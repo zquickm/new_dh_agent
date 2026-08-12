@@ -1,0 +1,9 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local environment files may contain API keys or database passwords.
+.env
+.env.*
+env copy.txt

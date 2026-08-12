@@ -1,0 +1,12 @@
+fastapi
+# The base package avoids Linux-only uvloop wheels in offline deployments.
+uvicorn==0.39.0
+aiohttp
+python-dotenv
+# LangChain 1.x requires Python 3.10+. These versions retain Python 3.9 support.
+langchain-openai==0.3.35
+tortoise-orm
+asyncmy
+sqlglot==30.12.0
+cryptography
+tzdata
