@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import AsyncIterator
+from typing import Optional
 
 from agents.events import ActionResult, ReActEvent
 from agents.llm_client import HelloAgentsLLM
-from agents.tools import ToolExecutor, build_tool_executor
+from agents.tools.executor import ToolExecutor
+from agents.tools.registry import build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage
 
@@ -43,7 +45,17 @@ class ActionAgent:
         self.llm = llm
         self.tools = tools
 
-    async def run(self, context: list[str]) -> ActionResult:
+    async def run(
+        self,
+        context: list[str],
+        preferred_tool: Optional[str] = None,
+    ) -> ActionResult:
+        if preferred_tool:
+            try:
+                observation = await self.tools.execute(preferred_tool, "")
+                return ActionResult(preferred_tool, "", observation, True)
+            except Exception:
+                return ActionResult(preferred_tool, "", "工具执行失败", False)
         prompt = build_prompt(
             context,
             "请根据上下文选择一个工具。\n可用工具：\n"
@@ -108,9 +120,14 @@ class CoreAgent:
             available.append("think")
         if self.enable_tools and self.tools.tools:
             available.append("action")
+        tool_descriptions = self.tools.descriptions() or "无"
         prompt = build_prompt(
             context,
-            f"当前第 {round_number} 轮，可选：{', '.join(available)}。\n{self.ROUTE_PROMPT}",
+            f"当前第 {round_number} 轮，可选：{', '.join(available)}。\n"
+            f"可用工具：\n{tool_descriptions}\n"
+            "需要实时信息、服务器状态或外部数据且存在合适工具时，必须选择 action；"
+            "上下文已有足够的工具返回结果时，选择 answer。\n"
+            f"{self.ROUTE_PROMPT}",
         )
         response = await self.llm.invoke(
             [{"role": "user", "content": prompt}], temperature=0
@@ -130,10 +147,17 @@ class CoreAgent:
         limit = get_settings().conversation.max_history_messages
         context = [f"{item.role}: {item.content}" for item in history[-limit:]]
         context.append(f"user: {question}")
+        preferred_tool = (
+            self.tools.match(question) if self.enable_tools else None
+        )
+        answer_after_tool = False
         for round_number in range(1, self.max_rounds + 1):
             next_agent = (
                 "answer"
-                if self.force_answer and round_number == self.max_rounds
+                if answer_after_tool
+                or (self.force_answer and round_number == self.max_rounds)
+                else "action"
+                if preferred_tool
                 else await self.route(context, round_number)
             )
             if next_agent == "think":
@@ -148,7 +172,8 @@ class CoreAgent:
                 continue
             if next_agent == "action":
                 yield ReActEvent("action_started", round_number=round_number)
-                result = await self.action_agent.run(context)
+                result = await self.action_agent.run(context, preferred_tool)
+                preferred_tool = None
                 yield ReActEvent(
                     "action_finished",
                     result.observation,
@@ -159,6 +184,7 @@ class CoreAgent:
                 context.append(
                     f"{result.tool_name or '工具'}返回：{result.observation}"
                 )
+                answer_after_tool = True
                 continue
             produced = False
             async for token in self.answer_agent.run(context):
