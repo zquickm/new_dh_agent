@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import AsyncIterator
+from typing import Any
 
 from agents.events import ActionResult, ReActEvent
 from agents.llm_client import HelloAgentsLLM
 from agents.tools import ToolExecutor, build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage
+
+
+logger = logging.getLogger(__name__)
 
 
 def build_prompt(context: list[str], instruction: str) -> str:
@@ -48,20 +53,29 @@ class ActionAgent:
             context,
             "请根据上下文选择一个工具。\n可用工具：\n"
             f"{self.tools.descriptions()}\n"
-            "只能输出 工具名称[工具参数]，不要解释或回答用户。",
+            "只能输出 工具名称[JSON参数对象]，不要解释或回答用户。\n"
+            "例如：rag_search[{\"query\":\"东海赤潮形成原因\",\"top_k\":5}]\n"
+            "参数中的 query 或 question 必须是脱离上下文也能理解的完整问题。",
         )
         action_text = await self.llm.invoke(
             [{"role": "user", "content": prompt}], temperature=0
         )
-        match = re.search(r"([\w.-]+)\[(.*)\]", action_text.strip(), re.DOTALL)
+        match = re.fullmatch(r"([\w.-]+)\s*\[(.*)\]\s*", action_text.strip(), re.DOTALL)
         if not match:
             return ActionResult("", "", "模型未返回有效工具调用", False)
-        name, argument = match.group(1), match.group(2).strip()
+        name, raw_argument = match.group(1), match.group(2).strip()
+        try:
+            argument: Any = json.loads(raw_argument)
+        except json.JSONDecodeError:
+            return ActionResult(name, raw_argument, "工具参数不是合法 JSON 对象", False)
+        if not isinstance(argument, dict):
+            return ActionResult(name, raw_argument, "工具参数必须是 JSON 对象", False)
         try:
             observation = await self.tools.execute(name, argument)
-            return ActionResult(name, argument, observation, True)
+            return ActionResult(name, raw_argument, observation, True)
         except Exception:
-            return ActionResult(name, argument, "工具执行失败", False)
+            logger.exception("Tool %s failed", name)
+            return ActionResult(name, raw_argument, "工具执行失败", False)
 
 
 class AnswerAgent:
@@ -101,6 +115,9 @@ class CoreAgent:
     @property
     def model_name(self) -> str:
         return self.llm.model
+
+    async def close(self) -> None:
+        await self.tools.close()
 
     async def route(self, context: list[str], round_number: int) -> str:
         available = ["answer"]

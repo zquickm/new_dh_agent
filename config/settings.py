@@ -8,6 +8,7 @@ from dotenv import dotenv_values
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import (
     BaseSettings,
+    DotEnvSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
     YamlConfigSettingsSource,
@@ -16,6 +17,27 @@ from pydantic_settings import (
 
 CONFIG_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = CONFIG_DIR.parent
+
+
+class ApplicationDotEnvSettingsSource(DotEnvSettingsSource):
+    """Ignore variables owned by tool backends while validating app settings."""
+
+    TOOL_PREFIXES = (
+        "rag_",
+        "rerank_",
+        "deepseek_",
+        "database_",
+        "business_db_",
+        "tool_",
+    )
+
+    def __call__(self) -> dict[str, object]:
+        values = super().__call__()
+        return {
+            name: value
+            for name, value in values.items()
+            if not name.lower().startswith(self.TOOL_PREFIXES)
+        }
 
 
 def get_active_profile() -> str:
@@ -96,10 +118,15 @@ class Settings(BaseSettings):
             yaml_file=profile_file if profile_file.exists() else None,
             yaml_file_encoding="utf-8",
         )
+        application_dotenv = ApplicationDotEnvSettingsSource(
+            settings_cls,
+            env_file=PROJECT_DIR / ".env",
+            env_file_encoding="utf-8",
+        )
         return (
             init_settings,
             env_settings,
-            dotenv_settings,
+            application_dotenv,
             file_secret_settings,
             profile_yaml,
             base_yaml,

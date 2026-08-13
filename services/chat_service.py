@@ -23,6 +23,13 @@ class ChatService:
             self._agent = build_react_agent()
         return self._agent
 
+    async def close(self) -> None:
+        if self._agent is not None:
+            close = getattr(self._agent, "close", None)
+            if close is not None:
+                await close()
+            self._agent = None
+
     async def stream_chat(self, request: AgentRequest) -> AsyncIterator[dict]:
         conversation_id = request.conversation_id
         if not conversation_id:
