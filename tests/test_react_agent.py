@@ -1,6 +1,7 @@
 import unittest
 
 from agents.react_agent import CoreAgent
+from agents.tools.executor import ToolExecutor
 from agents.tools.registry import build_tool_executor
 
 
@@ -49,3 +50,65 @@ class ReActAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(llm.invoke_calls, 1)
         self.assertIn("CurrentServerTime", llm.invoke_prompts[0])
         self.assertIn("获取当前服务器", llm.invoke_prompts[0])
+        self.assertIn("实际观测值", llm.invoke_prompts[0])
+        self.assertIn("内部文档", llm.invoke_prompts[0])
+
+    async def test_complex_task_can_call_rag_then_database_before_answer(self):
+        class MultiToolLlm:
+            model = "fake-model"
+
+            def __init__(self):
+                self.responses = iter(
+                    [
+                        '{"agent":"action"}',
+                        'rag_search[{"query":"E2断面相关报告","top_k":5}]',
+                        '{"agent":"action"}',
+                        'database_query[{"question":"查询E2断面盐度平均值","limit":100}]',
+                    ]
+                )
+                self.answer_prompt = ""
+
+            async def invoke(self, messages, temperature=None):
+                del messages, temperature
+                return next(self.responses)
+
+            async def stream(self, messages):
+                self.answer_prompt = messages[-1]["content"]
+                yield "综合回答"
+
+        async def rag_search(query, top_k=5):
+            return {"query": query, "top_k": top_k, "chunks": ["报告依据"]}
+
+        async def database_query(question, limit=100):
+            return {"question": question, "limit": limit, "rows": [{"avg": 30.1}]}
+
+        llm = MultiToolLlm()
+        tools = ToolExecutor()
+        tools.register("rag_search", "检索内部文档", rag_search)
+        tools.register("database_query", "查询实际数据", database_query)
+        agent = CoreAgent(llm, tools)
+
+        events = [
+            event
+            async for event in agent.run_stream(
+                "结合E2断面报告和实际盐度平均值进行分析",
+                [],
+            )
+        ]
+
+        self.assertEqual(
+            [event.type for event in events],
+            [
+                "action_started",
+                "action_finished",
+                "action_started",
+                "action_finished",
+                "answer",
+            ],
+        )
+        self.assertEqual(
+            [events[1].tool_name, events[3].tool_name],
+            ["rag_search", "database_query"],
+        )
+        self.assertIn("报告依据", llm.answer_prompt)
+        self.assertIn('"avg": 30.1', llm.answer_prompt)

@@ -58,9 +58,11 @@ class ActionAgent:
                 return ActionResult(preferred_tool, "", "工具执行失败", False)
         prompt = build_prompt(
             context,
-            "请根据上下文选择一个工具。\n可用工具：\n"
+            "请根据完整上下文选择最适合当前步骤的一个工具。\n可用工具：\n"
             f"{self.tools.descriptions()}\n"
-            "只能输出 工具名称[工具参数]，不要解释或回答用户。",
+            "必须严格按照工具的 parameters 生成 JSON 参数对象，并完整保留用户给出的"
+            "时间、断面、站点、指标和过滤条件。只能输出 工具名称[JSON参数对象]，"
+            "不要输出 Markdown、解释或最终答案。",
         )
         action_text = await self.llm.invoke(
             [{"role": "user", "content": prompt}], temperature=0
@@ -128,8 +130,12 @@ class CoreAgent:
             context,
             f"当前第 {round_number} 轮，可选：{', '.join(available)}。\n"
             f"可用工具：\n{tool_descriptions}\n"
-            "需要实时信息、服务器状态或外部数据且存在合适工具时，必须选择 action；"
-            "上下文已有足够的工具返回结果时，选择 answer。\n"
+            "路由规则：查询实际观测值、记录数、统计、比较、趋势、断面或站点数据时，"
+            "选择 action 并使用 database_query；查询内部文档、制度、报告、说明或知识依据时，"
+            "选择 action 并使用 rag_search；询问服务器当前时间时使用 CurrentServerTime。"
+            "概念解释、普通对话或上下文信息已经足够时选择 answer。"
+            "同时需要文档依据和实际数据时，先调用其中一个工具，下一轮再调用另一个；"
+            "不得在存在合适工具时直接回答无法查询。\n"
             f"{self.ROUTE_PROMPT}",
         )
         response = await self.llm.invoke(
@@ -175,7 +181,8 @@ class CoreAgent:
                 continue
             if next_agent == "action":
                 yield ReActEvent("action_started", round_number=round_number)
-                result = await self.action_agent.run(context, preferred_tool)
+                forced_tool = preferred_tool
+                result = await self.action_agent.run(context, forced_tool)
                 preferred_tool = None
                 yield ReActEvent(
                     "action_finished",
@@ -187,7 +194,7 @@ class CoreAgent:
                 context.append(
                     f"{result.tool_name or '工具'}返回：{result.observation}"
                 )
-                answer_after_tool = True
+                answer_after_tool = forced_tool is not None
                 continue
             produced = False
             async for token in self.answer_agent.run(context):
