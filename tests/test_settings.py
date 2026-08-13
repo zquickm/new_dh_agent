@@ -1,8 +1,16 @@
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from config.settings import clear_settings_cache, get_active_profile, get_settings
+from config.settings import (
+    ApplicationDotEnvSettingsSource,
+    Settings,
+    clear_settings_cache,
+    get_active_profile,
+    get_settings,
+)
 
 
 class SettingsTest(unittest.TestCase):
@@ -43,3 +51,26 @@ class SettingsTest(unittest.TestCase):
             clear_settings_cache()
             settings = get_settings()
             self.assertEqual(settings.llm.api_key.get_secret_value(), "")
+
+    def test_tool_backend_variables_are_not_app_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "APP_PROFILE=dev\n"
+                "NEW_DH_LLM__API_KEY=test-key\n"
+                "RAG_API_TOKEN=rag-token\n"
+                "BUSINESS_DB_PASSWORD=db-password\n",
+                encoding="utf-8",
+            )
+            source = ApplicationDotEnvSettingsSource(
+                Settings,
+                env_file=env_file,
+                env_file_encoding="utf-8",
+            )
+
+            values = source()
+
+            self.assertEqual(values["APP_PROFILE"], "dev")
+            self.assertEqual(values["llm"]["api_key"], "test-key")
+            self.assertNotIn("rag_api_token", values)
+            self.assertNotIn("business_db_password", values)

@@ -32,6 +32,20 @@ NEW_DH_LLM__API_KEY=your-key
 
 流式接口为 `POST /agent/chat/stream`。会话只存放在当前进程内存中，服务重启后清空。
 
+## RAG 与数据库工具
+
+Agent 已注册两个异步工具：
+
+- `rag_search`：检索内部知识库并返回文档片段和来源。
+- `database_query`：将自然语言问题转换成只读 SQL，并查询授权业务表。
+
+复制 `.env.example` 为 `.env`，至少填写 `RAG_*` 和 `BUSINESS_DB_*` 配置。
+数据库 SQL 生成默认复用上面的 `NEW_DH_LLM__*` 模型配置；只有需要使用独立模型时，
+才填写 `DEEPSEEK_*`。数据库账号必须是专用只读账号，只授予 `SELECT` 权限。
+
+数据库工具仅允许查询 `database_information/` 中具有 DDL 文件的授权表。
+修改表范围时，需要同时更新对应 DDL 和 `断面数据_AI_SQL查询指南.md`。
+
 ## 内网部署
 
 项目依赖已经锁定为支持 CPython 3.9 的版本。建议先在外网 Python 3.9 打包机上升级 `pip`：

@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -8,12 +10,19 @@ from controller.agent_controller import router as agent_router
 from controller.conversation_controller import router as conversation_router
 from controller.health_controller import router as health_router
 from controller.recommend_controller import router as recommend_router
+from services.chat_service import chat_service
 
 
 # Fail fast when YAML, environment overrides, or required secrets are invalid.
 get_settings()
 
-app = FastAPI(title="New DH ReAct Agent")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    await chat_service.close()
+
+
+app = FastAPI(title="New DH ReAct Agent", lifespan=lifespan)
 app.include_router(health_router)
 app.include_router(conversation_router)
 app.include_router(recommend_router)
