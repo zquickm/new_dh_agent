@@ -114,6 +114,9 @@ class CoreAgent:
     def model_name(self) -> str:
         return self.llm.model
 
+    async def close(self) -> None:
+        await self.tools.close()
+
     async def route(self, context: list[str], round_number: int) -> str:
         available = ["answer"]
         if self.enable_think:
