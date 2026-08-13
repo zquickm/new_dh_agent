@@ -4,8 +4,9 @@ import json
 import re
 from collections.abc import AsyncIterator
 
-from agents.events import ReActEvent
+from agents.events import ActionResult, ReActEvent
 from agents.llm_client import HelloAgentsLLM
+from agents.tools import ToolExecutor, build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage
 
@@ -24,7 +25,7 @@ class ThinkAgent:
     PROMPT = (
         "请概括当前问题的处理进展，并说明下一步需要什么信息。\n"
         "要求：简短、清楚，可以直接展示给用户；只输出推理概括，"
-        "不展示详细思维过程；不直接给出最终答案。"
+        "不展示详细思维过程；不调用工具，不直接给出最终答案。"
     )
 
     def __init__(self, llm: HelloAgentsLLM) -> None:
@@ -37,10 +38,36 @@ class ThinkAgent:
             yield token
 
 
+class ActionAgent:
+    def __init__(self, llm: HelloAgentsLLM, tools: ToolExecutor) -> None:
+        self.llm = llm
+        self.tools = tools
+
+    async def run(self, context: list[str]) -> ActionResult:
+        prompt = build_prompt(
+            context,
+            "请根据上下文选择一个工具。\n可用工具：\n"
+            f"{self.tools.descriptions()}\n"
+            "只能输出 工具名称[工具参数]，不要解释或回答用户。",
+        )
+        action_text = await self.llm.invoke(
+            [{"role": "user", "content": prompt}], temperature=0
+        )
+        match = re.search(r"([\w.-]+)\[(.*)\]", action_text.strip(), re.DOTALL)
+        if not match:
+            return ActionResult("", "", "模型未返回有效工具调用", False)
+        name, argument = match.group(1), match.group(2).strip()
+        try:
+            observation = await self.tools.execute(name, argument)
+            return ActionResult(name, argument, observation, True)
+        except Exception:
+            return ActionResult(name, argument, "工具执行失败", False)
+
+
 class AnswerAgent:
     PROMPT = (
-        "请根据上下文和思考概括直接回答用户的问题；"
-        "不要输出内部思考过程。"
+        "请根据上下文直接回答用户的问题。合理使用思考概括和工具返回的信息；"
+        "不要输出内部思考和调用工具的过程。"
     )
 
     def __init__(self, llm: HelloAgentsLLM) -> None:
@@ -55,17 +82,20 @@ class AnswerAgent:
 
 class CoreAgent:
     ROUTE_PROMPT = (
-        "请快速选择下一步：think 表示分析梳理，"
+        "请快速选择下一步：think 表示分析梳理，action 表示调用工具，"
         "answer 表示最终回答。只输出 JSON，例如 {\"agent\": \"think\"}。"
     )
 
-    def __init__(self, llm: HelloAgentsLLM) -> None:
+    def __init__(self, llm: HelloAgentsLLM, tools: ToolExecutor) -> None:
         settings = get_settings()
         self.llm = llm
+        self.tools = tools
         self.max_rounds = settings.react.max_rounds
         self.enable_think = settings.react.enable_think
+        self.enable_tools = settings.react.enable_tools
         self.force_answer = settings.react.force_answer_on_last_round
         self.think_agent = ThinkAgent(llm)
+        self.action_agent = ActionAgent(llm, tools)
         self.answer_agent = AnswerAgent(llm)
 
     @property
@@ -76,6 +106,8 @@ class CoreAgent:
         available = ["answer"]
         if self.enable_think:
             available.append("think")
+        if self.enable_tools and self.tools.tools:
+            available.append("action")
         prompt = build_prompt(
             context,
             f"当前第 {round_number} 轮，可选：{', '.join(available)}。\n{self.ROUTE_PROMPT}",
@@ -86,7 +118,7 @@ class CoreAgent:
         try:
             choice = json.loads(response.strip()).get("agent")
         except (json.JSONDecodeError, AttributeError):
-            match = re.search(r"\b(think|answer)\b", response, re.I)
+            match = re.search(r"\b(think|action|answer)\b", response, re.I)
             choice = match.group(1).lower() if match else "answer"
         return choice if choice in available else "answer"
 
@@ -114,6 +146,20 @@ class CoreAgent:
                     context.append(f"assistant: 阶段性分析：{summary}")
                 yield ReActEvent("think_finished", summary, round_number)
                 continue
+            if next_agent == "action":
+                yield ReActEvent("action_started", round_number=round_number)
+                result = await self.action_agent.run(context)
+                yield ReActEvent(
+                    "action_finished",
+                    result.observation,
+                    round_number,
+                    result.tool_name,
+                    result.success,
+                )
+                context.append(
+                    f"{result.tool_name or '工具'}返回：{result.observation}"
+                )
+                continue
             produced = False
             async for token in self.answer_agent.run(context):
                 produced = True
@@ -125,4 +171,4 @@ class CoreAgent:
 
 
 def build_react_agent() -> CoreAgent:
-    return CoreAgent(HelloAgentsLLM())
+    return CoreAgent(HelloAgentsLLM(), build_tool_executor())

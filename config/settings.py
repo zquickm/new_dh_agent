@@ -45,6 +45,7 @@ class LLMSettings(BaseModel):
 class ReactSettings(BaseModel):
     max_rounds: int = Field(default=5, ge=1, le=20)
     enable_think: bool = True
+    enable_tools: bool = True
     force_answer_on_last_round: bool = True
 
 
@@ -54,6 +55,7 @@ class ConversationSettings(BaseModel):
 
 class StreamSettings(BaseModel):
     include_process: bool = True
+    include_tool_result: bool = False
 
 
 class Settings(BaseSettings):

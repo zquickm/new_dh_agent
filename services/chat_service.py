@@ -73,6 +73,40 @@ class ChatService:
                                 sequence,
                             ),
                         }
+                elif event.type == "action_started":
+                    if get_settings().stream.include_process:
+                        yield {
+                            "event": "process",
+                            "data": self._process_data(
+                                event.round_number,
+                                "tool",
+                                "tool",
+                                "running",
+                                "调用外部工具",
+                                "正在选择并调用工具",
+                                sequence,
+                            ),
+                        }
+                elif event.type == "action_finished":
+                    if get_settings().stream.include_process:
+                        summary = (
+                            event.content
+                            if get_settings().stream.include_tool_result
+                            else f"{event.tool_name or '工具'}调用{'完成' if event.success else '失败'}"
+                        )
+                        yield {
+                            "event": "process",
+                            "data": self._process_data(
+                                event.round_number,
+                                "tool",
+                                "tool",
+                                "success" if event.success else "failed",
+                                "调用外部工具",
+                                summary,
+                                sequence,
+                                recoverable=True,
+                            ),
+                        }
                 elif event.type == "answer":
                     answer_parts.append(event.content)
                     yield {"event": "token", "data": {"content": event.content}}

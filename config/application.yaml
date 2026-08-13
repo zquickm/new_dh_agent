@@ -13,6 +13,7 @@ llm:
 react:
   max_rounds: 5
   enable_think: true
+  enable_tools: true
   force_answer_on_last_round: true
 
 conversation:
@@ -20,3 +21,4 @@ conversation:
 
 stream:
   include_process: true
+  include_tool_result: false
