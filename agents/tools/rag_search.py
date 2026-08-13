@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from config.settings import get_settings
 from tool_backends.rag_backend import RagSearchBackend
 
 
@@ -53,7 +54,34 @@ class RagSearchTool:
     @property
     def backend(self) -> RagSearchBackend:
         if self._backend is None:
-            self._backend = RagSearchBackend.from_env()
+            settings = get_settings().tools.rag
+            rerank = settings.rerank
+            self._backend = RagSearchBackend(
+                recall_url=settings.resolved_recall_url(),
+                api_token=settings.api_token.get_secret_value(),
+                tenant_id=settings.tenant_id,
+                knowledge_ids=tuple(settings.knowledge_ids),
+                dept_ids=tuple(settings.dept_ids),
+                score=settings.score,
+                candidate_top_n=(
+                    rerank.candidate_top_n if rerank.enabled else settings.top_n
+                ),
+                faq_score=settings.faq_score,
+                search_method=settings.search_method,
+                search_scope=settings.search_scope,
+                timeout=settings.timeout,
+                connect_timeout=settings.connect_timeout,
+                connection_limit=settings.connection_limit,
+                verify_ssl=settings.verify_ssl,
+                max_retries=settings.max_retries,
+                retry_backoff=settings.retry_backoff,
+                rerank_enabled=rerank.enabled,
+                rerank_url=settings.resolved_rerank_url(),
+                rerank_model=rerank.model,
+                rerank_timeout=rerank.timeout,
+                rerank_max_retries=rerank.max_retries,
+                rerank_retry_backoff=rerank.retry_backoff,
+            )
         return self._backend
 
     async def execute(

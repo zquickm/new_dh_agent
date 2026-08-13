@@ -9,6 +9,7 @@
 - `config/application-prod.yaml`：生产环境覆盖
 - `APP_PROFILE`：选择 `dev` 或 `prod`，默认 `dev`
 - `NEW_DH_...__...`：使用双下划线覆盖嵌套配置
+- `${ENV_NAME:默认值}`：在 YAML 中读取环境变量，环境变量不存在时使用默认值
 
 密钥不要写入 YAML。复制 `.env.example` 为 `.env`：
 
@@ -39,9 +40,29 @@ Agent 已注册两个异步工具：
 - `rag_search`：检索内部知识库并返回文档片段和来源。
 - `database_query`：将自然语言问题转换成只读 SQL，并查询授权业务表。
 
-复制 `.env.example` 为 `.env`，至少填写 `RAG_*` 和 `BUSINESS_DB_*` 配置。
-数据库 SQL 生成默认复用上面的 `NEW_DH_LLM__*` 模型配置；只有需要使用独立模型时，
-才填写 `DEEPSEEK_*`。数据库账号必须是专用只读账号，只授予 `SELECT` 权限。
+RAG、重排、数据库和 SQL 生成模型的地址、超时、重试、知识库 ID、数据库账号等
+普通参数统一配置在 `config/application.yaml`，不同环境的差异写入对应的
+`application-{profile}.yaml`。
+
+密码和 Token 不写入 YAML。YAML 使用类似 Spring 的环境变量占位符：
+
+```yaml
+api_token: "${RAG_API_TOKEN:}"
+password: "${BUSINESS_DB_PASSWORD:}"
+```
+
+复制 `.env.example` 为 `.env`，按需填写：
+
+```dotenv
+NEW_DH_LLM__API_KEY=
+RAG_API_TOKEN=
+BUSINESS_DB_PASSWORD=
+DEEPSEEK_API_KEY=
+```
+
+数据库 SQL 生成默认复用 `llm` 配置；仅当需要独立鉴权模型时填写
+`DEEPSEEK_API_KEY`，并在 `tools.database.sql_llm` 中配置独立模型地址和名称。
+数据库账号必须是专用只读账号，只授予 `SELECT` 权限。
 
 数据库工具仅允许查询 `database_information/` 中具有 DDL 文件的授权表。
 修改表范围时，需要同时更新对应 DDL 和 `断面数据_AI_SQL查询指南.md`。

@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from dotenv import load_dotenv
-
 from agents.tools.current_server_time import (
     TOOL_DESCRIPTION,
     TOOL_NAME,
@@ -23,13 +19,11 @@ from agents.tools.rag_search import (
     TOOL_PARAMETERS as RAG_TOOL_PARAMETERS,
     RagSearchTool,
 )
+from config.settings import get_settings
 
 
 def build_tool_executor() -> ToolExecutor:
-    project_dir = Path(__file__).resolve().parents[2]
-    load_dotenv(project_dir / ".env")
-
-    executor = ToolExecutor()
+    executor = ToolExecutor(get_settings().tools.execution_timeout)
     executor.register(
         TOOL_NAME,
         TOOL_DESCRIPTION,

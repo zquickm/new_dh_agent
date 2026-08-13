@@ -4,11 +4,11 @@ server:
   reload: false
 
 llm:
-  model: dsv4
-  base_url: http://127.0.0.1:8900/v1
-  api_key: ""
+  model: "dsv4"
+  base_url: "http://71.10.60.31:8900/v1"
+  api_key: "${NEW_DH_LLM__API_KEY:}"
   temperature: 0.6
-  timeout: 60
+  timeout: 120
 
 react:
   max_rounds: 5
@@ -22,3 +22,58 @@ conversation:
 stream:
   include_process: true
   include_tool_result: false
+
+tools:
+  execution_timeout: 300
+  rag:
+    base_url: "http://71.10.60.34:18000"
+    recall_path: "/rag-platform-default/zsgl/knowledgeRecall"
+    recall_url: ""
+    api_token: "${RAG_API_TOKEN:}"
+    tenant_id: "c3d03091-026c-413a-974e-081a4bbfe8c0"
+    knowledge_ids:
+      - "KLB_6729221e7b9047d290726f527b02ebed"
+    dept_ids:
+      - "c3d03091-026c-413a-974e-081a4bbfe8c0"
+    score: 0.5
+    top_n: 20
+    faq_score: 0.8
+    search_method: 3
+    search_scope: "knowledge"
+    timeout: 30
+    connect_timeout: 5
+    connection_limit: 100
+    verify_ssl: true
+    max_retries: 2
+    retry_backoff: 0.5
+    rerank:
+      enabled: true
+      base_url: "http://71.10.60.34:18000"
+      path: "/maas-712f5806/v1/rerank"
+      url: ""
+      model: "Qwen3-Reranker-4B"
+      candidate_top_n: 100
+      timeout: 15
+      max_retries: 1
+      retry_backoff: 0.3
+  database:
+    information_dir: database_information
+    query_guide_file: "断面数据_AI_SQL查询指南.md"
+    host: "71.10.60.132"
+    port: 3310
+    user: "dh_agent_reader"
+    password: "${BUSINESS_DB_PASSWORD:}"
+    name: "document"
+    connect_timeout: 5
+    query_timeout: 10
+    max_rows: 50
+    pool_max_size: 3
+    ssl_enabled: false
+    ssl_ca: null
+    ssl_verify_cert: true
+    sql_llm:
+      base_url: "http://71.10.60.31:8900/v1"
+      model: "dsv4"
+      api_key: "${DEEPSEEK_API_KEY:}"
+      temperature: 0.6
+      timeout: 120

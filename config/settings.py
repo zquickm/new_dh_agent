@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
+from typing import Any, Optional
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, Field, SecretStr
@@ -38,6 +40,42 @@ class ApplicationDotEnvSettingsSource(DotEnvSettingsSource):
             for name, value in values.items()
             if not name.lower().startswith(self.TOOL_PREFIXES)
         }
+
+
+class SpringYamlConfigSettingsSource(YamlConfigSettingsSource):
+    """Resolve Spring-style ${ENV_NAME:default} placeholders in YAML values."""
+
+    PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([^{}]*))?\}")
+
+    def _read_file(self, file_path: Path) -> dict[str, Any]:
+        values = super()._read_file(file_path)
+        dotenv = dotenv_values(PROJECT_DIR / ".env")
+
+        def resolve(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {key: resolve(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [resolve(item) for item in value]
+            if not isinstance(value, str):
+                return value
+
+            def replace(match: re.Match[str]) -> str:
+                name, default = match.group(1), match.group(2)
+                environment_value = os.getenv(name)
+                if environment_value is not None:
+                    return environment_value
+                dotenv_value = dotenv.get(name)
+                if dotenv_value is not None:
+                    return str(dotenv_value)
+                if default is not None:
+                    return default
+                raise ValueError(
+                    f"Required environment variable {name} is not configured"
+                )
+
+            return self.PLACEHOLDER.sub(replace, value)
+
+        return resolve(values)
 
 
 def get_active_profile() -> str:
@@ -80,6 +118,87 @@ class StreamSettings(BaseModel):
     include_tool_result: bool = False
 
 
+class RerankSettings(BaseModel):
+    enabled: bool = True
+    base_url: str = ""
+    path: str = "/v1/rerank"
+    url: str = ""
+    model: str = "Qwen3-Reranker-4B"
+    candidate_top_n: int = Field(default=100, ge=1)
+    timeout: float = Field(default=15, gt=0)
+    max_retries: int = Field(default=1, ge=0)
+    retry_backoff: float = Field(default=0.3, ge=0)
+
+
+class RagToolSettings(BaseModel):
+    base_url: str = ""
+    recall_path: str = "/rag-platform-default/zsgl/knowledgeRecall"
+    recall_url: str = ""
+    api_token: SecretStr = SecretStr("")
+    tenant_id: str = ""
+    knowledge_ids: list[str] = Field(default_factory=list)
+    dept_ids: list[str] = Field(default_factory=list)
+    score: float = Field(default=0.6, ge=0, le=1)
+    top_n: int = Field(default=20, ge=1)
+    faq_score: float = Field(default=0.8, ge=0, le=1)
+    search_method: int = 3
+    search_scope: str = "knowledge"
+    timeout: float = Field(default=30, gt=0)
+    connect_timeout: float = Field(default=5, gt=0)
+    connection_limit: int = Field(default=100, ge=1)
+    verify_ssl: bool = True
+    max_retries: int = Field(default=2, ge=0)
+    retry_backoff: float = Field(default=0.5, ge=0)
+    rerank: RerankSettings = Field(default_factory=RerankSettings)
+
+    def resolved_recall_url(self) -> str:
+        if self.recall_url.strip():
+            return self.recall_url.strip()
+        if not self.base_url.strip():
+            return ""
+        return f"{self.base_url.rstrip('/')}/{self.recall_path.lstrip('/')}"
+
+    def resolved_rerank_url(self) -> str:
+        if self.rerank.url.strip():
+            return self.rerank.url.strip()
+        base_url = self.rerank.base_url.strip() or self.base_url.strip()
+        if not base_url:
+            return ""
+        return f"{base_url.rstrip('/')}/{self.rerank.path.lstrip('/')}"
+
+
+class SqlLlmSettings(BaseModel):
+    base_url: str = ""
+    model: str = ""
+    api_key: SecretStr = SecretStr("")
+    temperature: float = Field(default=0, ge=0, le=2)
+    timeout: float = Field(default=120, gt=0)
+
+
+class DatabaseToolSettings(BaseModel):
+    information_dir: str = "database_information"
+    query_guide_file: str = "断面数据_AI_SQL查询指南.md"
+    host: str = "127.0.0.1"
+    port: int = Field(default=3306, ge=1, le=65535)
+    user: str = "readonly_user"
+    password: SecretStr = SecretStr("")
+    name: str = "document"
+    connect_timeout: float = Field(default=5, gt=0)
+    query_timeout: float = Field(default=10, gt=0)
+    max_rows: int = Field(default=1000, ge=1)
+    pool_max_size: int = Field(default=3, ge=1)
+    ssl_enabled: bool = False
+    ssl_ca: Optional[str] = None
+    ssl_verify_cert: bool = True
+    sql_llm: SqlLlmSettings = Field(default_factory=SqlLlmSettings)
+
+
+class ToolSettings(BaseModel):
+    execution_timeout: float = Field(default=300, gt=0)
+    rag: RagToolSettings = Field(default_factory=RagToolSettings)
+    database: DatabaseToolSettings = Field(default_factory=DatabaseToolSettings)
+
+
 class Settings(BaseSettings):
     app_profile: str = Field(default_factory=get_active_profile, validation_alias="APP_PROFILE")
     server: ServerSettings = Field(default_factory=ServerSettings)
@@ -87,6 +206,7 @@ class Settings(BaseSettings):
     react: ReactSettings = Field(default_factory=ReactSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
     stream: StreamSettings = Field(default_factory=StreamSettings)
+    tools: ToolSettings = Field(default_factory=ToolSettings)
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_DIR / ".env",
@@ -107,13 +227,13 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         profile = get_active_profile()
-        base_yaml = YamlConfigSettingsSource(
+        base_yaml = SpringYamlConfigSettingsSource(
             settings_cls,
             yaml_file=CONFIG_DIR / "application.yaml",
             yaml_file_encoding="utf-8",
         )
         profile_file = CONFIG_DIR / f"application-{profile}.yaml"
-        profile_yaml = YamlConfigSettingsSource(
+        profile_yaml = SpringYamlConfigSettingsSource(
             settings_cls,
             yaml_file=profile_file if profile_file.exists() else None,
             yaml_file_encoding="utf-8",

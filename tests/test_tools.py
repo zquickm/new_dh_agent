@@ -1,5 +1,7 @@
 import json
+import io
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -110,6 +112,52 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.tool_name, "rag_search")
         self.assertIn('"top_k": 3', result.observation)
+
+    async def test_action_agent_prints_serious_backend_error_to_stdout(self):
+        class FakeLlm:
+            async def invoke(self, messages, temperature=0):
+                del messages, temperature
+                return 'rag_search[{"query":"东海赤潮"}]'
+
+        async def rag_search(query):
+            del query
+            try:
+                raise ConnectionError("upstream disconnected")
+            except ConnectionError as exc:
+                raise RuntimeError("RAG service request failed") from exc
+
+        executor = ToolExecutor()
+        executor.register("rag_search", "检索知识库", rag_search)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = await ActionAgent(FakeLlm(), executor).run(["user: 查询赤潮"])
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.observation, "工具执行失败")
+        self.assertIn("Serious error while executing tool rag_search", output.getvalue())
+        self.assertIn("ConnectionError: upstream disconnected", output.getvalue())
+        self.assertIn("RuntimeError: RAG service request failed", output.getvalue())
+
+    async def test_action_agent_does_not_print_business_error(self):
+        class FakeLlm:
+            async def invoke(self, messages, temperature=0):
+                del messages, temperature
+                return 'database_query[{"question":"删除数据"}]'
+
+        async def database_query(question):
+            del question
+            raise ValueError("只允许执行只读查询")
+
+        executor = ToolExecutor()
+        executor.register("database_query", "查询数据库", database_query)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = await ActionAgent(FakeLlm(), executor).run(["user: 删除数据"])
+
+        self.assertFalse(result.success)
+        self.assertEqual(output.getvalue(), "")
 
     async def test_registry_contains_all_three_tools_without_eager_backends(self):
         executor = build_tool_executor()

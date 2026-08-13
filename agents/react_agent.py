@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+import traceback
 from collections.abc import AsyncIterator
 from typing import Optional
 
@@ -11,6 +13,50 @@ from agents.tools.executor import ToolExecutor
 from agents.tools.registry import build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage
+
+
+_BACKEND_TOOL_NAMES = {"database_query", "rag_search"}
+_INFRASTRUCTURE_MODULES = {
+    "aiohttp",
+    "aiomysql",
+    "asyncmy",
+    "httpcore",
+    "httpx",
+    "pymysql",
+}
+
+
+def _is_serious_tool_error(exc: Exception) -> bool:
+    """Distinguish infrastructure/programming failures from business errors."""
+    current: Optional[BaseException] = exc
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        error_name = type(current).__name__
+        module_root = type(current).__module__.partition(".")[0]
+        if error_name in {"DatabaseToolError", "RagToolError"}:
+            current = current.__cause__ or current.__context__
+            continue
+        if isinstance(
+            current,
+            (ConnectionError, TimeoutError, OSError, AttributeError, TypeError, KeyError),
+        ):
+            return True
+        if module_root in _INFRASTRUCTURE_MODULES:
+            return True
+        if isinstance(current, (ValueError, LookupError)) or module_root == "sqlglot":
+            current = current.__cause__ or current.__context__
+            continue
+        return True
+    return False
+
+
+def _print_serious_tool_error(tool_name: str, exc: Exception) -> None:
+    if tool_name not in _BACKEND_TOOL_NAMES or not _is_serious_tool_error(exc):
+        return
+    print(f"Serious error while executing tool {tool_name}:", file=sys.stdout)
+    traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stdout)
+    sys.stdout.flush()
 
 
 def build_prompt(context: list[str], instruction: str) -> str:
@@ -54,7 +100,8 @@ class ActionAgent:
             try:
                 observation = await self.tools.execute(preferred_tool, "")
                 return ActionResult(preferred_tool, "", observation, True)
-            except Exception:
+            except Exception as exc:
+                _print_serious_tool_error(preferred_tool, exc)
                 return ActionResult(preferred_tool, "", "工具执行失败", False)
         prompt = build_prompt(
             context,
@@ -74,7 +121,8 @@ class ActionAgent:
         try:
             observation = await self.tools.execute(name, argument)
             return ActionResult(name, argument, observation, True)
-        except Exception:
+        except Exception as exc:
+            _print_serious_tool_error(name, exc)
             return ActionResult(name, argument, "工具执行失败", False)
 
 

@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional
 
 from config.settings import get_settings
-from tool_backends.database_backend import DatabaseQueryBackend
+from tool_backends.database_backend import (
+    DatabaseInformationCatalog,
+    DatabaseQueryBackend,
+    DatabaseToolError,
+    MysqlReadonlyGateway,
+)
 
 
 TOOL_NAME = "database_query"
@@ -36,12 +42,53 @@ class DatabaseQueryTool:
     @property
     def backend(self) -> DatabaseQueryBackend:
         if self._backend is None:
-            llm = get_settings().llm
-            self._backend = DatabaseQueryBackend.from_env(
-                default_llm_base_url=llm.base_url,
-                default_llm_model=llm.model,
-                default_llm_api_key=llm.api_key.get_secret_value(),
-                default_llm_temperature=llm.temperature,
+            try:
+                from langchain_openai import ChatOpenAI
+            except ImportError as exc:
+                raise DatabaseToolError("缺少 langchain-openai 依赖") from exc
+
+            settings = get_settings()
+            database = settings.tools.database
+            sql_llm = database.sql_llm
+            information_dir = Path(database.information_dir)
+            if not information_dir.is_absolute():
+                information_dir = Path(__file__).resolve().parents[2] / information_dir
+            catalog = DatabaseInformationCatalog(
+                information_dir,
+                guide_filename=database.query_guide_file,
+            )
+            gateway = MysqlReadonlyGateway(
+                host=database.host,
+                port=database.port,
+                user=database.user,
+                password=database.password.get_secret_value(),
+                database=database.name,
+                connect_timeout=database.connect_timeout,
+                query_timeout=database.query_timeout,
+                configured_max_rows=database.max_rows,
+                allowed_tables=catalog.available_tables,
+                pool_max_size=database.pool_max_size,
+                ssl_enabled=database.ssl_enabled,
+                ssl_ca=database.ssl_ca,
+                ssl_verify_cert=database.ssl_verify_cert,
+            )
+            llm = ChatOpenAI(
+                api_key=(
+                    sql_llm.api_key.get_secret_value()
+                    or settings.llm.api_key.get_secret_value()
+                    or "not-required"
+                ),
+                base_url=sql_llm.base_url or settings.llm.base_url,
+                model=sql_llm.model or settings.llm.model,
+                temperature=sql_llm.temperature,
+                timeout=sql_llm.timeout,
+                max_retries=1,
+            )
+            self._backend = DatabaseQueryBackend(
+                catalog=catalog,
+                gateway=gateway,
+                llm=llm,
+                generation_timeout=sql_llm.timeout,
             )
         return self._backend
 

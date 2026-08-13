@@ -52,6 +52,35 @@ class SettingsTest(unittest.TestCase):
             settings = get_settings()
             self.assertEqual(settings.llm.api_key.get_secret_value(), "")
 
+    def test_yaml_reads_sensitive_tool_values_from_environment(self):
+        with patch.dict(
+            os.environ,
+            {
+                "APP_PROFILE": "dev",
+                "RAG_API_TOKEN": "rag-secret",
+                "BUSINESS_DB_PASSWORD": "database-secret",
+                "DEEPSEEK_API_KEY": "sql-llm-secret",
+            },
+            clear=False,
+        ):
+            clear_settings_cache()
+            settings = get_settings()
+
+            self.assertEqual(
+                settings.tools.rag.api_token.get_secret_value(),
+                "rag-secret",
+            )
+            self.assertEqual(
+                settings.tools.database.password.get_secret_value(),
+                "database-secret",
+            )
+            self.assertEqual(
+                settings.tools.database.sql_llm.api_key.get_secret_value(),
+                "sql-llm-secret",
+            )
+            self.assertEqual(settings.tools.rag.timeout, 30)
+            self.assertTrue(settings.tools.database.host)
+
     def test_tool_backend_variables_are_not_app_settings(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
