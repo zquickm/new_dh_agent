@@ -1,0 +1,22 @@
+server:
+  host: 0.0.0.0
+  port: 8000
+  reload: false
+
+llm:
+  model: dsv4
+  base_url: http://127.0.0.1:8900/v1
+  api_key: ""
+  temperature: 0.6
+  timeout: 60
+
+react:
+  max_rounds: 5
+  enable_think: true
+  force_answer_on_last_round: true
+
+conversation:
+  max_history_messages: 20
+
+stream:
+  include_process: true

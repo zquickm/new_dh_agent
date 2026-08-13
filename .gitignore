@@ -1,9 +1,12 @@
 .DS_Store
 .venv/
 __pycache__/
+.idea
+wheelhouse
 *.py[cod]
 
 # Local environment files may contain API keys or database passwords.
 .env
 .env.*
+!.env.example
 env copy.txt

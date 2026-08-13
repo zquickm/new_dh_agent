@@ -1,12 +1,50 @@
-fastapi
-# The base package avoids Linux-only uvloop wheels in offline deployments.
+# Fully pinned for reproducible intranet deployment.
+# Production baseline: CPython 3.9 (also compatible with the current dev runtime).
+
+# Direct dependencies
+fastapi==0.128.8
 uvicorn==0.39.0
-aiohttp
-python-dotenv
-# LangChain 1.x requires Python 3.10+. These versions retain Python 3.9 support.
+python-dotenv==1.2.1
 langchain-openai==0.3.35
-tortoise-orm
-asyncmy
-sqlglot==30.12.0
-cryptography
-tzdata
+pydantic-settings==2.11.0
+PyYAML==6.0.3
+
+# Transitive dependencies
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.12.1
+certifi==2026.6.17
+charset-normalizer==3.4.9
+click==8.1.8
+colorama==0.4.6
+distro==1.9.0
+exceptiongroup==1.3.1
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.18
+jiter==0.16.0
+jsonpatch==1.33
+jsonpointer==3.0.0
+langchain-core==0.3.86
+langsmith==0.4.37
+openai==2.45.0
+orjson==3.11.5
+packaging==25.0
+pydantic==2.13.4
+pydantic_core==2.46.4
+regex==2026.1.15
+requests==2.32.5
+requests-toolbelt==1.0.0
+sniffio==1.3.1
+starlette==0.49.3
+tenacity==9.1.2
+tiktoken==0.11.0
+tqdm==4.68.4
+typing-inspection==0.4.2
+typing_extensions==4.16.0
+urllib3==2.6.3
+uuid_utils==0.15.0
+websockets==15.0.1
+xxhash==3.5.0
+zstandard==0.25.0
