@@ -18,6 +18,22 @@ class DatabaseToolError(RuntimeError):
     """A safe error raised by the database tool backend."""
 
 
+class DatabaseConnectionError(DatabaseToolError):
+    """The database server could not be reached or authenticated."""
+
+
+class SqlGenerationError(DatabaseToolError):
+    """The SQL generation service failed before returning usable SQL."""
+
+
+class SqlValidationError(DatabaseToolError):
+    """Generated SQL failed the local read-only policy."""
+
+
+class SqlExecutionError(DatabaseToolError):
+    """The database rejected SQL that the model may be able to repair."""
+
+
 class DatabaseInformationCatalog:
     """Read the trusted query guide and authorized per-table DDL files."""
 
@@ -96,18 +112,18 @@ class ReadonlySqlValidator:
     ) -> str:
         text = sql.strip()
         if not text:
-            raise DatabaseToolError("SQL 不能为空")
+            raise SqlValidationError("SQL 不能为空")
         try:
             statements = [item for item in parse(text, read="mysql") if item is not None]
         except ParseError as exc:
-            raise DatabaseToolError("SQL 无法解析") from exc
+            raise SqlValidationError("SQL 无法解析") from exc
         if len(statements) != 1 or not isinstance(statements[0], exp.Query):
-            raise DatabaseToolError("只允许执行一条只读 SELECT 或 WITH ... SELECT 查询")
+            raise SqlValidationError("只允许执行一条只读 SELECT 或 WITH ... SELECT 查询")
         expression = statements[0]
         if list(expression.find_all(exp.Into)):
-            raise DatabaseToolError("不允许 SELECT INTO")
+            raise SqlValidationError("不允许 SELECT INTO")
         if list(expression.find_all(exp.Lock)):
-            raise DatabaseToolError("不允许加锁查询")
+            raise SqlValidationError("不允许加锁查询")
 
         cte_names = {
             str(item.alias_or_name).strip().casefold()
@@ -121,7 +137,7 @@ class ReadonlySqlValidator:
         }
         unauthorized_tables = referenced_tables - set(allowed_tables) - cte_names
         if unauthorized_tables:
-            raise DatabaseToolError(
+            raise SqlValidationError(
                 "SQL 引用了未授权表：" + "、".join(sorted(unauthorized_tables))
             )
 
@@ -132,7 +148,7 @@ class ReadonlySqlValidator:
             if name in blocked_functions:
                 used_blocked_functions.add(name)
         if used_blocked_functions:
-            raise DatabaseToolError(
+            raise SqlValidationError(
                 "SQL 使用了禁止函数：" + "、".join(sorted(used_blocked_functions))
             )
 
@@ -200,6 +216,7 @@ class MysqlReadonlyGateway:
             effective_limit,
             self.allowed_tables,
         )
+        await self._get_pool()
         try:
             return await asyncio.wait_for(
                 self._execute(bounded_sql, effective_limit),
@@ -210,7 +227,10 @@ class MysqlReadonlyGateway:
         except asyncio.TimeoutError as exc:
             raise DatabaseToolError("数据库查询超时，请缩小查询范围") from exc
         except Exception as exc:
-            raise DatabaseToolError(self._safe_error(exc)) from exc
+            message = self._safe_error(exc)
+            if self._mysql_error_code(exc) in self._REPAIRABLE_SQL_ERROR_CODES:
+                raise SqlExecutionError(message) from exc
+            raise DatabaseToolError(message) from exc
 
     async def close(self) -> None:
         async with self._get_pool_lock():
@@ -266,12 +286,26 @@ class MysqlReadonlyGateway:
                     "charset": "utf8mb4",
                     "autocommit": True,
                     "connect_timeout": self.connect_timeout,
-                    "minsize": 0,
+                    "minsize": 1,
                     "maxsize": self.pool_max_size,
                 }
                 if self.ssl_enabled:
                     options["ssl"] = self._ssl_context()
-                self._pool = await asyncmy.create_pool(**options)
+                try:
+                    self._pool = await asyncio.wait_for(
+                        asyncmy.create_pool(**options),
+                        timeout=self.connect_timeout,
+                    )
+                except asyncio.TimeoutError as exc:
+                    raise DatabaseConnectionError(
+                        "数据库连接超时，请检查 host、port 和网络访问策略"
+                    ) from exc
+                except DatabaseToolError:
+                    raise
+                except Exception as exc:
+                    raise DatabaseConnectionError(
+                        "数据库连接失败，请检查账号、密码和连接配置"
+                    ) from exc
         return self._pool
 
     def _get_pool_lock(self) -> asyncio.Lock:
@@ -316,12 +350,18 @@ class MysqlReadonlyGateway:
     @staticmethod
     def _safe_error(exc: Exception) -> str:
         args = getattr(exc, "args", ())
-        code = args[0] if args and isinstance(args[0], int) else None
-        safe_codes = {1052, 1054, 1064, 1111, 1146, 1241, 1242}
-        if code in safe_codes and len(args) > 1:
+        code = MysqlReadonlyGateway._mysql_error_code(exc)
+        if code in MysqlReadonlyGateway._REPAIRABLE_SQL_ERROR_CODES and len(args) > 1:
             detail = re.sub(r"[\x00-\x1f]+", " ", str(args[1])).strip()[:300]
             return f"数据库拒绝该 SQL（错误 {code}）：{detail}"
         return "数据库暂时不可用"
+
+    _REPAIRABLE_SQL_ERROR_CODES = {1052, 1054, 1064, 1111, 1146, 1241, 1242}
+
+    @staticmethod
+    def _mysql_error_code(exc: Exception) -> Optional[int]:
+        args = getattr(exc, "args", ())
+        return args[0] if args and isinstance(args[0], int) else None
 
 
 class DatabaseQueryBackend:
@@ -457,7 +497,7 @@ class DatabaseQueryBackend:
                     previous_error=previous_error,
                 )
                 return await self.gateway.query(sql, limit)
-            except DatabaseToolError as exc:
+            except (SqlValidationError, SqlExecutionError) as exc:
                 previous_sql = sql
                 previous_error = str(exc)
                 if attempt == 1:
@@ -503,7 +543,9 @@ class DatabaseQueryBackend:
                 timeout=self.generation_timeout,
             )
         except asyncio.TimeoutError as exc:
-            raise DatabaseToolError("SQL 生成超时") from exc
+            raise SqlGenerationError("SQL 生成超时") from exc
+        except Exception as exc:
+            raise SqlGenerationError("SQL 生成服务不可用") from exc
         content = self._extract_content(getattr(response, "content", response))
         return self._parse_sql(content)
 
@@ -532,7 +574,7 @@ class DatabaseQueryBackend:
         if fenced is not None:
             text = fenced.group(1).strip()
         if not re.match(r"^(SELECT|WITH)\b", text, re.IGNORECASE):
-            raise DatabaseToolError("SQL 模型没有返回 SELECT 或 WITH 查询")
+            raise SqlValidationError("SQL 模型没有返回 SELECT 或 WITH 查询")
         return text
 
 
