@@ -2,7 +2,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from agents.events import ReActEvent
+from agents.events import AgentEvent
 from main import app
 from services.chat_service import chat_service
 
@@ -12,7 +12,7 @@ class FakeAgent:
 
     async def run_stream(self, question, history):
         del question, history
-        yield ReActEvent("answer", "流式回答", 1)
+        yield AgentEvent(type="answer_delta", content="流式回答", round_number=1)
 
 
 class ApiTest(unittest.TestCase):

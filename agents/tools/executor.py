@@ -61,9 +61,12 @@ class ToolExecutor:
     def definitions(self) -> list[dict[str, Any]]:
         return [
             {
-                "name": name,
-                "description": tool.description,
-                "parameters": tool.parameters,
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                },
             }
             for name, tool in self.tools.items()
         ]

@@ -1,11 +1,8 @@
 import json
-import io
 import unittest
-from contextlib import redirect_stdout
 from datetime import datetime
 from types import SimpleNamespace
 
-from agents.react_agent import ActionAgent
 from agents.tools.current_server_time import TOOL_NAME, matches_current_server_time
 from agents.tools.database_query import DatabaseQueryTool
 from agents.tools.executor import ToolExecutor
@@ -20,6 +17,38 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Echo", executor.descriptions())
         self.assertEqual(await executor.execute("Echo", "hello"), "result:hello")
+
+    def test_definitions_use_openai_tool_schema(self):
+        executor = ToolExecutor()
+        parameters = {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        }
+        executor.register("Search", "搜索资料", lambda query: query, parameters)
+
+        self.assertEqual(
+            executor.definitions(),
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "Search",
+                        "description": "搜索资料",
+                        "parameters": parameters,
+                    },
+                }
+            ],
+        )
+
+    async def test_no_argument_tool_accepts_native_empty_arguments(self):
+        executor = build_tool_executor()
+
+        result = json.loads(await executor.execute(TOOL_NAME, {}))
+
+        self.assertIn("datetime", result)
+        await executor.close()
 
     async def test_async_tool_accepts_json_object_arguments(self):
         executor = ToolExecutor()
@@ -94,70 +123,6 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rag_result["chunks"][0]["source"], "文档")
         self.assertEqual(database_result["question"], "E2 平均盐度")
         self.assertEqual(database_result["limit"], 1000)
-
-    async def test_action_agent_parses_json_and_calls_async_tool(self):
-        class FakeLlm:
-            async def invoke(self, messages, temperature=0):
-                del messages, temperature
-                return 'rag_search[{"query":"东海赤潮","top_k":3}]'
-
-        async def rag_search(query, top_k=5):
-            return {"query": query, "top_k": top_k}
-
-        executor = ToolExecutor()
-        executor.register("rag_search", "检索知识库", rag_search)
-
-        result = await ActionAgent(FakeLlm(), executor).run(["user: 查询赤潮"])
-
-        self.assertTrue(result.success)
-        self.assertEqual(result.tool_name, "rag_search")
-        self.assertIn('"top_k": 3', result.observation)
-
-    async def test_action_agent_prints_serious_backend_error_to_stdout(self):
-        class FakeLlm:
-            async def invoke(self, messages, temperature=0):
-                del messages, temperature
-                return 'rag_search[{"query":"东海赤潮"}]'
-
-        async def rag_search(query):
-            del query
-            try:
-                raise ConnectionError("upstream disconnected")
-            except ConnectionError as exc:
-                raise RuntimeError("RAG service request failed") from exc
-
-        executor = ToolExecutor()
-        executor.register("rag_search", "检索知识库", rag_search)
-        output = io.StringIO()
-
-        with redirect_stdout(output):
-            result = await ActionAgent(FakeLlm(), executor).run(["user: 查询赤潮"])
-
-        self.assertFalse(result.success)
-        self.assertEqual(result.observation, "工具执行失败")
-        self.assertIn("Serious error while executing tool rag_search", output.getvalue())
-        self.assertIn("ConnectionError: upstream disconnected", output.getvalue())
-        self.assertIn("RuntimeError: RAG service request failed", output.getvalue())
-
-    async def test_action_agent_does_not_print_business_error(self):
-        class FakeLlm:
-            async def invoke(self, messages, temperature=0):
-                del messages, temperature
-                return 'database_query[{"question":"删除数据"}]'
-
-        async def database_query(question):
-            del question
-            raise ValueError("只允许执行只读查询")
-
-        executor = ToolExecutor()
-        executor.register("database_query", "查询数据库", database_query)
-        output = io.StringIO()
-
-        with redirect_stdout(output):
-            result = await ActionAgent(FakeLlm(), executor).run(["user: 删除数据"])
-
-        self.assertFalse(result.success)
-        self.assertEqual(output.getvalue(), "")
 
     async def test_registry_contains_all_three_tools_without_eager_backends(self):
         executor = build_tool_executor()

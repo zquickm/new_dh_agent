@@ -1,6 +1,6 @@
-# New DH ReAct Agent
+# New DH AgentLoop
 
-精简的 FastAPI + ReAct 流式对话后端，接口兼容现有 `dh-frontend`。
+精简的 FastAPI + AgentLoop 流式对话后端，接口兼容现有 `dh-frontend`。
 
 ## 配置
 

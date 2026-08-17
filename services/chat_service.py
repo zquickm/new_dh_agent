@@ -4,7 +4,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Optional
 
-from agents.react_agent import CoreAgent, build_react_agent
+from agents.agent_loop import AgentLoop, build_agent_loop
 from config.settings import get_settings
 from repositories.memory_conversation_repository import conversation_repository
 from schemas.chat import AgentRequest
@@ -15,12 +15,12 @@ logger = logging.getLogger(__name__)
 
 class ChatService:
     def __init__(self) -> None:
-        self._agent: Optional[CoreAgent] = None
+        self._agent: Optional[AgentLoop] = None
 
     @property
-    def agent(self) -> CoreAgent:
+    def agent(self) -> AgentLoop:
         if self._agent is None:
-            self._agent = build_react_agent()
+            self._agent = build_agent_loop()
         return self._agent
 
     async def close(self) -> None:
@@ -42,45 +42,13 @@ class ChatService:
             return
         yield {"event": "conversation", "data": {"conversation_id": conversation_id}}
         answer_parts: list[str] = []
-        think_buffers: dict[int, str] = {}
         sequence = 0
         try:
             async for event in self.agent.run_stream(
                 request.question, request.chat_history
             ):
                 sequence += 1
-                if event.type == "think":
-                    if not get_settings().stream.include_process:
-                        continue
-                    summary = think_buffers.get(event.round_number, "") + event.content
-                    think_buffers[event.round_number] = summary
-                    yield {
-                        "event": "process",
-                        "data": self._process_data(
-                            event.round_number,
-                            "reasoning",
-                            "reasoning",
-                            "running",
-                            f"第 {event.round_number} 轮分析",
-                            summary,
-                            sequence,
-                        ),
-                    }
-                elif event.type == "think_finished":
-                    if get_settings().stream.include_process:
-                        yield {
-                            "event": "process",
-                            "data": self._process_data(
-                                event.round_number,
-                                "reasoning",
-                                "reasoning",
-                                "success",
-                                f"第 {event.round_number} 轮分析",
-                                event.content or "分析完成",
-                                sequence,
-                            ),
-                        }
-                elif event.type == "action_started":
+                if event.type == "tool_started":
                     if get_settings().stream.include_process:
                         yield {
                             "event": "process",
@@ -89,12 +57,13 @@ class ChatService:
                                 "tool",
                                 "tool",
                                 "running",
-                                "调用外部工具",
-                                "正在选择并调用工具",
+                                f"调用工具：{event.tool_name}",
+                                "工具正在执行",
                                 sequence,
+                                step_id=event.tool_call_id,
                             ),
                         }
-                elif event.type == "action_finished":
+                elif event.type == "tool_finished":
                     if get_settings().stream.include_process:
                         summary = (
                             event.content
@@ -108,18 +77,19 @@ class ChatService:
                                 "tool",
                                 "tool",
                                 "success" if event.success else "failed",
-                                "调用外部工具",
+                                f"调用工具：{event.tool_name}",
                                 summary,
                                 sequence,
+                                step_id=event.tool_call_id,
                                 recoverable=True,
                             ),
                         }
-                elif event.type == "answer":
+                elif event.type == "answer_delta":
                     answer_parts.append(event.content)
                     yield {"event": "token", "data": {"content": event.content}}
             answer = "".join(answer_parts)
             if not answer.strip():
-                raise RuntimeError("ReAct 未生成有效回答")
+                raise RuntimeError("AgentLoop 未生成有效回答")
             message = await conversation_repository.save_exchange(
                 conversation_id, request.question, answer
             )
@@ -135,12 +105,12 @@ class ChatService:
                 },
             }
         except Exception:
-            logger.exception("ReAct chat stream failed")
+            logger.exception("Agent chat stream failed")
             yield {
                 "event": "error",
                 "data": {
                     "message": "对话生成失败，请稍后重试",
-                    "error_code": "REACT_STREAM_FAILED",
+                    "error_code": "AGENT_STREAM_FAILED",
                     "retryable": True,
                 },
             }
@@ -155,11 +125,12 @@ class ChatService:
         summary: str,
         sequence: int,
         *,
+        step_id: str = "",
         recoverable: bool = True,
     ) -> dict:
         return {
-            "agent_id": "react-agent",
-            "step_id": f"{kind}-{round_number}",
+            "agent_id": "agent-loop",
+            "step_id": step_id or f"{kind}-{round_number}",
             "parent_id": None,
             "stage": stage,
             "kind": kind,

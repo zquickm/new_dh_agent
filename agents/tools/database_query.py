@@ -34,7 +34,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
 
 
 class DatabaseQueryTool:
-    """Adapt the database backend to the ReAct tool contract."""
+    """Adapt the database backend to the agent tool contract."""
 
     def __init__(self, backend: Optional[DatabaseQueryBackend] = None) -> None:
         self._backend = backend

@@ -1,1 +1,1 @@
-"""ReAct tool implementations and execution infrastructure."""
+"""Agent tool implementations and execution infrastructure."""

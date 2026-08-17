@@ -46,7 +46,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
 
 
 class RagSearchTool:
-    """Adapt the RAG backend to the ReAct tool contract."""
+    """Adapt the RAG backend to the agent tool contract."""
 
     def __init__(self, backend: Optional[RagSearchBackend] = None) -> None:
         self._backend = backend

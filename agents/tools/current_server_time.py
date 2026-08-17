@@ -22,7 +22,7 @@ def matches_current_server_time(query: str) -> bool:
     return any(re.search(pattern, normalized) for pattern in patterns)
 
 
-def get_current_server_time(argument: str) -> str:
+def get_current_server_time(argument: str = "") -> str:
     """Return the current local time of the server process."""
 
     del argument
