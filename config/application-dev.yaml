@@ -3,4 +3,4 @@ server:
   reload: true
 
 react:
-  max_rounds: 3
+  max_rounds: 5

@@ -33,13 +33,19 @@ class ReActAgentTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [event.type for event in events],
-            ["action_started", "action_finished", "answer"],
+            [
+                "action_started",
+                "action_finished",
+                "think",
+                "think_finished",
+                "answer",
+            ],
         )
         self.assertEqual(events[1].tool_name, "CurrentServerTime")
         self.assertTrue(events[1].success)
         self.assertIn('"datetime"', events[1].content)
-        self.assertIn("CurrentServerTime返回", llm.stream_prompts[0])
-        self.assertEqual(llm.invoke_calls, 0)
+        self.assertIn("CurrentServerTime返回", llm.stream_prompts[-1])
+        self.assertEqual(llm.invoke_calls, 1)
 
     async def test_route_prompt_contains_available_tool_descriptions(self):
         llm = FakeLlm()
@@ -101,14 +107,38 @@ class ReActAgentTest(unittest.IsolatedAsyncioTestCase):
             [
                 "action_started",
                 "action_finished",
+                "think",
+                "think_finished",
                 "action_started",
                 "action_finished",
+                "think",
+                "think_finished",
                 "answer",
             ],
         )
         self.assertEqual(
-            [events[1].tool_name, events[3].tool_name],
+            [events[1].tool_name, events[5].tool_name],
             ["rag_search", "database_query"],
         )
         self.assertIn("报告依据", llm.answer_prompt)
         self.assertIn('"avg": 30.1', llm.answer_prompt)
+
+    async def test_think_cannot_run_twice_in_a_row(self):
+        class RepeatingThinkLlm(FakeLlm):
+            async def invoke(self, messages, temperature=None):
+                del temperature
+                self.invoke_calls += 1
+                self.invoke_prompts.append(messages[-1]["content"])
+                return '{"agent":"think"}'
+
+        llm = RepeatingThinkLlm()
+        agent = CoreAgent(llm, ToolExecutor())
+
+        events = [event async for event in agent.run_stream("分析一下", [])]
+
+        self.assertEqual(
+            [event.type for event in events],
+            ["think", "think_finished", "answer"],
+        )
+        self.assertIn("可选步骤：answer", llm.invoke_prompts[1])
+        self.assertNotIn("可选步骤：answer, think", llm.invoke_prompts[1])

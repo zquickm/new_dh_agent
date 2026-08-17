@@ -5,6 +5,7 @@ import re
 import sys
 import traceback
 from collections.abc import AsyncIterator
+from textwrap import dedent
 from typing import Optional
 
 from agents.events import ActionResult, ReActEvent
@@ -59,21 +60,31 @@ def _print_serious_tool_error(tool_name: str, exc: Exception) -> None:
     sys.stdout.flush()
 
 
-def build_prompt(context: list[str], instruction: str) -> str:
+def build_prompt(
+    template: str,
+    *,
+    context: Optional[list[str]] = None,
+    **values: object,
+) -> str:
+    prompt = dedent(template).strip()
+    if values:
+        prompt = prompt.format(**values)
+    if context is None:
+        return prompt
     context_text = "\n".join(context) or "无"
-    return (
-        "当前上下文：\n----------------\n"
-        f"{context_text}\n"
-        "----------------\n\n"
-        f"{instruction}"
-    )
+    return f"当前上下文：\n----------------\n{context_text}\n----------------\n\n{prompt}"
 
 
 class ThinkAgent:
-    PROMPT = (
-        "请概括当前问题的处理进展，并说明下一步需要什么信息。\n"
-        "要求：简短、清楚，可以直接展示给用户；只输出推理概括，"
-        "不展示详细思维过程；不调用工具，不直接给出最终答案。"
+    PROMPT = build_prompt(
+        """
+        任务：概括当前问题的处理进展，并说明下一步需要什么信息。
+
+        要求：
+        - 简短、清楚，可以直接展示给用户。
+        - 只输出推理概括，不展示详细思维过程。
+        - 不调用工具，不直接给出最终答案。
+        """
     )
 
     def __init__(self, llm: HelloAgentsLLM) -> None:
@@ -81,7 +92,7 @@ class ThinkAgent:
 
     async def run(self, context: list[str]) -> AsyncIterator[str]:
         async for token in self.llm.stream(
-            [{"role": "user", "content": build_prompt(context, self.PROMPT)}]
+            [{"role": "user", "content": build_prompt(self.PROMPT, context=context)}]
         ):
             yield token
 
@@ -103,14 +114,22 @@ class ActionAgent:
             except Exception as exc:
                 _print_serious_tool_error(preferred_tool, exc)
                 return ActionResult(preferred_tool, "", "工具执行失败", False)
-        prompt = build_prompt(
-            context,
-            "请根据完整上下文选择最适合当前步骤的一个工具。\n可用工具：\n"
-            f"{self.tools.descriptions()}\n"
-            "必须严格按照工具的 parameters 生成 JSON 参数对象，并完整保留用户给出的"
-            "时间、断面、站点、指标和过滤条件。只能输出 工具名称[JSON参数对象]，"
-            "不要输出 Markdown、解释或最终答案。",
+        instruction = build_prompt(
+            """
+            任务：根据完整上下文选择最适合当前步骤的一个工具。
+
+            可用工具：
+            {tools}
+
+            输出要求：
+            - 严格按照工具的 parameters 生成 JSON 参数对象。
+            - 完整保留用户给出的时间、断面、站点、指标和过滤条件。
+            - 只输出：工具名称[JSON参数对象]
+            - 不要输出 Markdown、解释或最终答案。
+            """,
+            tools=self.tools.descriptions(),
         )
+        prompt = build_prompt(instruction, context=context)
         action_text = await self.llm.invoke(
             [{"role": "user", "content": prompt}], temperature=0
         )
@@ -127,9 +146,14 @@ class ActionAgent:
 
 
 class AnswerAgent:
-    PROMPT = (
-        "请根据上下文直接回答用户的问题。合理使用思考概括和工具返回的信息；"
-        "不要输出内部思考和调用工具的过程。"
+    PROMPT = build_prompt(
+        """
+        任务：根据上下文直接回答用户的问题。
+
+        要求：
+        - 合理使用思考概括和工具返回的信息。
+        - 不要输出内部思考和调用工具的过程。
+        """
     )
 
     def __init__(self, llm: HelloAgentsLLM) -> None:
@@ -137,15 +161,21 @@ class AnswerAgent:
 
     async def run(self, context: list[str]) -> AsyncIterator[str]:
         async for token in self.llm.stream(
-            [{"role": "user", "content": build_prompt(context, self.PROMPT)}]
+            [{"role": "user", "content": build_prompt(self.PROMPT, context=context)}]
         ):
             yield token
 
 
 class CoreAgent:
-    ROUTE_PROMPT = (
-        "请快速选择下一步：think 表示分析梳理，action 表示调用工具，"
-        "answer 表示最终回答。只输出 JSON，例如 {\"agent\": \"think\"}。"
+    ROUTE_PROMPT = build_prompt(
+        """
+        请快速选择下一步：
+        - think：分析梳理。
+        - action：调用工具。
+        - answer：给出最终回答。
+
+        只输出 JSON，例如 {"agent": "think"}。
+        """
     )
 
     def __init__(self, llm: HelloAgentsLLM, tools: ToolExecutor) -> None:
@@ -153,8 +183,6 @@ class CoreAgent:
         self.llm = llm
         self.tools = tools
         self.max_rounds = settings.react.max_rounds
-        self.enable_think = settings.react.enable_think
-        self.enable_tools = settings.react.enable_tools
         self.force_answer = settings.react.force_answer_on_last_round
         self.think_agent = ThinkAgent(llm)
         self.action_agent = ActionAgent(llm, tools)
@@ -167,25 +195,41 @@ class CoreAgent:
     async def close(self) -> None:
         await self.tools.close()
 
-    async def route(self, context: list[str], round_number: int) -> str:
+    async def route(
+        self,
+        context: list[str],
+        round_number: int,
+        previous_agent: Optional[str] = None,
+    ) -> str:
         available = ["answer"]
-        if self.enable_think:
+        if previous_agent != "think":
             available.append("think")
-        if self.enable_tools and self.tools.tools:
+        if self.tools.tools and round_number <= self.max_rounds - 2:
             available.append("action")
         tool_descriptions = self.tools.descriptions() or "无"
-        prompt = build_prompt(
-            context,
-            f"当前第 {round_number} 轮，可选：{', '.join(available)}。\n"
-            f"可用工具：\n{tool_descriptions}\n"
-            "路由规则：查询实际观测值、记录数、统计、比较、趋势、断面或站点数据时，"
-            "选择 action 并使用 database_query；查询内部文档、制度、报告、说明或知识依据时，"
-            "选择 action 并使用 rag_search；询问服务器当前时间时使用 CurrentServerTime。"
-            "概念解释、普通对话或上下文信息已经足够时选择 answer。"
-            "同时需要文档依据和实际数据时，先调用其中一个工具，下一轮再调用另一个；"
-            "不得在存在合适工具时直接回答无法查询。\n"
-            f"{self.ROUTE_PROMPT}",
+        instruction = build_prompt(
+            """
+            当前轮次：{round_number}
+            可选步骤：{available}
+
+            可用工具：
+            {tools}
+
+            路由规则：
+            - 查询实际观测值、记录数、统计、比较、趋势、断面或站点数据：选择 action，使用 database_query。
+            - 查询内部文档、制度、报告、说明或知识依据：选择 action，使用 rag_search。
+            - 询问服务器当前时间：选择 action，使用 CurrentServerTime。
+            - 概念解释、普通对话或上下文信息已经足够：选择 answer。
+            - 同时需要文档依据和实际数据：先调用其中一个工具，后续再调用另一个。
+
+            {route_prompt}
+            """,
+            round_number=round_number,
+            available=", ".join(available),
+            tools=tool_descriptions,
+            route_prompt=self.ROUTE_PROMPT,
         )
+        prompt = build_prompt(instruction, context=context)
         response = await self.llm.invoke(
             [{"role": "user", "content": prompt}], temperature=0
         )
@@ -204,19 +248,18 @@ class CoreAgent:
         limit = get_settings().conversation.max_history_messages
         context = [f"{item.role}: {item.content}" for item in history[-limit:]]
         context.append(f"user: {question}")
-        preferred_tool = (
-            self.tools.match(question) if self.enable_tools else None
-        )
-        answer_after_tool = False
+        preferred_tool = self.tools.match(question)
+        previous_agent: Optional[str] = None
         for round_number in range(1, self.max_rounds + 1):
-            next_agent = (
-                "answer"
-                if answer_after_tool
-                or (self.force_answer and round_number == self.max_rounds)
-                else "action"
-                if preferred_tool
-                else await self.route(context, round_number)
-            )
+            action_has_room = round_number <= self.max_rounds - 2
+            if previous_agent == "action":
+                next_agent = "think"
+            elif self.force_answer and round_number == self.max_rounds:
+                next_agent = "answer"
+            elif preferred_tool and action_has_room:
+                next_agent = "action"
+            else:
+                next_agent = await self.route(context, round_number, previous_agent)
             if next_agent == "think":
                 parts: list[str] = []
                 async for token in self.think_agent.run(context):
@@ -226,6 +269,7 @@ class CoreAgent:
                 if summary:
                     context.append(f"assistant: 阶段性分析：{summary}")
                 yield ReActEvent("think_finished", summary, round_number)
+                previous_agent = "think"
                 continue
             if next_agent == "action":
                 yield ReActEvent("action_started", round_number=round_number)
@@ -242,7 +286,7 @@ class CoreAgent:
                 context.append(
                     f"{result.tool_name or '工具'}返回：{result.observation}"
                 )
-                answer_after_tool = forced_tool is not None
+                previous_agent = "action"
                 continue
             produced = False
             async for token in self.answer_agent.run(context):
