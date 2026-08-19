@@ -79,7 +79,7 @@ class CitationRegistryTest(unittest.TestCase):
             parsed_model_observation["chunks"][1]["text"],
         )
 
-    def test_transforms_only_registered_source_keys_and_citations(self):
+    def test_transforms_only_registered_source_keys(self):
         registry = CitationRegistry()
         registry.register_rag_observation(
             json.dumps(
@@ -107,10 +107,62 @@ class CitationRegistryTest(unittest.TestCase):
         )
 
         answer = registry.transform_answer(
-            "事实一<<SRC_1>>；未知<<SRC_99>>；事实二[[cite:2]]；无效[[cite:9]]"
+            "事实一<<SRC_1>>；事实二<<SRC_2>>"
         )
 
-        self.assertEqual(answer, "事实一[[cite:1]]；未知；事实二[[cite:2]]；无效")
+        self.assertEqual(answer, "事实一[[cite:1]]；事实二[[cite:2]]")
+
+    def test_rejects_direct_citations_and_unknown_source_keys(self):
+        registry = CitationRegistry()
+        registry.register_rag_observation(
+            json.dumps(
+                {
+                    "query": "测试",
+                    "chunks": [
+                        {"text": "证据", "source": "一.pdf", "score": 0.8}
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            tool_call_id="call-rag",
+            fallback_query="",
+        )
+
+        for answer in ("事实[[cite:1]]", "事实<<SRC_99>>", "事实<<SRC_1"):
+            with self.subTest(answer=answer):
+                with self.assertRaises(ValueError):
+                    registry.transform_answer(answer)
+
+    def test_source_identity_matches_backend_and_ignores_document_id(self):
+        registry = CitationRegistry()
+        registry.register_rag_observation(
+            json.dumps(
+                {
+                    "query": "测试",
+                    "chunks": [
+                        {
+                            "text": "第一段",
+                            "source": "同名.pdf",
+                            "document_id": "doc-1",
+                            "page_index": 0,
+                        },
+                        {
+                            "text": "第二段",
+                            "source": "同名.pdf",
+                            "document_id": "doc-2",
+                            "page_index": 0,
+                        },
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            tool_call_id="call-rag",
+            fallback_query="",
+        )
+
+        sources = registry.sources()
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0]["preview"], "第一段\n\n第二段")
 
     def test_history_citations_are_removed(self):
         self.assertEqual(
@@ -190,4 +242,13 @@ class CitationServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(answer, "没有引用的回答")
+        self.assertEqual(cited, [])
+
+    def test_finalize_uses_the_same_case_sensitive_pattern_as_backend(self):
+        answer, cited = CitationService.finalize(
+            "大写标记[[CITE:1]]",
+            [{"citation_id": 1, "source": "一.pdf", "preview": "一"}],
+        )
+
+        self.assertEqual(answer, "大写标记[[CITE:1]]")
         self.assertEqual(cited, [])

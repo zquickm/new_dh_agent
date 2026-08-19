@@ -19,7 +19,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "type": "integer",
             "minimum": 1,
             "maximum": 20,
-            "default": 5,
+            "default": 20,
         },
         "filters": {
             "type": "object",
@@ -87,7 +87,7 @@ class RagSearchTool:
     async def execute(
         self,
         query: str,
-        top_k: int = 5,
+        top_k: int = 20,
         filters: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         query = query.strip()
