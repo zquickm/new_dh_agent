@@ -79,8 +79,10 @@ class RagSearchTool:
                 rerank_url=settings.resolved_rerank_url(),
                 rerank_model=rerank.model,
                 rerank_timeout=rerank.timeout,
+                rerank_connect_timeout=rerank.connect_timeout,
                 rerank_max_retries=rerank.max_retries,
                 rerank_retry_backoff=rerank.retry_backoff,
+                rerank_verify_ssl=rerank.verify_ssl,
             )
         return self._backend
 

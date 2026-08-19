@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
-from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 import aiohttp
 
+from tool_backends.rag_models import RagChunk, RagToolError
+from tool_backends.rerank_backend import (
+    DocumentReranker,
+    VllmDocumentReranker,
+    VllmRerankerSettings,
+)
 
-class RagToolError(RuntimeError):
-    """A safe error raised by the RAG tool backend."""
+
+logger = logging.getLogger(__name__)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -50,31 +56,8 @@ def _as_int(value: Any) -> Optional[int]:
         return None
 
 
-@dataclass(frozen=True)
-class RagChunk:
-    text: str
-    source: str
-    score: float
-    document_id: Optional[str] = None
-    chunk_id: Optional[str] = None
-    knowledge_id: Optional[str] = None
-    title: Optional[str] = None
-    url: Optional[str] = None
-    page_index: Optional[int] = None
-    line: Optional[int] = None
-    page: Optional[int] = None
-
-
 class RagSearchBackend:
     """Asynchronous knowledge-base recall with optional vLLM reranking."""
-
-    _RERANK_PREFIX = (
-        "system\n"
-        "Judge whether the Document meets the requirements based on the Query "
-        "and the Instruct provided. The answer can only be yes or no.\n"
-        "user\n"
-    )
-    _RERANK_INSTRUCTION = "根据用户问题，判断文档是否包含能够回答问题的相关内容"
 
     def __init__(
         self,
@@ -99,8 +82,11 @@ class RagSearchBackend:
         rerank_url: str,
         rerank_model: str,
         rerank_timeout: float,
+        rerank_connect_timeout: float,
         rerank_max_retries: int,
         rerank_retry_backoff: float,
+        rerank_verify_ssl: bool,
+        reranker: Optional[DocumentReranker] = None,
     ) -> None:
         if not recall_url or not api_token or not tenant_id or not knowledge_ids:
             raise RagToolError(
@@ -124,11 +110,20 @@ class RagSearchBackend:
         self.max_retries = max_retries
         self.retry_backoff = retry_backoff
         self.rerank_enabled = rerank_enabled
-        self.rerank_url = rerank_url
-        self.rerank_model = rerank_model
-        self.rerank_timeout = rerank_timeout
-        self.rerank_max_retries = rerank_max_retries
-        self.rerank_retry_backoff = rerank_retry_backoff
+        self.reranker = reranker if rerank_enabled else None
+        if rerank_enabled and self.reranker is None:
+            self.reranker = VllmDocumentReranker(
+                VllmRerankerSettings(
+                    url=rerank_url,
+                    model=rerank_model,
+                    api_token=api_token,
+                    timeout=rerank_timeout,
+                    connect_timeout=rerank_connect_timeout,
+                    max_retries=rerank_max_retries,
+                    retry_backoff=rerank_retry_backoff,
+                    verify_ssl=rerank_verify_ssl,
+                )
+            )
         self._session: Optional[aiohttp.ClientSession] = None
         self._session_lock = asyncio.Lock()
 
@@ -182,10 +177,14 @@ class RagSearchBackend:
             rerank_url=rerank_url,
             rerank_model=os.getenv("RERANK_MODEL", "Qwen3-Reranker-4B").strip(),
             rerank_timeout=float(os.getenv("RERANK_TIMEOUT", "15")),
+            rerank_connect_timeout=float(
+                os.getenv("RERANK_CONNECT_TIMEOUT", "5")
+            ),
             rerank_max_retries=int(os.getenv("RERANK_MAX_RETRIES", "1")),
             rerank_retry_backoff=float(
                 os.getenv("RERANK_RETRY_BACKOFF", "0.3")
             ),
+            rerank_verify_ssl=_env_bool("RERANK_VERIFY_SSL", True),
         )
 
     async def search(
@@ -254,71 +253,28 @@ class RagSearchBackend:
         if not chunks:
             return []
 
-        if self.rerank_enabled:
+        if self.reranker is not None:
             try:
-                return await self._rerank(query, chunks, top_k)
+                return await self.reranker.rerank(query, chunks, top_k)
             except RagToolError:
                 # Recall order is a usable fallback when reranking is unavailable.
+                logger.warning(
+                    "Rerank failed; falling back to recall order: "
+                    "candidate_count=%s result_count=%s",
+                    len(chunks),
+                    min(top_k, len(chunks)),
+                    exc_info=True,
+                )
                 return chunks[:top_k]
         return chunks[:top_k]
 
     async def close(self) -> None:
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
-
-    async def _rerank(
-        self,
-        query: str,
-        chunks: list[RagChunk],
-        top_k: int,
-    ) -> list[RagChunk]:
-        limit = min(max(1, top_k), len(chunks))
-        payload = {
-            "model": self.rerank_model,
-            "query": (
-                f"{self._RERANK_PREFIX}<Instruct>: {self._RERANK_INSTRUCTION}\n"
-                f"<Query>: {query}\n"
-            ),
-            "documents": [f"<Document>: {chunk.text}\n" for chunk in chunks],
-            "top_n": limit,
-        }
-        body = await self._post_json(
-            self.rerank_url,
-            payload,
-            self._headers(),
-            timeout=self.rerank_timeout,
-            max_retries=self.rerank_max_retries,
-            retry_backoff=self.rerank_retry_backoff,
-        )
-        results = body.get("results") if isinstance(body, dict) else None
-        if not isinstance(results, list):
-            raise RagToolError("Rerank service returned an invalid response")
-
-        ranked: list[tuple[float, RagChunk]] = []
-        seen: set[int] = set()
-        for item in results:
-            if not isinstance(item, dict):
-                raise RagToolError("Rerank result must be an object")
-            index = item.get("index")
-            if (
-                not isinstance(index, int)
-                or isinstance(index, bool)
-                or index < 0
-                or index >= len(chunks)
-                or index in seen
-            ):
-                raise RagToolError("Rerank result contains an invalid index")
-            try:
-                relevance = float(item["relevance_score"])
-            except (KeyError, TypeError, ValueError) as exc:
-                raise RagToolError("Rerank result contains an invalid score") from exc
-            seen.add(index)
-            ranked.append((relevance, replace(chunks[index], score=relevance)))
-
-        if len(ranked) != limit:
-            raise RagToolError("Rerank service returned an incomplete result")
-        ranked.sort(key=lambda pair: pair[0], reverse=True)
-        return [chunk for _, chunk in ranked]
+        try:
+            if self._session is not None and not self._session.closed:
+                await self._session.close()
+        finally:
+            if self.reranker is not None:
+                await self.reranker.close()
 
     async def _post_json(
         self,

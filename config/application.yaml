@@ -52,8 +52,10 @@ tools:
       model: "Qwen3-Reranker-4B"
       candidate_top_n: 100
       timeout: 15
+      connect_timeout: 5
       max_retries: 1
       retry_backoff: 0.3
+      verify_ssl: true
   database:
     information_dir: database_information
     query_guide_file: "断面数据_AI_SQL查询指南.md"

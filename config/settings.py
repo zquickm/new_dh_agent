@@ -124,8 +124,10 @@ class RerankSettings(BaseModel):
     model: str = "Qwen3-Reranker-4B"
     candidate_top_n: int = Field(default=100, ge=1)
     timeout: float = Field(default=15, gt=0)
+    connect_timeout: float = Field(default=5, gt=0)
     max_retries: int = Field(default=1, ge=0)
     retry_backoff: float = Field(default=0.3, ge=0)
+    verify_ssl: bool = True
 
 
 class RagToolSettings(BaseModel):
