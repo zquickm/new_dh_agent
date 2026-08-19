@@ -232,7 +232,7 @@ class RagSearchBackend:
             "forceTagList": [],
         }
         headers = self._headers()
-        minimum_score = round(max(0.0, self.score - 0.2), 2)
+        minimum_score = round(self.score - 0.2, 2)
         score = self.score
 
         while True:
@@ -374,13 +374,13 @@ class RagSearchBackend:
             line = _as_int(record.get("line"))
             if line is None:
                 line = _as_int(record.get("line_no"))
+            if line is None and page_index is not None:
+                line = page_index + 1
             # Keep the legacy one-based display field, but preserve the
             # upstream zero-based page index and line as separate values.
             page = page_index + 1 if page_index is not None else line
             document_id = _first_text(
                 record.get("doc_id"),
-                record.get("document_id"),
-                record.get("documentId"),
             )
             source = _first_text(
                 record.get("fileName"),

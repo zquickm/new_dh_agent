@@ -2,7 +2,7 @@ import re
 from typing import Any
 
 
-_CITATION_PATTERN = re.compile(r"\[\[cite:(\d+)\]\]", re.IGNORECASE)
+_CITATION_PATTERN = re.compile(r"\[\[cite:(\d+)\]\]")
 
 
 class CitationService:

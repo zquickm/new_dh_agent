@@ -1,20 +1,14 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 from typing import Any, Optional
 
 
 _CITATION_PATTERN = re.compile(r"\[\[cite:(\d+)\]\]", re.IGNORECASE)
 _SOURCE_TOKEN_PATTERN = re.compile(r"<<SRC_(\d+)>>", re.IGNORECASE)
-_MALFORMED_SOURCE_TOKEN_PATTERN = re.compile(r"<<\s*SRC_[^>]*>>", re.IGNORECASE)
-_INCOMPLETE_SOURCE_TOKEN_PATTERN = re.compile(
-    r"<<\s*SRC_(?!\d+>>)[^\r\n]*", re.IGNORECASE
-)
-_INCOMPLETE_CITATION_PATTERN = re.compile(
-    r"\[\[\s*cite:(?!\d+\]\])[^\r\n]*", re.IGNORECASE
-)
+_SOURCE_TOKEN_OPENER = "<<src_"
+_RAW_CITATION_OPENER = "[[cite:"
 
 
 def strip_citation_markers(text: str) -> str:
@@ -24,15 +18,12 @@ def strip_citation_markers(text: str) -> str:
 
 def _score(value: Any) -> float:
     try:
-        result = float(value)
+        return float(value)
     except (TypeError, ValueError):
         return 0.0
-    return result if math.isfinite(result) else 0.0
 
 
 def _optional_int(value: Any) -> Optional[int]:
-    if value is None or isinstance(value, bool):
-        return None
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -128,24 +119,50 @@ class CitationRegistry:
         return retrieval, json.dumps(model_result, ensure_ascii=False, default=str)
 
     def transform_answer(self, answer: str) -> str:
-        valid_ids = {
-            int(source["citation_id"])
-            for source in self._sources
-            if source.get("citation_id") is not None
-        }
+        registry = self._source_registry()
+        output: list[str] = []
+        position = 0
+        folded = answer.casefold()
+        while position < len(answer):
+            source_index = folded.find(_SOURCE_TOKEN_OPENER, position)
+            citation_index = folded.find(_RAW_CITATION_OPENER, position)
+            marker_indexes = [
+                index for index in (source_index, citation_index) if index >= 0
+            ]
+            if not marker_indexes:
+                output.append(answer[position:])
+                break
 
-        def replace_source_key(match: re.Match[str]) -> str:
-            citation_id = int(match.group(1))
-            return f"[[cite:{citation_id}]]" if citation_id in valid_ids else ""
+            marker_index = min(marker_indexes)
+            output.append(answer[position:marker_index])
+            if marker_index == citation_index:
+                raise ValueError("最终模型不得直接输出数字引用标记")
 
-        def remove_invalid_citation(match: re.Match[str]) -> str:
-            return match.group(0) if int(match.group(1)) in valid_ids else ""
+            close_index = folded.find(">>", marker_index + len(_SOURCE_TOKEN_OPENER))
+            if close_index < 0:
+                raise ValueError("最终模型输出了不完整的来源键")
+            token = answer[marker_index : close_index + 2]
+            match = _SOURCE_TOKEN_PATTERN.fullmatch(token)
+            if match is None:
+                raise ValueError(f"最终模型输出了非法来源键：{token}")
+            key = f"SRC_{match.group(1)}"
+            source = registry.get(key)
+            if source is None:
+                raise ValueError(f"最终模型输出了未知来源键：{token}")
+            output.append(f"[[cite:{source['citation_id']}]]")
+            position = close_index + 2
 
-        answer = _SOURCE_TOKEN_PATTERN.sub(replace_source_key, answer)
-        answer = _MALFORMED_SOURCE_TOKEN_PATTERN.sub("", answer)
-        answer = _INCOMPLETE_SOURCE_TOKEN_PATTERN.sub("", answer)
-        answer = _CITATION_PATTERN.sub(remove_invalid_citation, answer)
-        return _INCOMPLETE_CITATION_PATTERN.sub("", answer)
+        return "".join(output)
+
+    def _source_registry(self) -> dict[str, dict[str, Any]]:
+        registry: dict[str, dict[str, Any]] = {}
+        for source in self._sources:
+            citation_id = int(source["citation_id"])
+            key = f"SRC_{citation_id}"
+            if citation_id <= 0 or key in registry:
+                raise ValueError(f"引用来源编号无效或重复：{citation_id}")
+            registry[key] = source
+        return registry
 
     def _register_source(
         self,
@@ -158,7 +175,6 @@ class CitationRegistry:
         location = page_index if page_index is not None else line
         document = str(
             item.get("knowledge_id")
-            or item.get("document_id")
             or source_name
         ).strip().casefold()
         identity = (document, location, source_name.strip().casefold())

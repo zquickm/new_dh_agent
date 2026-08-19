@@ -126,6 +126,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rag_result["chunks"][0]["source"], "文档")
         self.assertEqual(rag_result["chunks"][0]["page_index"], 1)
         self.assertEqual(rag_result["chunks"][0]["page"], 2)
+        self.assertEqual(rag_tool.backend.arguments, ("赤潮", 20, {}))
         self.assertEqual(database_result["question"], "E2 平均盐度")
         self.assertEqual(database_result["limit"], 1000)
 
@@ -151,6 +152,27 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(chunks), 1)
         self.assertEqual(chunks[0].page_index, 2)
         self.assertEqual(chunks[0].line, 0)
+        self.assertEqual(chunks[0].page, 3)
+
+    def test_rag_parser_matches_backend_line_fallback(self):
+        chunks = RagSearchBackend._parse_recall(
+            {
+                "code": 200,
+                "data": {
+                    "records": [
+                        {
+                            "chunk_text": "片段正文",
+                            "fileName": "资料.pdf",
+                            "page_index": 2,
+                        }
+                    ]
+                },
+            },
+            5,
+        )
+
+        self.assertEqual(chunks[0].page_index, 2)
+        self.assertEqual(chunks[0].line, 3)
         self.assertEqual(chunks[0].page, 3)
 
     async def test_registry_contains_all_three_tools_without_eager_backends(self):
