@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from copy import deepcopy
 
@@ -86,6 +87,33 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"datetime"', second_messages[-1]["content"])
         await agent.close()
 
+    async def test_discards_pre_tool_text_instead_of_streaming_it_as_answer(self):
+        tool_call = {
+            "id": "call-time",
+            "name": "CurrentServerTime",
+            "args": {},
+            "type": "tool_call",
+        }
+        llm = FakeLlm(
+            [
+                (["正在查询"], [tool_call]),
+                (["查询完成"], []),
+            ]
+        )
+        agent = AgentLoop(llm, build_tool_executor())
+
+        events = [event async for event in agent.run_stream("现在几点了", [])]
+
+        self.assertEqual(
+            "".join(event.content for event in events if event.type == "answer_delta"),
+            "查询完成",
+        )
+        self.assertEqual(
+            [event.type for event in events],
+            ["tool_started", "tool_finished", "answer_delta"],
+        )
+        await agent.close()
+
     async def test_can_call_multiple_tools_across_rounds(self):
         responses = [
             (
@@ -163,6 +191,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 "tool_started",
                 "tool_finished",
                 "answer_delta",
+                "answer_delta",
             ],
         )
         self.assertEqual(
@@ -174,11 +203,57 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[1].data["chunks"][0]["preview"], "报告依据")
         self.assertEqual(events[1].data["chunks"][0]["page_index"], 2)
         self.assertEqual(events[1].sources[0]["citation_id"], 1)
-        self.assertEqual(events[-1].content, "综合回答[[cite:1]]")
+        self.assertEqual(
+            "".join(event.content for event in events if event.type == "answer_delta"),
+            "综合回答[[cite:1]]",
+        )
         final_messages = llm.calls[-1][0]
         self.assertIn("报告依据", final_messages[-3]["content"])
         self.assertIn('"source_key": "<<SRC_1>>"', final_messages[-3]["content"])
         self.assertIn('"avg": 30.1', final_messages[-1]["content"])
+
+    async def test_streams_first_answer_chunk_before_final_model_chunk(self):
+        class DelayedLlm:
+            model = "fake-model"
+
+            def __init__(self):
+                self.call_count = 0
+                self.release = asyncio.Event()
+
+            async def stream(self, messages, tools=None, temperature=0):
+                del messages, tools, temperature
+                self.call_count += 1
+                if self.call_count == 1:
+                    yield "", [
+                        {
+                            "id": "call-echo",
+                            "name": "Echo",
+                            "args": {"value": "完成"},
+                            "type": "tool_call",
+                        }
+                    ]
+                    return
+                yield "第一段", []
+                await self.release.wait()
+                yield "第二段", []
+
+        llm = DelayedLlm()
+        tools = ToolExecutor()
+        tools.register("Echo", "回显", lambda value: value)
+        agent = AgentLoop(llm, tools)
+        stream = agent.run_stream("测试流式输出", [])
+
+        self.assertEqual((await stream.__anext__()).type, "tool_started")
+        self.assertEqual((await stream.__anext__()).type, "tool_finished")
+        first_answer = await asyncio.wait_for(stream.__anext__(), timeout=0.2)
+
+        self.assertEqual(first_answer.type, "answer_delta")
+        self.assertEqual(first_answer.content, "第一段")
+        self.assertFalse(llm.release.is_set())
+
+        llm.release.set()
+        remaining = [event async for event in stream]
+        self.assertEqual([event.content for event in remaining], ["第二段"])
 
     async def test_invalid_rag_result_is_reported_as_tool_failure(self):
         async def rag_search(query):

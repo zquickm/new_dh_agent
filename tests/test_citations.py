@@ -112,6 +112,34 @@ class CitationRegistryTest(unittest.TestCase):
 
         self.assertEqual(answer, "事实一[[cite:1]]；事实二[[cite:2]]")
 
+    def test_stream_transformer_preserves_split_source_keys(self):
+        registry = CitationRegistry()
+        registry.register_rag_observation(
+            json.dumps(
+                {
+                    "query": "测试",
+                    "chunks": [
+                        {"text": "证据", "source": "一.pdf", "score": 0.8}
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            tool_call_id="call-rag",
+            fallback_query="",
+        )
+
+        first, pending = registry.transform_stream_buffer("事实<<SR", final=False)
+        second, pending = registry.transform_stream_buffer(
+            pending + "C_1>>继续",
+            final=False,
+        )
+        tail, pending = registry.transform_stream_buffer(pending, final=True)
+
+        self.assertEqual(first, "事实")
+        self.assertEqual(second, "[[cite:1]]继续")
+        self.assertEqual(tail, "")
+        self.assertEqual(pending, "")
+
     def test_rejects_direct_citations_and_unknown_source_keys(self):
         registry = CitationRegistry()
         registry.register_rag_observation(

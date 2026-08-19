@@ -119,29 +119,53 @@ class CitationRegistry:
         return retrieval, json.dumps(model_result, ensure_ascii=False, default=str)
 
     def transform_answer(self, answer: str) -> str:
+        content, pending = self.transform_stream_buffer(answer, final=True)
+        if pending:
+            raise ValueError("最终模型输出了不完整的来源键")
+        return content
+
+    def transform_stream_buffer(
+        self,
+        buffer: str,
+        *,
+        final: bool,
+    ) -> tuple[str, str]:
         registry = self._source_registry()
         output: list[str] = []
         position = 0
-        folded = answer.casefold()
-        while position < len(answer):
+        folded = buffer.casefold()
+        while position < len(buffer):
             source_index = folded.find(_SOURCE_TOKEN_OPENER, position)
             citation_index = folded.find(_RAW_CITATION_OPENER, position)
             marker_indexes = [
                 index for index in (source_index, citation_index) if index >= 0
             ]
             if not marker_indexes:
-                output.append(answer[position:])
-                break
+                remainder = buffer[position:]
+                if final:
+                    output.append(remainder)
+                    return "".join(output), ""
+                keep = self._partial_opener_length(remainder)
+                if keep:
+                    output.append(remainder[:-keep])
+                    return "".join(output), remainder[-keep:]
+                output.append(remainder)
+                return "".join(output), ""
 
             marker_index = min(marker_indexes)
-            output.append(answer[position:marker_index])
+            output.append(buffer[position:marker_index])
             if marker_index == citation_index:
+                close_index = folded.find("]]", marker_index + 2)
+                if close_index < 0 and not final:
+                    return "".join(output), buffer[marker_index:]
                 raise ValueError("最终模型不得直接输出数字引用标记")
 
             close_index = folded.find(">>", marker_index + len(_SOURCE_TOKEN_OPENER))
             if close_index < 0:
+                if not final:
+                    return "".join(output), buffer[marker_index:]
                 raise ValueError("最终模型输出了不完整的来源键")
-            token = answer[marker_index : close_index + 2]
+            token = buffer[marker_index : close_index + 2]
             match = _SOURCE_TOKEN_PATTERN.fullmatch(token)
             if match is None:
                 raise ValueError(f"最终模型输出了非法来源键：{token}")
@@ -152,7 +176,18 @@ class CitationRegistry:
             output.append(f"[[cite:{source['citation_id']}]]")
             position = close_index + 2
 
-        return "".join(output)
+        return "".join(output), ""
+
+    @staticmethod
+    def _partial_opener_length(text: str) -> int:
+        folded = text.casefold()
+        lengths = (
+            length
+            for opener in (_SOURCE_TOKEN_OPENER, _RAW_CITATION_OPENER)
+            for length in range(1, len(opener))
+            if folded.endswith(opener[:length])
+        )
+        return max(lengths, default=0)
 
     def _source_registry(self) -> dict[str, dict[str, Any]]:
         registry: dict[str, dict[str, Any]] = {}
