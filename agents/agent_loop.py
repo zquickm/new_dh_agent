@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import traceback
 from collections.abc import AsyncIterator
@@ -36,6 +37,58 @@ _INFRASTRUCTURE_MODULES = {
     "httpx",
     "pymysql",
 }
+
+
+def _rag_retrieval_data(
+    observation: str,
+    *,
+    tool_call_id: str,
+    fallback_query: Any,
+) -> dict[str, Any]:
+    try:
+        result = json.loads(observation)
+    except json.JSONDecodeError as exc:
+        raise ValueError("rag_search returned invalid JSON") from exc
+    if not isinstance(result, dict) or not isinstance(result.get("chunks"), list):
+        raise ValueError("rag_search returned an invalid result")
+
+    chunks: list[dict[str, Any]] = []
+    for rank, item in enumerate(result["chunks"], start=1):
+        if not isinstance(item, dict):
+            raise ValueError("rag_search returned an invalid chunk")
+        text = item.get("text")
+        source = item.get("source")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("rag_search returned a chunk without text")
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("rag_search returned a chunk without source")
+        chunks.append(
+            {
+                "rank": rank,
+                "source": source,
+                "preview": text,
+                "score": item.get("score"),
+                "document_id": item.get("document_id"),
+                "chunk_id": item.get("chunk_id"),
+                "knowledge_id": item.get("knowledge_id"),
+                "title": item.get("title"),
+                "url": item.get("url"),
+                "page_index": item.get("page_index"),
+                "line": item.get("line"),
+                "page": item.get("page"),
+            }
+        )
+
+    query = result.get("query")
+    if not isinstance(query, str):
+        query = str(fallback_query or "")
+    return {
+        "tool_call_id": tool_call_id,
+        "tool_name": "rag_search",
+        "query": query,
+        "result_count": len(chunks),
+        "chunks": chunks,
+    }
 
 
 def _is_serious_tool_error(exc: Exception) -> bool:
@@ -163,12 +216,35 @@ class AgentLoop:
                 )
                 try:
                     observation = await self.tools.execute(name, tool_call["args"])
+                    tool_arguments = tool_call["args"]
+                    retrieval_data = (
+                        _rag_retrieval_data(
+                            observation,
+                            tool_call_id=tool_call["id"],
+                            fallback_query=(
+                                tool_arguments.get("query")
+                                if isinstance(tool_arguments, dict)
+                                else ""
+                            ),
+                        )
+                        if name == "rag_search"
+                        else None
+                    )
                     success = True
                 except Exception as exc:
                     _print_serious_tool_error(name, exc)
                     observation = "工具执行失败"
+                    retrieval_data = None
                     success = False
 
+                if retrieval_data is not None:
+                    yield AgentEvent(
+                        type="retrieval",
+                        data=retrieval_data,
+                        round_number=round_number,
+                        tool_name=name,
+                        tool_call_id=tool_call["id"],
+                    )
                 yield AgentEvent(
                     type="tool_finished",
                     content=observation,

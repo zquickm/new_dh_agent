@@ -108,6 +108,8 @@ class RagSearchTool:
                     "knowledge_id": chunk.knowledge_id,
                     "title": chunk.title,
                     "url": chunk.url,
+                    "page_index": chunk.page_index,
+                    "line": chunk.line,
                     "page": chunk.page,
                 }
                 for chunk in chunks

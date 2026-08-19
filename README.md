@@ -67,6 +67,47 @@ DEEPSEEK_API_KEY=
 数据库工具仅允许查询 `database_information/` 中具有 DDL 文件的授权表。
 修改表范围时，需要同时更新对应 DDL 和 `断面数据_AI_SQL查询指南.md`。
 
+### RAG 检索片段流事件
+
+`rag_search` 成功完成召回和可选重排后，流式接口会在工具完成状态之前发送
+`retrieval` 事件。该事件表示本次实际返回给 Agent 的最终片段，不包含未通过
+筛选或重排的候选记录：
+
+```text
+event: retrieval
+data: {
+  "code": 200,
+  "message": "成功",
+  "data": {
+    "tool_call_id": "call-rag-1",
+    "tool_name": "rag_search",
+    "query": "东海赤潮相关资料",
+    "result_count": 1,
+    "chunks": [
+      {
+        "rank": 1,
+        "source": "资料.pdf",
+        "preview": "检索片段正文",
+        "score": 0.91,
+        "document_id": "doc-1",
+        "chunk_id": "chunk-1",
+        "knowledge_id": "kb-1",
+        "title": "章节标题",
+        "url": null,
+        "page_index": 2,
+        "line": null,
+        "page": 3
+      }
+    ]
+  }
+}
+```
+
+`page_index` 是上游返回的零基页索引，`page` 是兼容前端直接展示的一基页码。
+前端应以 `tool_call_id` 区分同一轮中的多次检索，并将 `preview` 作为不可信纯文本
+渲染。当前最小版本只展示检索片段，`done.sources` 仍为空；正文引用关联和来源
+持久化将在后续阶段实现。
+
 ## 内网部署
 
 项目依赖已经锁定为支持 CPython 3.9 的版本。建议先在外网 Python 3.9 打包机上升级 `pip`：

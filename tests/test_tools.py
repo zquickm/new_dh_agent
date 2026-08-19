@@ -8,6 +8,7 @@ from agents.tools.database_query import DatabaseQueryTool
 from agents.tools.executor import ToolExecutor
 from agents.tools.rag_search import RagSearchTool
 from agents.tools.registry import build_tool_executor
+from tool_backends.rag_backend import RagSearchBackend
 
 
 class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
@@ -99,6 +100,8 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                         knowledge_id="kb-1",
                         title="标题",
                         url=None,
+                        page_index=1,
+                        line=None,
                         page=2,
                     )
                 ]
@@ -121,8 +124,34 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(rag_result["count"], 1)
         self.assertEqual(rag_result["chunks"][0]["source"], "文档")
+        self.assertEqual(rag_result["chunks"][0]["page_index"], 1)
+        self.assertEqual(rag_result["chunks"][0]["page"], 2)
         self.assertEqual(database_result["question"], "E2 平均盐度")
         self.assertEqual(database_result["limit"], 1000)
+
+    def test_rag_parser_preserves_page_index_and_line(self):
+        chunks = RagSearchBackend._parse_recall(
+            {
+                "code": 200,
+                "data": {
+                    "records": [
+                        {
+                            "chunk_text": "片段正文",
+                            "fileName": "资料.pdf",
+                            "score": 0.8,
+                            "page_index": 2,
+                            "line": 0,
+                        }
+                    ]
+                },
+            },
+            5,
+        )
+
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0].page_index, 2)
+        self.assertEqual(chunks[0].line, 0)
+        self.assertEqual(chunks[0].page, 3)
 
     async def test_registry_contains_all_three_tools_without_eager_backends(self):
         executor = build_tool_executor()

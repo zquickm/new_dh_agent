@@ -12,6 +12,25 @@ class FakeAgent:
 
     async def run_stream(self, question, history):
         del question, history
+        yield AgentEvent(
+            type="retrieval",
+            data={
+                "tool_call_id": "call-rag",
+                "tool_name": "rag_search",
+                "query": "你好",
+                "result_count": 1,
+                "chunks": [
+                    {
+                        "rank": 1,
+                        "source": "资料.pdf",
+                        "preview": "检索片段",
+                        "page_index": 0,
+                    }
+                ],
+            },
+            tool_name="rag_search",
+            tool_call_id="call-rag",
+        )
         yield AgentEvent(type="answer_delta", content="流式回答", round_number=1)
 
 
@@ -42,8 +61,10 @@ class ApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("event: conversation", body)
+        self.assertIn("event: retrieval", body)
         self.assertIn("event: token", body)
         self.assertIn("event: done", body)
+        self.assertIn("检索片段", body)
         self.assertIn("流式回答", body)
 
         detail = self.client.get(f"/conversations/{conversation_id}").json()["data"]

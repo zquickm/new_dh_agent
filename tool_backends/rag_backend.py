@@ -60,6 +60,8 @@ class RagChunk:
     knowledge_id: Optional[str] = None
     title: Optional[str] = None
     url: Optional[str] = None
+    page_index: Optional[int] = None
+    line: Optional[int] = None
     page: Optional[int] = None
 
 
@@ -413,9 +415,12 @@ class RagSearchBackend:
             if not text:
                 continue
             page_index = _as_int(record.get("page_index"))
-            page = _as_int(record.get("line")) or _as_int(record.get("line_no"))
-            if page is None and page_index is not None:
-                page = page_index + 1
+            line = _as_int(record.get("line"))
+            if line is None:
+                line = _as_int(record.get("line_no"))
+            # Keep the legacy one-based display field, but preserve the
+            # upstream zero-based page index and line as separate values.
+            page = page_index + 1 if page_index is not None else line
             document_id = _first_text(
                 record.get("doc_id"),
                 record.get("document_id"),
@@ -443,6 +448,8 @@ class RagSearchBackend:
                         record.get("doc_title"),
                     ),
                     url=_first_text(record.get("downloadUrl")),
+                    page_index=page_index,
+                    line=line,
                     page=page,
                 )
             )

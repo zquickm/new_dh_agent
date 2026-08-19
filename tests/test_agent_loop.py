@@ -117,7 +117,25 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         ]
 
         async def rag_search(query, top_k=5):
-            return {"query": query, "top_k": top_k, "chunks": ["报告依据"]}
+            return {
+                "query": query,
+                "top_k": top_k,
+                "chunks": [
+                    {
+                        "text": "报告依据",
+                        "source": "E2报告.pdf",
+                        "score": 0.91,
+                        "document_id": "doc-1",
+                        "chunk_id": "chunk-1",
+                        "knowledge_id": "kb-1",
+                        "title": "E2断面",
+                        "url": None,
+                        "page_index": 2,
+                        "line": None,
+                        "page": 3,
+                    }
+                ],
+            }
 
         async def database_query(question, limit=100):
             return {"question": question, "limit": limit, "rows": [{"avg": 30.1}]}
@@ -140,6 +158,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             [event.type for event in events],
             [
                 "tool_started",
+                "retrieval",
                 "tool_finished",
                 "tool_started",
                 "tool_finished",
@@ -147,12 +166,80 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual(
-            [events[1].tool_name, events[3].tool_name],
+            [events[2].tool_name, events[4].tool_name],
             ["rag_search", "database_query"],
         )
+        self.assertEqual(events[1].data["tool_call_id"], "call-rag")
+        self.assertEqual(events[1].data["result_count"], 1)
+        self.assertEqual(events[1].data["chunks"][0]["preview"], "报告依据")
+        self.assertEqual(events[1].data["chunks"][0]["page_index"], 2)
         final_messages = llm.calls[-1][0]
         self.assertIn("报告依据", final_messages[-3]["content"])
         self.assertIn('"avg": 30.1', final_messages[-1]["content"])
+
+    async def test_invalid_rag_result_is_reported_as_tool_failure(self):
+        async def rag_search(query):
+            return {"query": query, "chunks": ["invalid"]}
+
+        llm = FakeLlm(
+            [
+                (
+                    [],
+                    [
+                        {
+                            "id": "call-rag",
+                            "name": "rag_search",
+                            "args": {"query": "测试"},
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                (["降级回答"], []),
+            ]
+        )
+        tools = ToolExecutor()
+        tools.register("rag_search", "检索内部文档", rag_search)
+        agent = AgentLoop(llm, tools)
+
+        events = [event async for event in agent.run_stream("测试", [])]
+
+        self.assertEqual(
+            [event.type for event in events],
+            ["tool_started", "tool_finished", "answer_delta"],
+        )
+        self.assertFalse(events[1].success)
+        self.assertEqual(llm.calls[1][0][-1]["content"], "工具执行失败")
+
+    async def test_empty_rag_result_still_emits_retrieval_event(self):
+        async def rag_search(query):
+            return {"query": query, "count": 0, "chunks": []}
+
+        llm = FakeLlm(
+            [
+                (
+                    [],
+                    [
+                        {
+                            "id": "call-rag",
+                            "name": "rag_search",
+                            "args": {"query": "没有匹配的内容"},
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                (["未检索到相关资料"], []),
+            ]
+        )
+        tools = ToolExecutor()
+        tools.register("rag_search", "检索内部文档", rag_search)
+        agent = AgentLoop(llm, tools)
+
+        events = [event async for event in agent.run_stream("测试", [])]
+
+        self.assertEqual(events[1].type, "retrieval")
+        self.assertEqual(events[1].data["result_count"], 0)
+        self.assertEqual(events[1].data["chunks"], [])
+        self.assertTrue(events[2].success)
 
     async def test_tool_failure_is_returned_to_model_for_recovery(self):
         async def database_query(question):

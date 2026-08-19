@@ -42,6 +42,7 @@ class ChatService:
             return
         yield {"event": "conversation", "data": {"conversation_id": conversation_id}}
         answer_parts: list[str] = []
+        retrieval_counts: dict[str, int] = {}
         sequence = 0
         try:
             async for event in self.agent.run_stream(
@@ -63,6 +64,14 @@ class ChatService:
                                 step_id=event.tool_call_id,
                             ),
                         }
+                elif event.type == "retrieval":
+                    data = event.data or {}
+                    result_count = data.get("result_count")
+                    if isinstance(result_count, int) and not isinstance(
+                        result_count, bool
+                    ):
+                        retrieval_counts[event.tool_call_id] = result_count
+                    yield {"event": "retrieval", "data": data}
                 elif event.type == "tool_finished":
                     if get_settings().stream.include_process:
                         summary = (
@@ -82,6 +91,12 @@ class ChatService:
                                 sequence,
                                 step_id=event.tool_call_id,
                                 recoverable=True,
+                                details=(
+                                    {"result_count": retrieval_counts[event.tool_call_id]}
+                                    if event.success
+                                    and event.tool_call_id in retrieval_counts
+                                    else {}
+                                ),
                             ),
                         }
                 elif event.type == "answer_delta":
@@ -127,6 +142,7 @@ class ChatService:
         *,
         step_id: str = "",
         recoverable: bool = True,
+        details: Optional[dict] = None,
     ) -> dict:
         return {
             "agent_id": "agent-loop",
@@ -141,6 +157,7 @@ class ChatService:
             "sequence": sequence,
             "recoverable": recoverable,
             "retryable": False,
+            "details": details or {},
         }
 
 

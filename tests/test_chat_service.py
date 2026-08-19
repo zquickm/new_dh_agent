@@ -18,6 +18,26 @@ class FakeAgent:
             tool_call_id="call-1",
         )
         yield AgentEvent(
+            type="retrieval",
+            data={
+                "tool_call_id": "call-1",
+                "tool_name": "rag_search",
+                "query": "问题",
+                "result_count": 1,
+                "chunks": [
+                    {
+                        "rank": 1,
+                        "source": "资料.pdf",
+                        "preview": "检索片段",
+                        "page_index": 0,
+                    }
+                ],
+            },
+            round_number=1,
+            tool_name="rag_search",
+            tool_call_id="call-1",
+        )
+        yield AgentEvent(
             type="tool_finished",
             content="检索完成",
             round_number=1,
@@ -41,11 +61,21 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(
             [event["event"] for event in events],
-            ["conversation", "process", "process", "token", "token", "done"],
+            [
+                "conversation",
+                "process",
+                "retrieval",
+                "process",
+                "token",
+                "token",
+                "done",
+            ],
         )
-        self.assertEqual(events[2]["data"]["status"], "success")
+        self.assertEqual(events[2]["data"]["chunks"][0]["preview"], "检索片段")
+        self.assertEqual(events[3]["data"]["status"], "success")
         self.assertEqual(events[1]["data"]["step_id"], "call-1")
-        self.assertEqual(events[2]["data"]["step_id"], "call-1")
+        self.assertEqual(events[3]["data"]["step_id"], "call-1")
+        self.assertEqual(events[3]["data"]["details"]["result_count"], 1)
         self.assertEqual(events[1]["data"]["agent_id"], "agent-loop")
         self.assertEqual(events[-1]["data"]["answer"], "你好世界")
         detail = await conversation_repository.get(conversation.id)
