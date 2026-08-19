@@ -8,6 +8,7 @@ from agents.agent_loop import AgentLoop, build_agent_loop
 from config.settings import get_settings
 from repositories.memory_conversation_repository import conversation_repository
 from schemas.chat import AgentRequest
+from services.citation_service import CitationService
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class ChatService:
             return
         yield {"event": "conversation", "data": {"conversation_id": conversation_id}}
         answer_parts: list[str] = []
+        registered_sources: list[dict] = []
         retrieval_counts: dict[str, int] = {}
         sequence = 0
         try:
@@ -66,6 +68,8 @@ class ChatService:
                         }
                 elif event.type == "retrieval":
                     data = event.data or {}
+                    if event.sources is not None:
+                        registered_sources = event.sources
                     result_count = data.get("result_count")
                     if isinstance(result_count, int) and not isinstance(
                         result_count, bool
@@ -105,8 +109,11 @@ class ChatService:
             answer = "".join(answer_parts)
             if not answer.strip():
                 raise RuntimeError("AgentLoop 未生成有效回答")
+            answer, cited_sources = CitationService.finalize(
+                answer, registered_sources
+            )
             message = await conversation_repository.save_exchange(
-                conversation_id, request.question, answer
+                conversation_id, request.question, answer, cited_sources
             )
             yield {
                 "event": "done",
@@ -114,7 +121,7 @@ class ChatService:
                     "conversation_id": conversation_id,
                     "answer": answer,
                     "model": self.agent.model_name,
-                    "sources": [],
+                    "sources": cited_sources,
                     "images": [],
                     "assistant_message_id": message.id,
                 },

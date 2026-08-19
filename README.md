@@ -77,7 +77,7 @@ DEEPSEEK_API_KEY=
 event: retrieval
 data: {
   "code": 200,
-  "message": "成功",
+  "message": "success",
   "data": {
     "tool_call_id": "call-rag-1",
     "tool_name": "rag_search",
@@ -86,6 +86,7 @@ data: {
     "chunks": [
       {
         "rank": 1,
+        "citation_id": 1,
         "source": "资料.pdf",
         "preview": "检索片段正文",
         "score": 0.91,
@@ -105,8 +106,44 @@ data: {
 
 `page_index` 是上游返回的零基页索引，`page` 是兼容前端直接展示的一基页码。
 前端应以 `tool_call_id` 区分同一轮中的多次检索，并将 `preview` 作为不可信纯文本
-渲染。当前最小版本只展示检索片段，`done.sources` 仍为空；正文引用关联和来源
-持久化将在后续阶段实现。
+渲染。
+
+RAG 片段同时会在单次请求内注册为引用来源。模型使用内部 `<<SRC_n>>` 来源键，
+后端将合法来源键转换为 `[[cite:n]]`，删除无效引用，并在 `done.sources` 中仅返回
+正文实际引用的来源：
+
+```text
+event: done
+data: {
+  "code": 200,
+  "message": "success",
+  "data": {
+    "conversation_id": "conversation-1",
+    "answer": "报告显示盐度存在变化[[cite:1]]。",
+    "model": "dsv4",
+    "sources": [
+      {
+        "citation_id": 1,
+        "source": "资料.pdf",
+        "score": 0.91,
+        "preview": "检索片段正文",
+        "title": "章节标题",
+        "url": null,
+        "page_index": 2,
+        "line": null,
+        "chunk_id": "chunk-1",
+        "knowledge_id": "kb-1"
+      }
+    ],
+    "images": [],
+    "assistant_message_id": "message-1"
+  }
+}
+```
+
+`citation_id` 只在本轮回答内有效。同一文档同一页的多个 chunk 共用一个编号，
+其文本以空行连接后写入 `source.preview`。会话历史消息会保存最终引用来源，因此
+当前服务进程内重新打开会话时仍可恢复引用卡片；内存仓库本身不会跨服务重启保留。
 
 ## 内网部署
 

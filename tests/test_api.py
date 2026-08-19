@@ -28,10 +28,28 @@ class FakeAgent:
                     }
                 ],
             },
+            sources=[
+                {
+                    "citation_id": 1,
+                    "source": "资料.pdf",
+                    "line": None,
+                    "score": 0.9,
+                    "preview": "检索片段",
+                    "title": "资料",
+                    "url": None,
+                    "page_index": 0,
+                    "chunk_id": "chunk-1",
+                    "knowledge_id": "kb-1",
+                }
+            ],
             tool_name="rag_search",
             tool_call_id="call-rag",
         )
-        yield AgentEvent(type="answer_delta", content="流式回答", round_number=1)
+        yield AgentEvent(
+            type="answer_delta",
+            content="流式回答[[cite:1]]",
+            round_number=1,
+        )
 
 
 class ApiTest(unittest.TestCase):
@@ -65,10 +83,11 @@ class ApiTest(unittest.TestCase):
         self.assertIn("event: token", body)
         self.assertIn("event: done", body)
         self.assertIn("检索片段", body)
-        self.assertIn("流式回答", body)
+        self.assertIn("流式回答[[cite:1]]", body)
 
         detail = self.client.get(f"/conversations/{conversation_id}").json()["data"]
         self.assertEqual(
             [message["role"] for message in detail["messages"]],
             ["user", "assistant"],
         )
+        self.assertEqual(detail["messages"][-1]["sources"][0]["citation_id"], 1)

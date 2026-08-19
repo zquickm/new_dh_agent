@@ -33,6 +33,20 @@ class FakeAgent:
                     }
                 ],
             },
+            sources=[
+                {
+                    "citation_id": 1,
+                    "source": "资料.pdf",
+                    "line": None,
+                    "score": 0.9,
+                    "preview": "检索片段",
+                    "title": "资料",
+                    "url": None,
+                    "page_index": 0,
+                    "chunk_id": "chunk-1",
+                    "knowledge_id": "kb-1",
+                }
+            ],
             round_number=1,
             tool_name="rag_search",
             tool_call_id="call-1",
@@ -44,7 +58,7 @@ class FakeAgent:
             tool_name="rag_search",
             tool_call_id="call-1",
         )
-        yield AgentEvent(type="answer_delta", content="你好", round_number=2)
+        yield AgentEvent(type="answer_delta", content="你好[[cite:1]]", round_number=2)
         yield AgentEvent(type="answer_delta", content="世界", round_number=2)
 
 
@@ -77,6 +91,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[3]["data"]["step_id"], "call-1")
         self.assertEqual(events[3]["data"]["details"]["result_count"], 1)
         self.assertEqual(events[1]["data"]["agent_id"], "agent-loop")
-        self.assertEqual(events[-1]["data"]["answer"], "你好世界")
+        self.assertEqual(events[-1]["data"]["answer"], "你好[[cite:1]]世界")
+        self.assertEqual(events[-1]["data"]["sources"][0]["citation_id"], 1)
         detail = await conversation_repository.get(conversation.id)
         self.assertEqual([message.role for message in detail.messages], ["user", "assistant"])
+        self.assertEqual(detail.messages[-1].sources[0]["preview"], "检索片段")

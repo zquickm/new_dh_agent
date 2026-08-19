@@ -113,7 +113,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                     }
                 ],
             ),
-            (["综合回答"], []),
+            (["综合回答<<SRC_", "1>>"], []),
         ]
 
         async def rag_search(query, top_k=5):
@@ -173,8 +173,11 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[1].data["result_count"], 1)
         self.assertEqual(events[1].data["chunks"][0]["preview"], "报告依据")
         self.assertEqual(events[1].data["chunks"][0]["page_index"], 2)
+        self.assertEqual(events[1].sources[0]["citation_id"], 1)
+        self.assertEqual(events[-1].content, "综合回答[[cite:1]]")
         final_messages = llm.calls[-1][0]
         self.assertIn("报告依据", final_messages[-3]["content"])
+        self.assertIn('"source_key": "<<SRC_1>>"', final_messages[-3]["content"])
         self.assertIn('"avg": 30.1', final_messages[-1]["content"])
 
     async def test_invalid_rag_result_is_reported_as_tool_failure(self):

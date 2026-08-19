@@ -46,7 +46,11 @@ class MemoryConversationRepository:
             return [ConversationSummary(**item.model_dump()) for item in items]
 
     async def save_exchange(
-        self, conversation_id: str, question: str, answer: str
+        self,
+        conversation_id: str,
+        question: str,
+        answer: str,
+        sources: list[dict],
     ) -> ConversationMessage:
         now = _now()
         user = ConversationMessage(
@@ -60,6 +64,7 @@ class MemoryConversationRepository:
             role="assistant",
             content=answer,
             created_at=now,
+            sources=sources,
         )
         async with self._lock:
             item = self._items.get(conversation_id)

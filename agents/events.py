@@ -12,6 +12,7 @@ class AgentEvent:
     ]
     content: str = ""
     data: Optional[dict[str, Any]] = None
+    sources: Optional[list[dict[str, Any]]] = None
     round_number: int = 0
     tool_name: str = ""
     tool_call_id: str = ""
