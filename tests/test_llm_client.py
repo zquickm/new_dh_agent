@@ -156,3 +156,32 @@ class LlmClientToolCallTest(unittest.IsolatedAsyncioTestCase):
                 ),
             ],
         )
+
+    async def test_tool_free_stream_does_not_accumulate_the_full_response(self):
+        from agents.llm_client import HelloAgentsLLM
+
+        class StreamingChunk:
+            def __init__(self, content):
+                self.content = content
+
+            def __add__(self, _other):
+                raise AssertionError("tool-free answer chunks must not be accumulated")
+
+        async def chunks(*args, **kwargs):
+            del args, kwargs
+            yield StreamingChunk("第一段")
+            yield StreamingChunk("第二段")
+
+        with patch("agents.llm_client.ChatOpenAI") as chat_openai:
+            chat_openai.return_value.astream = chunks
+            llm = HelloAgentsLLM()
+
+            result = [
+                item
+                async for item in llm.stream(
+                    [{"role": "user", "content": "直接回答"}],
+                    None,
+                )
+            ]
+
+        self.assertEqual(result, [("第一段", []), ("第二段", [])])

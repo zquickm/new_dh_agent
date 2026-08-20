@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from textwrap import dedent
 from typing import Any, Optional
 
+from agents.answer_merger import AnswerMerger
 from agents.citations import CitationRegistry, strip_citation_markers
 from agents.events import AgentEvent
 from agents.llm_client import HelloAgentsLLM
@@ -78,10 +79,16 @@ def _print_serious_tool_error(tool_name: str, exc: Exception) -> None:
 
 
 class AgentLoop:
-    def __init__(self, llm: HelloAgentsLLM, tools: ToolExecutor) -> None:
+    def __init__(
+        self,
+        llm: HelloAgentsLLM,
+        tools: ToolExecutor,
+        answer_merger: Optional[AnswerMerger] = None,
+    ) -> None:
         settings = get_settings()
         self.llm = llm
         self.tools = tools
+        self.answer_merger = answer_merger or AnswerMerger(llm)
         self.max_rounds = settings.react.max_rounds
         self.force_answer = settings.react.force_answer_on_last_round
 
@@ -121,28 +128,20 @@ class AgentLoop:
             )
             content_parts: list[str] = []
             tool_calls: list[dict[str, Any]] = []
-            citation_buffer = ""
-            stream_answer = has_completed_tool or available_tools is None
+            stream_answer = (
+                not citation_registry.has_sources
+                and (has_completed_tool or available_tools is None)
+            )
 
             async for content, calls in self.llm.stream(messages, available_tools):
                 if content:
                     content_parts.append(content)
                     if stream_answer:
-                        if citation_registry.has_sources:
-                            transformed, citation_buffer = (
-                                citation_registry.transform_stream_buffer(
-                                    citation_buffer + content,
-                                    final=False,
-                                )
-                            )
-                        else:
-                            transformed = content
-                        if transformed:
-                            yield AgentEvent(
-                                type="answer_delta",
-                                content=transformed,
-                                round_number=round_number,
-                            )
+                        yield AgentEvent(
+                            type="answer_delta",
+                            content=content,
+                            round_number=round_number,
+                        )
                 if calls:
                     if stream_answer and content_parts:
                         raise RuntimeError("模型同时返回了回答正文和工具调用")
@@ -153,16 +152,14 @@ class AgentLoop:
                 if not content.strip():
                     raise RuntimeError("模型未生成有效回答")
                 if citation_registry.has_sources:
-                    tail, citation_buffer = citation_registry.transform_stream_buffer(
-                        citation_buffer,
-                        final=True,
-                    )
-                    if citation_buffer:
-                        raise RuntimeError("模型未生成有效回答")
-                    if tail:
+                    async for chunk in self.answer_merger.stream_merge(
+                        question,
+                        content,
+                        citation_registry,
+                    ):
                         yield AgentEvent(
                             type="answer_delta",
-                            content=tail,
+                            content=chunk,
                             round_number=round_number,
                         )
                 elif not stream_answer:

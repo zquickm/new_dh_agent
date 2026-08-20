@@ -142,6 +142,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 ],
             ),
             (["综合回答<<SRC_", "1>>"], []),
+            (["综合回答<<SRC_", "1>>"], []),
         ]
 
         async def rag_search(query, top_k=5):
@@ -207,10 +208,14 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             "".join(event.content for event in events if event.type == "answer_delta"),
             "综合回答[[cite:1]]",
         )
-        final_messages = llm.calls[-1][0]
-        self.assertIn("报告依据", final_messages[-3]["content"])
-        self.assertIn('"source_key": "<<SRC_1>>"', final_messages[-3]["content"])
-        self.assertIn('"avg": 30.1', final_messages[-1]["content"])
+        react_messages = llm.calls[-2][0]
+        self.assertIn("报告依据", react_messages[-3]["content"])
+        self.assertIn('"source_key": "<<SRC_1>>"', react_messages[-3]["content"])
+        self.assertIn('"avg": 30.1', react_messages[-1]["content"])
+        merger_messages, merger_tools = llm.calls[-1]
+        self.assertIsNone(merger_tools)
+        self.assertIn("候选回答", merger_messages[-1]["content"])
+        self.assertIn("来源键：<<SRC_1>>", merger_messages[-1]["content"])
 
     async def test_streams_first_answer_chunk_before_final_model_chunk(self):
         class DelayedLlm:
@@ -254,6 +259,72 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         llm.release.set()
         remaining = [event async for event in stream]
         self.assertEqual([event.content for event in remaining], ["第二段"])
+
+    async def test_streams_citation_before_final_merger_finishes(self):
+        class DelayedCitationLlm:
+            model = "fake-model"
+
+            def __init__(self):
+                self.call_count = 0
+                self.calls = []
+                self.release = asyncio.Event()
+
+            async def stream(self, messages, tools=None, temperature=0):
+                del temperature
+                self.call_count += 1
+                self.calls.append((deepcopy(messages), tools))
+                if self.call_count == 1:
+                    yield "", [
+                        {
+                            "id": "call-rag",
+                            "name": "rag_search",
+                            "args": {"query": "测试引用"},
+                            "type": "tool_call",
+                        }
+                    ]
+                    return
+                if self.call_count == 2:
+                    yield "候选回答<<SRC_1>>", []
+                    return
+                yield "第一段<<SRC_", []
+                await self.release.wait()
+                yield "1>>第二段", []
+
+        async def rag_search(query):
+            return {
+                "query": query,
+                "chunks": [
+                    {
+                        "text": "引用依据",
+                        "source": "资料.pdf",
+                        "score": 0.9,
+                        "page_index": 0,
+                    }
+                ],
+            }
+
+        llm = DelayedCitationLlm()
+        tools = ToolExecutor()
+        tools.register("rag_search", "检索内部文档", rag_search)
+        agent = AgentLoop(llm, tools)
+        stream = agent.run_stream("测试流式引用", [])
+
+        self.assertEqual((await stream.__anext__()).type, "tool_started")
+        self.assertEqual((await stream.__anext__()).type, "retrieval")
+        self.assertEqual((await stream.__anext__()).type, "tool_finished")
+        first_answer = await asyncio.wait_for(stream.__anext__(), timeout=0.2)
+
+        self.assertEqual(first_answer.type, "answer_delta")
+        self.assertEqual(first_answer.content, "第一段")
+        self.assertFalse(llm.release.is_set())
+        self.assertIsNone(llm.calls[-1][1])
+
+        llm.release.set()
+        remaining = [event async for event in stream]
+        self.assertEqual(
+            [event.content for event in remaining],
+            ["[[cite:1]]第二段"],
+        )
 
     async def test_invalid_rag_result_is_reported_as_tool_failure(self):
         async def rag_search(query):
