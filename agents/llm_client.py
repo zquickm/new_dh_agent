@@ -62,15 +62,21 @@ class HelloAgentsLLM:
     ) -> AsyncIterator[tuple[str, list[dict[str, Any]]]]:
         try:
             client = self.client.bind_tools(tools) if tools else self.client
-            response = None
+            tool_response = None
             async for chunk in client.astream(messages, temperature=temperature):
-                if tools:
-                    response = chunk if response is None else response + chunk
+                has_tool_delta = bool(
+                    getattr(chunk, "tool_call_chunks", None)
+                    or getattr(chunk, "tool_calls", None)
+                )
+                if tools and has_tool_delta:
+                    tool_response = (
+                        chunk if tool_response is None else tool_response + chunk
+                    )
                 content = self._content(chunk.content)
                 if content:
                     yield content, []
-            if tools and response is not None:
-                tool_calls = list(response.tool_calls or [])
+            if tool_response is not None:
+                tool_calls = list(tool_response.tool_calls or [])
                 if tool_calls:
                     yield "", tool_calls
         except Exception as exc:

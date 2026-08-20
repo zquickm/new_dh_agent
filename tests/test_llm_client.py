@@ -185,3 +185,46 @@ class LlmClientToolCallTest(unittest.IsolatedAsyncioTestCase):
             ]
 
         self.assertEqual(result, [("第一段", []), ("第二段", [])])
+
+    async def test_tool_bound_answer_stream_does_not_accumulate_content(self):
+        from agents.llm_client import HelloAgentsLLM
+
+        class StreamingChunk:
+            tool_call_chunks = []
+            tool_calls = []
+
+            def __init__(self, content):
+                self.content = content
+
+            def __add__(self, _other):
+                raise AssertionError("answer content chunks must not be accumulated")
+
+        async def chunks(*args, **kwargs):
+            del args, kwargs
+            yield StreamingChunk("第一段")
+            yield StreamingChunk("第二段")
+
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "rag_search",
+                    "description": "检索内部知识库",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+        with patch("agents.llm_client.ChatOpenAI") as chat_openai:
+            bound_model = chat_openai.return_value.bind_tools.return_value
+            bound_model.astream = chunks
+            llm = HelloAgentsLLM()
+
+            result = [
+                item
+                async for item in llm.stream(
+                    [{"role": "user", "content": "直接回答"}],
+                    tools,
+                )
+            ]
+
+        self.assertEqual(result, [("第一段", []), ("第二段", [])])

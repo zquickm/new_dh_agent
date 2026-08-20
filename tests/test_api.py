@@ -78,6 +78,9 @@ class ApiTest(unittest.TestCase):
             body = "".join(response.iter_text())
 
         self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers["content-type"].startswith("text/event-stream"))
+        self.assertEqual(response.headers["cache-control"], "no-cache")
+        self.assertEqual(response.headers["x-accel-buffering"], "no")
         self.assertIn("event: conversation", body)
         self.assertIn("event: retrieval", body)
         self.assertIn("event: token", body)

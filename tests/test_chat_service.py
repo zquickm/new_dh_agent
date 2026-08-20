@@ -1,6 +1,11 @@
+import asyncio
+import json
 import unittest
 
+from agents.agent_loop import AgentLoop
 from agents.events import AgentEvent
+from agents.tools.executor import ToolExecutor
+from controller.streaming.sse_encoder import encode_chat_stream
 from repositories.memory_conversation_repository import conversation_repository
 from schemas.chat import AgentRequest
 from services.chat_service import ChatService
@@ -96,3 +101,87 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         detail = await conversation_repository.get(conversation.id)
         self.assertEqual([message.role for message in detail.messages], ["user", "assistant"])
         self.assertEqual(detail.messages[-1].sources[0]["preview"], "检索片段")
+
+    async def test_answer_agent_citation_reaches_sse_before_model_finishes(self):
+        class DelayedLlm:
+            model = "fake-model"
+
+            def __init__(self):
+                self.call_count = 0
+                self.release = asyncio.Event()
+
+            async def stream(self, _messages, tools=None, temperature=0):
+                del temperature
+                self.call_count += 1
+                if self.call_count == 1:
+                    yield "", [
+                        {
+                            "id": "call-rag",
+                            "name": "rag_search",
+                            "args": {"query": "测试引用"},
+                            "type": "tool_call",
+                        }
+                    ]
+                    return
+                self.assert_tools_bound(tools)
+                yield "第一段<<SRC_", []
+                await self.release.wait()
+                yield "1>>第二段", []
+
+            @staticmethod
+            def assert_tools_bound(tools):
+                if not tools:
+                    raise AssertionError("最终回答必须由 Answer Agent 直接输出")
+
+        async def rag_search(query):
+            return {
+                "query": query,
+                "chunks": [
+                    {
+                        "text": "引用依据",
+                        "source": "资料.pdf",
+                        "score": 0.9,
+                        "page_index": 0,
+                    }
+                ],
+            }
+
+        llm = DelayedLlm()
+        tools = ToolExecutor()
+        tools.register("rag_search", "检索内部文档", rag_search)
+        service = ChatService()
+        service._agent = AgentLoop(llm, tools)
+        stream = encode_chat_stream(
+            service.stream_chat(AgentRequest(question="测试流式引用"))
+        )
+
+        first_token = None
+        for _ in range(5):
+            block = await asyncio.wait_for(stream.__anext__(), timeout=0.2)
+            if block.startswith("event: token\n"):
+                first_token = block
+                break
+
+        self.assertIsNotNone(first_token)
+        self.assertFalse(llm.release.is_set())
+        first_payload = json.loads(first_token.split("data: ", 1)[1])
+        self.assertEqual(first_payload["data"]["content"], "第一段")
+
+        llm.release.set()
+        remaining = [block async for block in stream]
+        token_blocks = [
+            block for block in remaining if block.startswith("event: token\n")
+        ]
+        done_block = next(
+            block for block in remaining if block.startswith("event: done\n")
+        )
+        done_payload = json.loads(done_block.split("data: ", 1)[1])
+
+        self.assertEqual(len(token_blocks), 1)
+        self.assertIn("[[cite:1]]第二段", token_blocks[0])
+        self.assertEqual(
+            done_payload["data"]["answer"],
+            "第一段[[cite:1]]第二段",
+        )
+        self.assertEqual(done_payload["data"]["sources"][0]["citation_id"], 1)
+        await service.close()

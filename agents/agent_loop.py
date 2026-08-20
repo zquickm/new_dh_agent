@@ -6,7 +6,6 @@ from collections.abc import AsyncIterator
 from textwrap import dedent
 from typing import Any, Optional
 
-from agents.answer_merger import AnswerMerger
 from agents.citations import CitationRegistry, strip_citation_markers
 from agents.events import AgentEvent
 from agents.llm_client import HelloAgentsLLM
@@ -79,16 +78,10 @@ def _print_serious_tool_error(tool_name: str, exc: Exception) -> None:
 
 
 class AgentLoop:
-    def __init__(
-        self,
-        llm: HelloAgentsLLM,
-        tools: ToolExecutor,
-        answer_merger: Optional[AnswerMerger] = None,
-    ) -> None:
+    def __init__(self, llm: HelloAgentsLLM, tools: ToolExecutor) -> None:
         settings = get_settings()
         self.llm = llm
         self.tools = tools
-        self.answer_merger = answer_merger or AnswerMerger(llm)
         self.max_rounds = settings.react.max_rounds
         self.force_answer = settings.react.force_answer_on_last_round
 
@@ -128,38 +121,52 @@ class AgentLoop:
             )
             content_parts: list[str] = []
             tool_calls: list[dict[str, Any]] = []
-            stream_answer = (
-                not citation_registry.has_sources
-                and (has_completed_tool or available_tools is None)
-            )
+            citation_buffer = ""
+            has_answer_content = False
+            stream_answer = has_completed_tool or available_tools is None
 
             async for content, calls in self.llm.stream(messages, available_tools):
                 if content:
-                    content_parts.append(content)
+                    has_answer_content = has_answer_content or bool(content.strip())
                     if stream_answer:
-                        yield AgentEvent(
-                            type="answer_delta",
-                            content=content,
-                            round_number=round_number,
-                        )
+                        if citation_registry.has_sources:
+                            citation_buffer += content
+                            transformed, citation_buffer = (
+                                citation_registry.transform_stream_buffer(
+                                    citation_buffer,
+                                    final=False,
+                                )
+                            )
+                        else:
+                            transformed = content
+                        if transformed:
+                            yield AgentEvent(
+                                type="answer_delta",
+                                content=transformed,
+                                round_number=round_number,
+                            )
+                    else:
+                        content_parts.append(content)
                 if calls:
-                    if stream_answer and content_parts:
+                    if stream_answer and has_answer_content:
                         raise RuntimeError("模型同时返回了回答正文和工具调用")
                     tool_calls.extend(calls)
 
             content = "".join(content_parts)
             if not tool_calls:
-                if not content.strip():
+                if not has_answer_content:
                     raise RuntimeError("模型未生成有效回答")
                 if citation_registry.has_sources:
-                    async for chunk in self.answer_merger.stream_merge(
-                        question,
-                        content,
-                        citation_registry,
-                    ):
+                    tail, citation_buffer = citation_registry.transform_stream_buffer(
+                        citation_buffer,
+                        final=True,
+                    )
+                    if citation_buffer:
+                        raise RuntimeError("模型未生成有效回答")
+                    if tail:
                         yield AgentEvent(
                             type="answer_delta",
-                            content=chunk,
+                            content=tail,
                             round_number=round_number,
                         )
                 elif not stream_answer:

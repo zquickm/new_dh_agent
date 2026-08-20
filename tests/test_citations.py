@@ -140,6 +140,58 @@ class CitationRegistryTest(unittest.TestCase):
         self.assertEqual(tail, "")
         self.assertEqual(pending, "")
 
+    def test_stream_transformer_handles_every_source_key_split_boundary(self):
+        registry = CitationRegistry()
+        registry.register_rag_observation(
+            json.dumps(
+                {
+                    "query": "测试",
+                    "chunks": [
+                        {"text": "证据一", "source": "一.pdf", "score": 0.8},
+                        {"text": "证据二", "source": "二.pdf", "score": 0.7},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            tool_call_id="call-rag",
+            fallback_query="",
+        )
+        raw = "开头<<SRC_1>>中间<<SRC_2>>结尾"
+        expected = "开头[[cite:1]]中间[[cite:2]]结尾"
+
+        for split_index in range(len(raw) + 1):
+            with self.subTest(split_index=split_index):
+                pending = ""
+                output = []
+                for chunk in (raw[:split_index], raw[split_index:]):
+                    content, pending = registry.transform_stream_buffer(
+                        pending + chunk,
+                        final=False,
+                    )
+                    output.append(content)
+                content, pending = registry.transform_stream_buffer(
+                    pending,
+                    final=True,
+                )
+                output.append(content)
+
+                self.assertEqual("".join(output), expected)
+                self.assertEqual(pending, "")
+
+        pending = ""
+        output = []
+        for character in raw:
+            content, pending = registry.transform_stream_buffer(
+                pending + character,
+                final=False,
+            )
+            output.append(content)
+        content, pending = registry.transform_stream_buffer(pending, final=True)
+        output.append(content)
+
+        self.assertEqual("".join(output), expected)
+        self.assertEqual(pending, "")
+
     def test_rejects_direct_citations_and_unknown_source_keys(self):
         registry = CitationRegistry()
         registry.register_rag_observation(

@@ -142,7 +142,6 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 ],
             ),
             (["综合回答<<SRC_", "1>>"], []),
-            (["综合回答<<SRC_", "1>>"], []),
         ]
 
         async def rag_search(query, top_k=5):
@@ -208,14 +207,10 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             "".join(event.content for event in events if event.type == "answer_delta"),
             "综合回答[[cite:1]]",
         )
-        react_messages = llm.calls[-2][0]
-        self.assertIn("报告依据", react_messages[-3]["content"])
-        self.assertIn('"source_key": "<<SRC_1>>"', react_messages[-3]["content"])
-        self.assertIn('"avg": 30.1', react_messages[-1]["content"])
-        merger_messages, merger_tools = llm.calls[-1]
-        self.assertIsNone(merger_tools)
-        self.assertIn("候选回答", merger_messages[-1]["content"])
-        self.assertIn("来源键：<<SRC_1>>", merger_messages[-1]["content"])
+        final_messages = llm.calls[-1][0]
+        self.assertIn("报告依据", final_messages[-3]["content"])
+        self.assertIn('"source_key": "<<SRC_1>>"', final_messages[-3]["content"])
+        self.assertIn('"avg": 30.1', final_messages[-1]["content"])
 
     async def test_streams_first_answer_chunk_before_final_model_chunk(self):
         class DelayedLlm:
@@ -260,7 +255,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         remaining = [event async for event in stream]
         self.assertEqual([event.content for event in remaining], ["第二段"])
 
-    async def test_streams_citation_before_final_merger_finishes(self):
+    async def test_answer_agent_streams_citation_before_model_finishes(self):
         class DelayedCitationLlm:
             model = "fake-model"
 
@@ -282,9 +277,6 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                             "type": "tool_call",
                         }
                     ]
-                    return
-                if self.call_count == 2:
-                    yield "候选回答<<SRC_1>>", []
                     return
                 yield "第一段<<SRC_", []
                 await self.release.wait()
@@ -317,7 +309,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_answer.type, "answer_delta")
         self.assertEqual(first_answer.content, "第一段")
         self.assertFalse(llm.release.is_set())
-        self.assertIsNone(llm.calls[-1][1])
+        self.assertIsNotNone(llm.calls[-1][1])
 
         llm.release.set()
         remaining = [event async for event in stream]
