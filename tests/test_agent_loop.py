@@ -3,7 +3,7 @@ import unittest
 from copy import deepcopy
 
 from agents.agent_loop import AgentLoop
-from agents.tools.executor import ToolExecutor
+from agents.tools.executor import ToolExecutor, ToolOutput
 from agents.tools.registry import build_tool_executor
 from schemas.chat import ChatMessage
 
@@ -445,3 +445,54 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1].content, "最终回答")
         self.assertIsNotNone(llm.calls[0][1])
         self.assertIsNone(llm.calls[1][1])
+
+    async def test_client_events_are_emitted_before_tool_finishes(self):
+        llm = FakeLlm(
+            [
+                (
+                    [],
+                    [
+                        {
+                            "id": "call-observation",
+                            "name": "observation_service",
+                            "args": {
+                                "operation": "search_stations",
+                                "query_type": "bbox",
+                                "bbox": [121, 29, 123, 31],
+                            },
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                (["查询完成"], []),
+            ]
+        )
+
+        async def observation_service(**arguments):
+            return ToolOutput(
+                content={"arguments": arguments, "total": 1},
+                client_events=(
+                    {"action_type": "layer.upsert", "payload": {"layer_id": "stations"}},
+                    {"action_type": "view.fit_bounds", "payload": {"bounds": [1, 2, 3, 4]}},
+                ),
+            )
+
+        tools = ToolExecutor()
+        tools.register("observation_service", "观测查询", observation_service)
+        agent = AgentLoop(llm, tools)
+
+        events = [event async for event in agent.run_stream("显示站点", [])]
+
+        self.assertEqual(
+            [event.type for event in events],
+            [
+                "tool_started",
+                "map_action",
+                "map_action",
+                "tool_finished",
+                "answer_delta",
+            ],
+        )
+        self.assertEqual(events[1].data["seq"], 1)
+        self.assertEqual(events[2].data["seq"], 2)
+        self.assertIn('"total": 1', llm.calls[1][0][-1]["content"])

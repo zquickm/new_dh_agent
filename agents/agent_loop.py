@@ -23,6 +23,7 @@ SYSTEM_PROMPT = dedent(
     - 需要实时信息、业务数据或内部文档时，调用合适的工具。
     - 可以根据任务需要连续调用多个工具。
     - 用户明确同时要求报告/文档资料和数据库实测数据时，必须分别调用 rag_search 和 database_query 后再回答。
+    - 需要观测站位置、状态、详情或观测要素数据时，调用 observation_service。
     - 工具返回结果后，继续判断是否还需要调用工具。
     - 信息足够时，直接回答用户，不要描述内部执行过程。
     - 不得编造工具返回的数据。
@@ -34,7 +35,7 @@ SYSTEM_PROMPT = dedent(
     """
 ).strip()
 
-_BACKEND_TOOL_NAMES = {"database_query", "rag_search"}
+_BACKEND_TOOL_NAMES = {"database_query", "observation_service", "rag_search"}
 _INFRASTRUCTURE_MODULES = {
     "aiohttp",
     "aiomysql",
@@ -212,7 +213,9 @@ class AgentLoop:
                     tool_call_id=tool_call["id"],
                 )
                 try:
-                    observation = await self.tools.execute(name, tool_call["args"])
+                    observation, client_events = await self.tools.execute_with_events(
+                        name, tool_call["args"]
+                    )
                     tool_arguments = tool_call["args"]
                     if name == "rag_search":
                         rag_result = citation_registry.register_rag_observation(
@@ -232,6 +235,7 @@ class AgentLoop:
                     _print_serious_tool_error(name, exc)
                     observation = "工具执行失败"
                     retrieval_data = None
+                    client_events = ()
                     success = False
 
                 if retrieval_data is not None:
@@ -239,6 +243,16 @@ class AgentLoop:
                         type="retrieval",
                         data=retrieval_data,
                         sources=citation_registry.sources(),
+                        round_number=round_number,
+                        tool_name=name,
+                        tool_call_id=tool_call["id"],
+                    )
+                for action_sequence, client_event in enumerate(
+                    client_events, start=1
+                ):
+                    yield AgentEvent(
+                        type="map_action",
+                        data={**client_event, "seq": action_sequence},
                         round_number=round_number,
                         tool_name=name,
                         tool_call_id=tool_call["id"],

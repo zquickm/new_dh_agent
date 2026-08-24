@@ -23,6 +23,12 @@ stream:
 
 tools:
   execution_timeout: 300
+  spatial:
+    base_url: "http://71.10.60.143:6022"
+    api_key: "${SPATIAL_API_KEY:}"
+    timeout: 30
+    connect_timeout: 5
+    verify_ssl: true
   rag:
     base_url: "http://71.10.60.34:18000"
     recall_path: "/rag-platform-default/zsgl/knowledgeRecall"

@@ -13,6 +13,12 @@ from agents.tools.database_query import (
     DatabaseQueryTool,
 )
 from agents.tools.executor import ToolExecutor
+from agents.tools.observation_service import (
+    TOOL_DESCRIPTION as OBSERVATION_TOOL_DESCRIPTION,
+    TOOL_NAME as OBSERVATION_TOOL_NAME,
+    TOOL_PARAMETERS as OBSERVATION_TOOL_PARAMETERS,
+    ObservationServiceTool,
+)
 from agents.tools.rag_search import (
     TOOL_DESCRIPTION as RAG_TOOL_DESCRIPTION,
     TOOL_NAME as RAG_TOOL_NAME,
@@ -32,6 +38,7 @@ def build_tool_executor() -> ToolExecutor:
     )
     rag_tool = RagSearchTool()
     database_tool = DatabaseQueryTool()
+    observation_tool = ObservationServiceTool()
     executor.register(
         RAG_TOOL_NAME,
         RAG_TOOL_DESCRIPTION,
@@ -44,6 +51,13 @@ def build_tool_executor() -> ToolExecutor:
         database_tool.execute,
         DATABASE_TOOL_PARAMETERS,
     )
+    executor.register(
+        OBSERVATION_TOOL_NAME,
+        OBSERVATION_TOOL_DESCRIPTION,
+        observation_tool.execute,
+        OBSERVATION_TOOL_PARAMETERS,
+    )
     executor.register_closer(rag_tool.close)
     executor.register_closer(database_tool.close)
+    executor.register_closer(observation_tool.close)
     return executor

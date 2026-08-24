@@ -13,6 +13,14 @@ ToolMatcher = Callable[[str], bool]
 
 
 @dataclass(frozen=True)
+class ToolOutput:
+    """Tool result for the model plus optional events for the client UI."""
+
+    content: Any
+    client_events: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
 class RegisteredTool:
     description: str
     function: ToolFunction
@@ -78,6 +86,14 @@ class ToolExecutor:
         return None
 
     async def execute(self, name: str, argument: Any) -> str:
+        content, _ = await self.execute_with_events(name, argument)
+        return content
+
+    async def execute_with_events(
+        self,
+        name: str,
+        argument: Any,
+    ) -> tuple[str, tuple[dict[str, Any], ...]]:
         tool = self.get(name)
         if tool is None:
             raise LookupError(f"Unknown tool: {name}")
@@ -102,9 +118,13 @@ class ToolExecutor:
             return result
 
         result = await asyncio.wait_for(invoke(), timeout=self.execution_timeout)
+        client_events: tuple[dict[str, Any], ...] = ()
+        if isinstance(result, ToolOutput):
+            client_events = result.client_events
+            result = result.content
         if isinstance(result, str):
-            return result
-        return json.dumps(result, ensure_ascii=False, default=str)
+            return result, client_events
+        return json.dumps(result, ensure_ascii=False, default=str), client_events
 
     async def close(self) -> None:
         for closer in reversed(self._closers):

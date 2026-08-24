@@ -185,3 +185,43 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(done_payload["data"]["sources"][0]["citation_id"], 1)
         await service.close()
+
+    async def test_map_action_has_run_batch_and_sequence_metadata(self):
+        class MapAgent:
+            model_name = "fake-model"
+
+            async def run_stream(self, question, history):
+                del question, history
+                yield AgentEvent(
+                    type="map_action",
+                    data={
+                        "seq": 1,
+                        "action_type": "layer.upsert",
+                        "payload": {"layer_id": "observation-stations"},
+                    },
+                    tool_name="observation_service",
+                    tool_call_id="call-map",
+                )
+                yield AgentEvent(type="answer_delta", content="已显示站点")
+
+        service = ChatService()
+        service._agent = MapAgent()
+
+        events = [
+            event
+            async for event in service.stream_chat(
+                AgentRequest(question="显示站点")
+            )
+        ]
+
+        conversation = events[0]["data"]
+        map_action = next(
+            event["data"] for event in events if event["event"] == "map_action"
+        )
+        done = events[-1]["data"]
+        self.assertEqual(map_action["run_id"], conversation["run_id"])
+        self.assertEqual(map_action["batch_id"], "call-map")
+        self.assertEqual(map_action["action_id"], "call-map-1")
+        self.assertEqual(map_action["seq"], 1)
+        self.assertEqual(map_action["action_type"], "layer.upsert")
+        self.assertEqual(done["run_id"], conversation["run_id"])

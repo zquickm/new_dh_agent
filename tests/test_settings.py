@@ -60,6 +60,7 @@ class SettingsTest(unittest.TestCase):
                 "RAG_API_TOKEN": "rag-secret",
                 "BUSINESS_DB_PASSWORD": "database-secret",
                 "DEEPSEEK_API_KEY": "sql-llm-secret",
+                "SPATIAL_API_KEY": "spatial-secret",
             },
             clear=False,
         ):
@@ -78,6 +79,14 @@ class SettingsTest(unittest.TestCase):
                 settings.tools.database.sql_llm.api_key.get_secret_value(),
                 "sql-llm-secret",
             )
+            self.assertEqual(
+                settings.tools.spatial.api_key.get_secret_value(),
+                "spatial-secret",
+            )
+            self.assertEqual(
+                settings.tools.spatial.base_url,
+                "http://71.10.60.143:6022",
+            )
             self.assertEqual(settings.tools.rag.timeout, 30)
             self.assertTrue(settings.tools.database.host)
 
@@ -88,7 +97,8 @@ class SettingsTest(unittest.TestCase):
                 "APP_PROFILE=dev\n"
                 "NEW_DH_LLM__API_KEY=test-key\n"
                 "RAG_API_TOKEN=rag-token\n"
-                "BUSINESS_DB_PASSWORD=db-password\n",
+                "BUSINESS_DB_PASSWORD=db-password\n"
+                "SPATIAL_API_KEY=spatial-token\n",
                 encoding="utf-8",
             )
             source = ApplicationDotEnvSettingsSource(
@@ -103,3 +113,4 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(values["llm"]["api_key"], "test-key")
             self.assertNotIn("rag_api_token", values)
             self.assertNotIn("business_db_password", values)
+            self.assertNotIn("spatial_api_key", values)

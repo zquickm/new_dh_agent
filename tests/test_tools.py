@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from agents.tools.current_server_time import TOOL_NAME, matches_current_server_time
 from agents.tools.database_query import DatabaseQueryTool
-from agents.tools.executor import ToolExecutor
+from agents.tools.executor import ToolExecutor, ToolOutput
 from agents.tools.rag_search import RagSearchTool
 from agents.tools.registry import build_tool_executor
 from tool_backends.rag_backend import RagSearchBackend
@@ -63,6 +63,24 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(json.loads(result), {"query": "东海", "top_k": 3})
+
+    async def test_tool_output_separates_model_content_and_client_events(self):
+        executor = ToolExecutor()
+
+        async def spatial_result():
+            return ToolOutput(
+                content={"total": 1},
+                client_events=(
+                    {"action_type": "view.fit_bounds", "payload": {}},
+                ),
+            )
+
+        executor.register("Spatial", "空间查询", spatial_result)
+
+        content, events = await executor.execute_with_events("Spatial", {})
+
+        self.assertEqual(json.loads(content), {"total": 1})
+        self.assertEqual(events[0]["action_type"], "view.fit_bounds")
 
     async def test_unknown_tool_is_rejected(self):
         executor = ToolExecutor()
@@ -175,11 +193,16 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks[0].line, 3)
         self.assertEqual(chunks[0].page, 3)
 
-    async def test_registry_contains_all_three_tools_without_eager_backends(self):
+    async def test_registry_contains_all_tools_without_eager_backends(self):
         executor = build_tool_executor()
 
         self.assertEqual(
             set(executor.tools),
-            {"CurrentServerTime", "rag_search", "database_query"},
+            {
+                "CurrentServerTime",
+                "rag_search",
+                "database_query",
+                "observation_service",
+            },
         )
         await executor.close()

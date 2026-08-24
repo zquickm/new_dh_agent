@@ -30,6 +30,7 @@ class ApplicationDotEnvSettingsSource(DotEnvSettingsSource):
         "deepseek_",
         "database_",
         "business_db_",
+        "spatial_",
         "tool_",
     )
 
@@ -193,10 +194,19 @@ class DatabaseToolSettings(BaseModel):
     sql_llm: SqlLlmSettings = Field(default_factory=SqlLlmSettings)
 
 
+class SpatialToolSettings(BaseModel):
+    base_url: str = ""
+    api_key: SecretStr = SecretStr("")
+    timeout: float = Field(default=30, gt=0)
+    connect_timeout: float = Field(default=5, gt=0)
+    verify_ssl: bool = True
+
+
 class ToolSettings(BaseModel):
     execution_timeout: float = Field(default=300, gt=0)
     rag: RagToolSettings = Field(default_factory=RagToolSettings)
     database: DatabaseToolSettings = Field(default_factory=DatabaseToolSettings)
+    spatial: SpatialToolSettings = Field(default_factory=SpatialToolSettings)
 
 
 class Settings(BaseSettings):

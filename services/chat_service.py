@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from typing import Optional
+from uuid import uuid4
 
 from agents.agent_loop import AgentLoop, build_agent_loop
 from config.settings import get_settings
@@ -32,6 +33,7 @@ class ChatService:
             self._agent = None
 
     async def stream_chat(self, request: AgentRequest) -> AsyncIterator[dict]:
+        run_id = str(uuid4())
         conversation_id = request.conversation_id
         if not conversation_id:
             conversation_id = (await conversation_repository.create("新会话")).id
@@ -41,7 +43,10 @@ class ChatService:
                 "data": {"message": "会话不存在", "error_code": "CONVERSATION_NOT_FOUND", "retryable": False},
             }
             return
-        yield {"event": "conversation", "data": {"conversation_id": conversation_id}}
+        yield {
+            "event": "conversation",
+            "data": {"conversation_id": conversation_id, "run_id": run_id},
+        }
         answer_parts: list[str] = []
         registered_sources: list[dict] = []
         retrieval_counts: dict[str, int] = {}
@@ -76,6 +81,22 @@ class ChatService:
                     ):
                         retrieval_counts[event.tool_call_id] = result_count
                     yield {"event": "retrieval", "data": data}
+                elif event.type == "map_action":
+                    data = event.data or {}
+                    action_sequence = int(data.get("seq") or 1)
+                    yield {
+                        "event": "map_action",
+                        "data": {
+                            "version": "1.0",
+                            "conversation_id": conversation_id,
+                            "run_id": run_id,
+                            "batch_id": event.tool_call_id,
+                            "action_id": f"{event.tool_call_id}-{action_sequence}",
+                            "seq": action_sequence,
+                            "action_type": data.get("action_type"),
+                            "payload": data.get("payload") or {},
+                        },
+                    }
                 elif event.type == "tool_finished":
                     if get_settings().stream.include_process:
                         summary = (
@@ -119,6 +140,7 @@ class ChatService:
                 "event": "done",
                 "data": {
                     "conversation_id": conversation_id,
+                    "run_id": run_id,
                     "answer": answer,
                     "model": self.agent.model_name,
                     "sources": cited_sources,

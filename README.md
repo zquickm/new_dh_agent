@@ -33,12 +33,13 @@ NEW_DH_LLM__API_KEY=your-key
 
 流式接口为 `POST /agent/chat/stream`。会话只存放在当前进程内存中，服务重启后清空。
 
-## RAG 与数据库工具
+## RAG、数据库与观测工具
 
-Agent 已注册两个异步工具：
+Agent 已注册三个异步业务工具：
 
 - `rag_search`：检索内部知识库并返回文档片段和来源。
 - `database_query`：将自然语言问题转换成只读 SQL，并查询授权业务表。
+- `observation_service`：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据。
 
 RAG、重排、数据库和 SQL 生成模型的地址、超时、重试、知识库 ID、数据库账号等
 普通参数统一配置在 `config/application.yaml`，不同环境的差异写入对应的
@@ -58,7 +59,45 @@ NEW_DH_LLM__API_KEY=
 RAG_API_TOKEN=
 BUSINESS_DB_PASSWORD=
 DEEPSEEK_API_KEY=
+SPATIAL_API_KEY=
 ```
+
+观测工具通过 `tools.spatial.base_url` 调用空间计算服务，并在请求头中携带
+`SPATIAL_API_KEY`。密钥只配置在 `.env` 或部署环境中，不要写入 YAML。
+
+### 观测站地图联动事件
+
+`observation_service` 执行 `search_stations` 成功且结果包含有效坐标时，会在工具
+完成事件之前发送一组 `map_action`。当前动作协议版本为 `1.0`，首版支持：
+
+- `layer.upsert`：使用 GeoJSON 新增或替换 `observation-stations` 图层。
+- `view.fit_bounds`：将地图视野缩放到本次站点结果范围。
+
+```text
+event: map_action
+data: {
+  "code": 200,
+  "message": "success",
+  "data": {
+    "version": "1.0",
+    "conversation_id": "conversation-1",
+    "run_id": "run-1",
+    "batch_id": "call-observation-1",
+    "action_id": "call-observation-1-1",
+    "seq": 1,
+    "action_type": "layer.upsert",
+    "payload": {
+      "layer_id": "observation-stations",
+      "layer_type": "geojson",
+      "data": {"type": "FeatureCollection", "features": []}
+    }
+  }
+}
+```
+
+前端应在同一 `batch_id` 内按 `seq` 串行执行，并用 `action_id` 去重。地图动作
+直接复用 `/agent/chat/stream`，当前实现不会调用空间服务中语义未明确的
+`POST /api/map_action`。
 
 数据库 SQL 生成默认复用 `llm` 配置；仅当需要独立鉴权模型时填写
 `DEEPSEEK_API_KEY`，并在 `tools.database.sql_llm` 中配置独立模型地址和名称。
