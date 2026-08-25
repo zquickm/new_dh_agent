@@ -1,0 +1,106 @@
+地图操作 SSE 事件契约
+版本：1.0
+日期：2026-08-25
+
+一、适用范围
+
+本契约用于智能体后端通过 POST /agent/chat/stream 的 SSE 响应向地图消费方发送可视化动作。
+地图动作只改变前端地图，不代表业务数据查询结果，也不修改业务数据。
+
+当前实现不调用虚拟接口 POST /api/map_action。若后续需要转发到该 HTTP 接口，必须由后端适配层完成字段转换，不能把 API Key 下发给前端。
+
+二、SSE 帧格式
+
+事件名固定为：map_action
+
+实际传输时 data 必须是单行 JSON，示意如下：
+
+event: map_action
+data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":"conversation-1","run_id":"run-1","batch_id":"call-map-1","action_id":"call-map-1-1","seq":1,"action_type":"FLY_TO","payload":{"center":[121.4737,31.2304],"zoom":12}}}
+
+每个 SSE 事件以两个换行符结束。
+
+三、data.data 字段
+
+version：协议版本，当前固定为 "1.0"。
+conversation_id：会话 ID。
+run_id：本次对话运行 ID；同一次流式回答内保持不变。
+batch_id：动作批次 ID，当前使用产生动作的 tool_call_id。
+action_id：动作唯一 ID，格式为 "{batch_id}-{seq}"。
+seq：动作在同一批次内的顺序，从 1 开始递增。
+action_type：地图动作类型，必须使用本契约规定的大写枚举。
+payload：动作参数对象，结构由 action_type 决定。
+
+四、动作类型及必填参数
+
+LOCATE：points。
+MARKER_ADD：markers。
+MARKER_REMOVE：marker_ids。
+POLYGON_DRAW：coordinates。
+CIRCLE_DRAW：center、radius。
+POPUP_SHOW：coordinates、title、content_html。
+CLEAR：无必填参数；layer_ids 不传时表示清除全部由 Map Action 创建的图层。
+TABLE_SHOW：title、columns、data。
+FLY_TO：center。
+TIMELINE_PLAY：scene。
+HEATMAP_SHOW：data_type。
+TRACK_PLAY：track_type、track_id。
+COMPARE_STATIONS：station_ids、data_types。
+
+所有地图坐标统一使用 CGCS2000（EPSG:4490），点坐标格式统一为 [经度, 纬度]。
+各 payload 的可选字段、枚举和具体数据结构以《地图操作工具定义》为准。
+
+五、观测站查询的标准动作批次
+
+观测站 search_stations 成功后，后端按以下顺序发送：
+
+1. CLEAR
+   payload：{"layer_ids":["observation-stations"]}
+
+2. 查询结果包含有效站点时发送 MARKER_ADD
+   payload：
+   {
+     "layer_id":"observation-stations",
+     "markers":[
+       {
+         "id":"站号",
+         "name":"站点名称",
+         "coordinates":[经度,纬度],
+         "type":"站点类型"
+       }
+     ],
+     "fit_bounds":true
+   }
+
+查询结果为空时只发送 CLEAR，确保地图不会保留上一次查询的站点。
+
+六、消费规则
+
+1. 消费方按 SSE 到达顺序处理事件；同一 batch_id 内必须按 seq 顺序执行。
+2. 消费方必须使用 action_id 去重。收到已经成功执行过的 action_id 时不得重复执行。
+3. 每个动作到达后即可执行，不需要等待整批动作结束。
+4. 收到未知 action_type 时不得猜测执行，应记录错误并忽略该动作。
+5. payload 校验失败时不得执行，应记录 action_id、action_type 和校验错误。
+6. event: done 表示本次 run_id 的流式回答正常结束；event: error 表示本次流失败。
+7. 当前协议不提供断线后的动作重放保证。断线重连后的地图状态如需恢复，应重新发起业务查询。
+
+七、字段命名转换
+
+SSE 协议固定使用：
+{"action_type":"FLY_TO","payload":{...}}
+
+伙伴最新 api.txt 中 POST /api/map_action 使用驼峰字段 actionType。若后端需要调用该接口，转换为：
+{"actionType":"FLY_TO","payload":{...}}
+
+除适配层外，前端和智能体工具都不得混用 action_type 与 actionType。
+
+八、安全约定
+
+1. X-API-Key 仅保存在服务端环境变量中，不得写入 SSE、日志或前端代码。
+2. POPUP_SHOW.content_html 属于不可信内容，地图消费方必须进行 HTML 白名单过滤，禁止 script、事件处理属性和危险 URL。
+3. 地图消费方不得把 payload 中的文本当作命令执行。
+
+九、兼容性
+
+新增可选字段属于向后兼容变更。
+删除字段、修改字段含义、修改动作名称或修改必填字段时必须升级 version，并由双方确认。

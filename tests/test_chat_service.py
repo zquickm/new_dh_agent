@@ -196,8 +196,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                     type="map_action",
                     data={
                         "seq": 1,
-                        "action_type": "layer.upsert",
-                        "payload": {"layer_id": "observation-stations"},
+                        "action_type": "MARKER_ADD",
+                        "payload": {"layer_id": "observation-stations", "markers": []},
                     },
                     tool_name="observation_service",
                     tool_call_id="call-map",
@@ -223,5 +223,5 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(map_action["batch_id"], "call-map")
         self.assertEqual(map_action["action_id"], "call-map-1")
         self.assertEqual(map_action["seq"], 1)
-        self.assertEqual(map_action["action_type"], "layer.upsert")
+        self.assertEqual(map_action["action_type"], "MARKER_ADD")
         self.assertEqual(done["run_id"], conversation["run_id"])

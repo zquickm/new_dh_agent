@@ -238,54 +238,51 @@ class ObservationServiceTool:
         raw_stations = data.get("stations")
         if not isinstance(raw_stations, list):
             return []
-        features = []
-        coordinates = []
+        markers = []
         for station in raw_stations:
             if not isinstance(station, dict):
                 continue
+            tzno = str(station.get("tzno") or "").strip()
+            name = str(station.get("name") or "").strip()
             lon = station.get("lon")
             lat = station.get("lat")
-            if not isinstance(lon, (int, float)) or not isinstance(
-                lat, (int, float)
+            if (
+                not tzno
+                or not name
+                or isinstance(lon, bool)
+                or isinstance(lat, bool)
+                or not isinstance(lon, (int, float))
+                or not isinstance(lat, (int, float))
             ):
                 continue
-            coordinates.append((float(lon), float(lat)))
-            features.append(
+            marker = {
+                "id": tzno,
+                "name": name,
+                "coordinates": [float(lon), float(lat)],
+            }
+            station_type = str(station.get("type") or "").strip()
+            if station_type:
+                marker["type"] = station_type
+            markers.append(marker)
+
+        actions = [
+            {
+                "action_type": "CLEAR",
+                "payload": {"layer_ids": ["observation-stations"]},
+            },
+        ]
+        if markers:
+            actions.append(
                 {
-                    "type": "Feature",
-                    "id": station.get("tzno"),
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": [lon, lat],
-                    },
-                    "properties": {
-                        "tzno": station.get("tzno"),
-                        "name": station.get("name"),
-                        "station_type": station.get("type"),
+                    "action_type": "MARKER_ADD",
+                    "payload": {
+                        "layer_id": "observation-stations",
+                        "markers": markers,
+                        "fit_bounds": True,
                     },
                 }
             )
-        if not features:
-            return []
-        lons = [item[0] for item in coordinates]
-        lats = [item[1] for item in coordinates]
-        return [
-            {
-                "action_type": "layer.upsert",
-                "payload": {
-                    "layer_id": "observation-stations",
-                    "layer_type": "geojson",
-                    "data": {"type": "FeatureCollection", "features": features},
-                },
-            },
-            {
-                "action_type": "view.fit_bounds",
-                "payload": {
-                    "bounds": [min(lons), min(lats), max(lons), max(lats)],
-                    "padding": 40,
-                },
-            },
-        ]
+        return actions
 
     @staticmethod
     def _required_text(value: Any, name: str) -> str:

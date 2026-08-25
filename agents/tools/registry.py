@@ -13,6 +13,12 @@ from agents.tools.database_query import (
     DatabaseQueryTool,
 )
 from agents.tools.executor import ToolExecutor
+from agents.tools.map_action import (
+    TOOL_DESCRIPTION as MAP_ACTION_TOOL_DESCRIPTION,
+    TOOL_NAME as MAP_ACTION_TOOL_NAME,
+    TOOL_PARAMETERS as MAP_ACTION_TOOL_PARAMETERS,
+    execute_map_action,
+)
 from agents.tools.observation_service import (
     TOOL_DESCRIPTION as OBSERVATION_TOOL_DESCRIPTION,
     TOOL_NAME as OBSERVATION_TOOL_NAME,
@@ -56,6 +62,12 @@ def build_tool_executor() -> ToolExecutor:
         OBSERVATION_TOOL_DESCRIPTION,
         observation_tool.execute,
         OBSERVATION_TOOL_PARAMETERS,
+    )
+    executor.register(
+        MAP_ACTION_TOOL_NAME,
+        MAP_ACTION_TOOL_DESCRIPTION,
+        execute_map_action,
+        MAP_ACTION_TOOL_PARAMETERS,
     )
     executor.register_closer(rag_tool.close)
     executor.register_closer(database_tool.close)

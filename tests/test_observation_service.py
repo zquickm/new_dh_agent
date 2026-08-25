@@ -75,14 +75,15 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output.content["total"], 2)
         self.assertEqual(
             [item["action_type"] for item in output.client_events],
-            ["layer.upsert", "view.fit_bounds"],
+            ["CLEAR", "MARKER_ADD"],
         )
-        features = output.client_events[0]["payload"]["data"]["features"]
-        self.assertEqual([item["id"] for item in features], ["A001", "A002"])
+        markers = output.client_events[1]["payload"]["markers"]
+        self.assertEqual([item["id"] for item in markers], ["A001", "A002"])
         self.assertEqual(
-            output.client_events[1]["payload"]["bounds"],
-            [122.1, 30.2, 122.4, 30.5],
+            output.client_events[0]["payload"]["layer_ids"],
+            ["observation-stations"],
         )
+        self.assertTrue(output.client_events[1]["payload"]["fit_bounds"])
         self.assertEqual(
             client.calls[0][1],
             {
@@ -91,6 +92,19 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
                 "radius": 10000.0,
                 "station_types": ["shore_station"],
             },
+        )
+
+    def test_empty_station_result_clears_previous_station_layer(self):
+        actions = ObservationServiceTool._station_map_actions({"stations": []})
+
+        self.assertEqual(
+            actions,
+            [
+                {
+                    "action_type": "CLEAR",
+                    "payload": {"layer_ids": ["observation-stations"]},
+                }
+            ],
         )
 
     async def test_range_query_validates_and_normalizes_parameters(self):

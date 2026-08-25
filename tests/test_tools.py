@@ -71,7 +71,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
             return ToolOutput(
                 content={"total": 1},
                 client_events=(
-                    {"action_type": "view.fit_bounds", "payload": {}},
+                    {"action_type": "LOCATE", "payload": {"points": [[1, 2]]}},
                 ),
             )
 
@@ -80,7 +80,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         content, events = await executor.execute_with_events("Spatial", {})
 
         self.assertEqual(json.loads(content), {"total": 1})
-        self.assertEqual(events[0]["action_type"], "view.fit_bounds")
+        self.assertEqual(events[0]["action_type"], "LOCATE")
 
     async def test_unknown_tool_is_rejected(self):
         executor = ToolExecutor()
@@ -203,6 +203,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                 "rag_search",
                 "database_query",
                 "observation_service",
+                "map_action",
             },
         )
         await executor.close()

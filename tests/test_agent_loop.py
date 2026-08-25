@@ -472,8 +472,8 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             return ToolOutput(
                 content={"arguments": arguments, "total": 1},
                 client_events=(
-                    {"action_type": "layer.upsert", "payload": {"layer_id": "stations"}},
-                    {"action_type": "view.fit_bounds", "payload": {"bounds": [1, 2, 3, 4]}},
+                    {"action_type": "CLEAR", "payload": {"layer_ids": ["stations"]}},
+                    {"action_type": "MARKER_ADD", "payload": {"markers": []}},
                 ),
             )
 
