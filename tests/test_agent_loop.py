@@ -212,7 +212,91 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"source_key": "<<SRC_1>>"', final_messages[-3]["content"])
         self.assertIn('"avg": 30.1', final_messages[-1]["content"])
 
-    async def test_streams_first_answer_chunk_before_final_model_chunk(self):
+    async def test_buffers_text_before_a_later_round_tool_call(self):
+        llm = FakeLlm(
+            [
+                (
+                    [],
+                    [
+                        {
+                            "id": "call-observation",
+                            "name": "observation_service",
+                            "args": {},
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                (
+                    ["接下来定位地图"],
+                    [
+                        {
+                            "id": "call-map",
+                            "name": "map_action",
+                            "args": {},
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                (["查询和定位完成"], []),
+            ]
+        )
+
+        async def observation_service():
+            return ToolOutput(
+                content={"total": 1},
+                client_events=(
+                    {"action_type": "CLEAR", "payload": {}},
+                    {"action_type": "MARKER_ADD", "payload": {"markers": []}},
+                ),
+            )
+
+        async def map_action():
+            return ToolOutput(
+                content={"success": True},
+                client_events=(
+                    {
+                        "action_type": "FLY_TO",
+                        "payload": {"center": [121.4737, 31.2304], "zoom": 12},
+                    },
+                ),
+            )
+
+        tools = ToolExecutor()
+        tools.register("observation_service", "观测查询", observation_service)
+        tools.register("map_action", "地图操作", map_action)
+        agent = AgentLoop(llm, tools)
+
+        events = [event async for event in agent.run_stream("查询并定位", [])]
+
+        self.assertEqual(
+            [event.type for event in events],
+            [
+                "tool_started",
+                "map_action",
+                "map_action",
+                "tool_finished",
+                "tool_started",
+                "map_action",
+                "tool_finished",
+                "answer_delta",
+            ],
+        )
+        self.assertEqual(
+            [
+                event.data["action_type"]
+                for event in events
+                if event.type == "map_action"
+            ],
+            ["CLEAR", "MARKER_ADD", "FLY_TO"],
+        )
+        self.assertEqual(
+            "".join(
+                event.content for event in events if event.type == "answer_delta"
+            ),
+            "查询和定位完成",
+        )
+
+    async def test_buffers_answer_chunks_until_tool_enabled_round_finishes(self):
         class DelayedLlm:
             model = "fake-model"
 
@@ -245,17 +329,20 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((await stream.__anext__()).type, "tool_started")
         self.assertEqual((await stream.__anext__()).type, "tool_finished")
-        first_answer = await asyncio.wait_for(stream.__anext__(), timeout=0.2)
+        pending_answer = asyncio.create_task(stream.__anext__())
+        await asyncio.sleep(0.05)
 
-        self.assertEqual(first_answer.type, "answer_delta")
-        self.assertEqual(first_answer.content, "第一段")
+        self.assertFalse(pending_answer.done())
         self.assertFalse(llm.release.is_set())
 
         llm.release.set()
+        first_answer = await asyncio.wait_for(pending_answer, timeout=1)
         remaining = [event async for event in stream]
+        self.assertEqual(first_answer.type, "answer_delta")
+        self.assertEqual(first_answer.content, "第一段")
         self.assertEqual([event.content for event in remaining], ["第二段"])
 
-    async def test_answer_agent_streams_citation_before_model_finishes(self):
+    async def test_buffers_citation_until_tool_enabled_round_finishes(self):
         class DelayedCitationLlm:
             model = "fake-model"
 
@@ -304,15 +391,18 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await stream.__anext__()).type, "tool_started")
         self.assertEqual((await stream.__anext__()).type, "retrieval")
         self.assertEqual((await stream.__anext__()).type, "tool_finished")
-        first_answer = await asyncio.wait_for(stream.__anext__(), timeout=0.2)
+        pending_answer = asyncio.create_task(stream.__anext__())
+        await asyncio.sleep(0.05)
 
-        self.assertEqual(first_answer.type, "answer_delta")
-        self.assertEqual(first_answer.content, "第一段")
+        self.assertFalse(pending_answer.done())
         self.assertFalse(llm.release.is_set())
         self.assertIsNotNone(llm.calls[-1][1])
 
         llm.release.set()
+        first_answer = await asyncio.wait_for(pending_answer, timeout=1)
         remaining = [event async for event in stream]
+        self.assertEqual(first_answer.type, "answer_delta")
+        self.assertEqual(first_answer.content, "第一段")
         self.assertEqual(
             [event.content for event in remaining],
             ["[[cite:1]]第二段"],

@@ -102,7 +102,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([message.role for message in detail.messages], ["user", "assistant"])
         self.assertEqual(detail.messages[-1].sources[0]["preview"], "检索片段")
 
-    async def test_answer_agent_citation_reaches_sse_before_model_finishes(self):
+    async def test_answer_agent_buffers_citation_until_tool_round_finishes(self):
         class DelayedLlm:
             model = "fake-model"
 
@@ -155,19 +155,22 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             service.stream_chat(AgentRequest(question="测试流式引用"))
         )
 
-        first_token = None
-        for _ in range(5):
-            block = await asyncio.wait_for(stream.__anext__(), timeout=0.2)
-            if block.startswith("event: token\n"):
-                first_token = block
-                break
+        initial_blocks = [
+            await asyncio.wait_for(stream.__anext__(), timeout=1) for _ in range(4)
+        ]
+        pending_token = asyncio.create_task(stream.__anext__())
+        await asyncio.sleep(0.05)
 
-        self.assertIsNotNone(first_token)
+        self.assertTrue(initial_blocks[0].startswith("event: conversation\n"))
+        self.assertFalse(pending_token.done())
         self.assertFalse(llm.release.is_set())
+
+        llm.release.set()
+        first_token = await asyncio.wait_for(pending_token, timeout=1)
+        self.assertTrue(first_token.startswith("event: token\n"))
         first_payload = json.loads(first_token.split("data: ", 1)[1])
         self.assertEqual(first_payload["data"]["content"], "第一段")
 
-        llm.release.set()
         remaining = [block async for block in stream]
         token_blocks = [
             block for block in remaining if block.startswith("event: token\n")

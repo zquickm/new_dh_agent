@@ -113,7 +113,6 @@ class AgentLoop:
         ]
         tool_definitions = self.tools.definitions()
         citation_registry = CitationRegistry()
-        has_completed_tool = False
 
         for round_number in range(1, self.max_rounds + 1):
             available_tools = (
@@ -125,7 +124,7 @@ class AgentLoop:
             tool_calls: list[dict[str, Any]] = []
             citation_buffer = ""
             has_answer_content = False
-            stream_answer = has_completed_tool or available_tools is None
+            stream_answer = available_tools is None
 
             async for content, calls in self.llm.stream(messages, available_tools):
                 if content:
@@ -159,6 +158,21 @@ class AgentLoop:
                 if not has_answer_content:
                     raise RuntimeError("模型未生成有效回答")
                 if citation_registry.has_sources:
+                    if not stream_answer:
+                        for part in content_parts:
+                            citation_buffer += part
+                            transformed, citation_buffer = (
+                                citation_registry.transform_stream_buffer(
+                                    citation_buffer,
+                                    final=False,
+                                )
+                            )
+                            if transformed:
+                                yield AgentEvent(
+                                    type="answer_delta",
+                                    content=transformed,
+                                    round_number=round_number,
+                                )
                     tail, citation_buffer = citation_registry.transform_stream_buffer(
                         citation_buffer,
                         final=True,
@@ -274,7 +288,6 @@ class AgentLoop:
                         "content": observation,
                     }
                 )
-                has_completed_tool = True
 
         raise RuntimeError("AgentLoop 达到最大轮数但未生成回答")
 
