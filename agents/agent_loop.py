@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from agents.citations import CitationRegistry, strip_citation_markers
 from agents.events import AgentEvent
-from agents.llm_client import DSMLStreamGuard, HelloAgentsLLM
+from agents.llm_client import DSMLParseError, DSMLStreamGuard, HelloAgentsLLM
 from agents.tools.executor import ToolExecutor
 from agents.tools.registry import build_tool_executor
 from config.settings import get_settings
@@ -40,6 +40,9 @@ _FINAL_ANSWER_INSTRUCTION = (
     "当前已经进入最终回答轮次，不得继续调用任何工具，也不得输出 DSML、tool_calls "
     "或其他工具调用协议。请仅根据前面已有的工具结果直接回答；如果现有数据不足，"
     "应明确说明缺少什么数据，禁止编造。"
+)
+_INSUFFICIENT_TOOL_DATA_ANSWER = (
+    "现有工具结果不足，无法生成可靠答案。请缩小查询范围、指定观测站或补充必要条件后重试。"
 )
 
 _BACKEND_TOOL_NAMES = {"database_query", "observation_service", "rag_search"}
@@ -148,12 +151,17 @@ class AgentLoop:
             has_answer_content = False
             stream_answer = available_tools is None
             dsml_guard = DSMLStreamGuard() if is_forced_final_round else None
+            dsml_blocked = False
 
             async for content, calls in self.llm.stream(
                 round_messages, available_tools
             ):
                 if content and dsml_guard is not None:
-                    content = dsml_guard.feed(content)
+                    try:
+                        content = dsml_guard.feed(content)
+                    except DSMLParseError:
+                        dsml_blocked = True
+                        break
                 if content:
                     has_answer_content = has_answer_content or bool(content.strip())
                     if stream_answer:
@@ -182,8 +190,22 @@ class AgentLoop:
                         raise RuntimeError("模型同时返回了回答正文和工具调用")
                     tool_calls.extend(calls)
 
-            if dsml_guard is not None:
-                dsml_guard.finish()
+            if dsml_guard is not None and not dsml_blocked:
+                try:
+                    dsml_guard.finish()
+                except DSMLParseError:
+                    dsml_blocked = True
+            if dsml_blocked:
+                yield AgentEvent(
+                    type="answer_delta",
+                    content=(
+                        f"\n{_INSUFFICIENT_TOOL_DATA_ANSWER}"
+                        if has_answer_content
+                        else _INSUFFICIENT_TOOL_DATA_ANSWER
+                    ),
+                    round_number=round_number,
+                )
+                return
 
             content = "".join(content_parts)
             if not tool_calls:
@@ -280,7 +302,17 @@ class AgentLoop:
                     success = True
                 except Exception as exc:
                     _print_serious_tool_error(name, exc)
-                    observation = "工具执行失败"
+                    if name == "observation_service" and isinstance(
+                        exc, ValueError
+                    ):
+                        observation = (
+                            "观测工具参数无效："
+                            f"{exc}。请严格使用 observation_service schema 中定义的 "
+                            "operation 和参数；如果现有操作无法完成问题，应明确说明能力不足，"
+                            "不得编造新的 operation。"
+                        )
+                    else:
+                        observation = "工具执行失败"
                     retrieval_data = None
                     client_events = ()
                     success = False

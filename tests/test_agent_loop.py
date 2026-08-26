@@ -571,14 +571,16 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         agent.max_rounds = 2
         agent.force_answer = True
 
-        events = []
-        with self.assertRaisesRegex(ValueError, "最终回答.*DSML"):
-            async for event in agent.run_stream("测试", []):
-                events.append(event)
+        events = [event async for event in agent.run_stream("测试", [])]
         answer = "".join(
             event.content for event in events if event.type == "answer_delta"
         )
-        self.assertEqual(answer, "准备继续查询：")
+        self.assertEqual(
+            answer,
+            "准备继续查询：\n"
+            "现有工具结果不足，无法生成可靠答案。"
+            "请缩小查询范围、指定观测站或补充必要条件后重试。",
+        )
         self.assertNotIn("DSML", answer)
 
     async def test_forced_final_answer_streams_citations_before_completion(self):

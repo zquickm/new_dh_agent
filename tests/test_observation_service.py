@@ -59,6 +59,12 @@ class FakeSpatialClient:
 
 
 class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
+    def test_description_states_cross_station_ranking_limit(self):
+        from agents.tools.observation_service import TOOL_DESCRIPTION
+
+        self.assertIn("不支持跨多个站点批量比较或排名", TOOL_DESCRIPTION)
+        self.assertIn("不得编造操作名", TOOL_DESCRIPTION)
+
     async def test_station_search_returns_model_data_and_ordered_map_actions(self):
         client = FakeSpatialClient()
         tool = ObservationServiceTool(client)
