@@ -42,6 +42,19 @@ class LlmClientTest(unittest.TestCase):
 
 
 class LlmClientToolCallTest(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def observation_tools():
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "observation_service",
+                    "description": "查询观测站",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+
     async def test_returns_content_and_native_tool_calls(self):
         from agents.llm_client import HelloAgentsLLM
 
@@ -156,6 +169,111 @@ class LlmClientToolCallTest(unittest.IsolatedAsyncioTestCase):
                 ),
             ],
         )
+
+    async def test_converts_streamed_deepseek_dsml_to_tool_calls(self):
+        from agents.llm_client import HelloAgentsLLM
+
+        async def chunks(*args, **kwargs):
+            del args, kwargs
+            yield AIMessageChunk(content="<｜DSML｜tool_")
+            yield AIMessageChunk(
+                content=(
+                    'calls>\n<｜DSML｜invoke name="observation_service">\n'
+                    '<｜DSML｜parameter name="operation" string="true">'
+                    'search_stations</｜DSML｜parameter>\n'
+                    '<｜DSML｜parameter name="station_types" string="false">'
+                    '["shore_station"]</｜DSML｜parameter>\n'
+                )
+            )
+            yield AIMessageChunk(
+                content=(
+                    '<｜DSML｜parameter name="query_type" string="true">'
+                    'bbox</｜DSML｜parameter>\n'
+                    '<｜DSML｜parameter name="bbox" string="false">'
+                    '[100, 0, 130, 45]</｜DSML｜parameter>\n'
+                    '</｜DSML｜invoke>\n</｜DSML｜tool_calls>'
+                )
+            )
+
+        tools = self.observation_tools()
+        with patch("agents.llm_client.ChatOpenAI") as chat_openai:
+            bound_model = chat_openai.return_value.bind_tools.return_value
+            bound_model.astream = chunks
+            llm = HelloAgentsLLM()
+
+            result = [
+                item
+                async for item in llm.stream(
+                    [{"role": "user", "content": "现在哪里浪最大"}], tools
+                )
+            ]
+
+        self.assertEqual(len(result), 1)
+        content, tool_calls = result[0]
+        self.assertEqual(content, "")
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["name"], "observation_service")
+        self.assertEqual(
+            tool_calls[0]["args"],
+            {
+                "operation": "search_stations",
+                "station_types": ["shore_station"],
+                "query_type": "bbox",
+                "bbox": [100, 0, 130, 45],
+            },
+        )
+
+    async def test_rejects_incomplete_dsml_instead_of_streaming_it_as_answer(self):
+        from agents.llm_client import HelloAgentsLLM, LLMInvocationError
+
+        async def chunks(*args, **kwargs):
+            del args, kwargs
+            yield AIMessageChunk(
+                content=(
+                    '<|DSML|tool_calls><|DSML|invoke name="observation_service">'
+                )
+            )
+
+        with patch("agents.llm_client.ChatOpenAI") as chat_openai:
+            bound_model = chat_openai.return_value.bind_tools.return_value
+            bound_model.astream = chunks
+            llm = HelloAgentsLLM()
+
+            with self.assertRaises(LLMInvocationError):
+                _ = [
+                    item
+                    async for item in llm.stream(
+                        [{"role": "user", "content": "查询观测站"}],
+                        self.observation_tools(),
+                    )
+                ]
+
+    async def test_rejects_dsml_calls_to_unregistered_tools(self):
+        from agents.llm_client import HelloAgentsLLM, LLMInvocationError
+
+        async def chunks(*args, **kwargs):
+            del args, kwargs
+            yield AIMessageChunk(
+                content=(
+                    '<|DSML|tool_calls><|DSML|invoke name="unknown_tool">'
+                    '{}'
+                    '</|DSML|invoke></|DSML|tool_calls>'
+                )
+            )
+
+        with patch("agents.llm_client.ChatOpenAI") as chat_openai:
+            bound_model = chat_openai.return_value.bind_tools.return_value
+            bound_model.astream = chunks
+            llm = HelloAgentsLLM()
+
+            with self.assertRaises(LLMInvocationError):
+                _ = [
+                    item
+                    async for item in llm.stream(
+                        [{"role": "user", "content": "查询观测站"}],
+                        self.observation_tools(),
+                    )
+                ]
 
     async def test_tool_free_stream_does_not_accumulate_the_full_response(self):
         from agents.llm_client import HelloAgentsLLM
