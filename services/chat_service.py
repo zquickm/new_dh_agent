@@ -10,6 +10,7 @@ from config.settings import get_settings
 from repositories.memory_conversation_repository import conversation_repository
 from schemas.chat import AgentRequest
 from services.citation_service import CitationService
+from services.request_context_adapter import enrich_question_with_frontend_context
 
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,12 @@ class ChatService:
         retrieval_counts: dict[str, int] = {}
         sequence = 0
         try:
+            agent_question = enrich_question_with_frontend_context(
+                request.question,
+                request.context,
+            )
             async for event in self.agent.run_stream(
-                request.question, request.chat_history
+                agent_question, request.chat_history
             ):
                 sequence += 1
                 if event.type == "tool_started":

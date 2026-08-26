@@ -101,6 +101,31 @@ data: {
 直接复用 `/agent/chat/stream`，当前实现不会调用 `POST /api/map_action`。完整协议
 见 `地图操作SSE事件契约.txt`。
 
+### 地图选区上下文
+
+`/agent/chat/stream` 接受前端通过 `map_context.drawn_geometry` 传入 GeoJSON
+`Polygon`。后端会在接口边界校验坐标并转换为 Agent 可使用的内部上下文；
+`AgentLoop`、LLM 客户端和工具不直接依赖前端字段名。
+
+```json
+{
+  "question": "这个区域有哪些观测站点",
+  "conversation_id": "后端会话 ID",
+  "map_context": {
+    "drawn_geometry": {
+      "type": "Polygon",
+      "coordinates": [[[121.6, 31.1], [122.5, 31.1], [122.5, 31.9], [121.6, 31.9], [121.6, 31.1]]],
+      "bbox": [121.6, 31.1, 122.5, 31.9],
+      "crs": "EPSG:4490"
+    }
+  }
+}
+```
+
+前端不要再把 `[系统上下文]` 或外接矩形说明拼入 `question`，否则会造成上下文
+重复，并污染保存的用户消息。`conversation_id` 应来自后端创建会话接口；若省略，
+流式接口会创建新会话，并在首个 `conversation` 事件中返回 ID。
+
 数据库 SQL 生成默认复用 `llm` 配置；仅当需要独立鉴权模型时填写
 `DEEPSEEK_API_KEY`，并在 `tools.database.sql_llm` 中配置独立模型地址和名称。
 数据库账号必须是专用只读账号，只授予 `SELECT` 权限。

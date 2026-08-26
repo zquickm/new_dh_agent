@@ -1,6 +1,15 @@
+from __future__ import annotations
+
+import math
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 
 class ChatMessage(BaseModel):
@@ -8,7 +17,91 @@ class ChatMessage(BaseModel):
     content: str = Field(..., min_length=1)
 
 
+class DrawnGeometry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["Polygon"]
+    coordinates: list[list[list[float]]]
+    bbox: list[float]
+    crs: Literal["EPSG:4490"] = "EPSG:4490"
+
+    @model_validator(mode="after")
+    def validate_geometry(self) -> DrawnGeometry:
+        if len(self.coordinates) != 1:
+            raise ValueError("当前只支持不含孔洞的 Polygon")
+        ring = self.coordinates[0]
+        if len(ring) < 4:
+            raise ValueError("Polygon 外环至少需要四个坐标点")
+        if len(ring) > 1000:
+            raise ValueError("Polygon 外环坐标点不能超过 1000 个")
+        if ring[0] != ring[-1]:
+            raise ValueError("Polygon 外环必须闭合")
+        for point in ring:
+            if len(point) != 2:
+                raise ValueError("Polygon 坐标点必须为 [经度, 纬度]")
+            lon, lat = point
+            if not math.isfinite(lon) or not math.isfinite(lat):
+                raise ValueError("Polygon 经纬度必须是有限数值")
+            if not -180 <= lon <= 180 or not -90 <= lat <= 90:
+                raise ValueError("Polygon 经纬度超出有效范围")
+        if len({tuple(point) for point in ring[:-1]}) < 3:
+            raise ValueError("Polygon 至少需要三个不同的顶点")
+        doubled_area = sum(
+            first[0] * second[1] - second[0] * first[1]
+            for first, second in zip(ring, ring[1:])
+        )
+        if abs(doubled_area) <= 1e-12:
+            raise ValueError("Polygon 面积必须大于 0")
+
+        if len(self.bbox) != 4:
+            raise ValueError("bbox 必须为 [minLon,minLat,maxLon,maxLat]")
+        min_lon, min_lat, max_lon, max_lat = self.bbox
+        if not all(math.isfinite(value) for value in self.bbox):
+            raise ValueError("bbox 必须是有限数值")
+        if not (-180 <= min_lon <= 180 and -180 <= max_lon <= 180):
+            raise ValueError("bbox 经度超出有效范围")
+        if not (-90 <= min_lat <= 90 and -90 <= max_lat <= 90):
+            raise ValueError("bbox 纬度超出有效范围")
+        if min_lon > max_lon or min_lat > max_lat:
+            raise ValueError("bbox 最小坐标不能大于最大坐标")
+        expected_bbox = [
+            min(point[0] for point in ring),
+            min(point[1] for point in ring),
+            max(point[0] for point in ring),
+            max(point[1] for point in ring),
+        ]
+        if any(
+            abs(actual - expected) > 1e-7
+            for actual, expected in zip(self.bbox, expected_bbox)
+        ):
+            raise ValueError("bbox 与 Polygon coordinates 不一致")
+        return self
+
+
+class FrontendContext(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    drawn_geometry: Optional[DrawnGeometry] = None
+
+
 class AgentRequest(BaseModel):
-    question: str = Field(..., min_length=1)
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    question: str = Field(
+        ...,
+        min_length=1,
+        validation_alias=AliasChoices("question", "message"),
+    )
     chat_history: list[ChatMessage] = Field(default_factory=list)
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("conversation_id", "conversationId"),
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("session_id", "sessionId"),
+    )
+    context: Optional[FrontendContext] = Field(
+        default=None,
+        validation_alias=AliasChoices("context", "map_context"),
+    )

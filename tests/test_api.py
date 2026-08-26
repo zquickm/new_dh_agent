@@ -10,8 +10,12 @@ from services.chat_service import chat_service
 class FakeAgent:
     model_name = "fake-model"
 
+    def __init__(self):
+        self.last_question = None
+
     async def run_stream(self, question, history):
-        del question, history
+        self.last_question = question
+        del history
         yield AgentEvent(
             type="retrieval",
             data={
@@ -55,7 +59,8 @@ class FakeAgent:
 class ApiTest(unittest.TestCase):
     def setUp(self):
         self.previous_agent = chat_service._agent
-        chat_service._agent = FakeAgent()
+        self.fake_agent = FakeAgent()
+        chat_service._agent = self.fake_agent
         self.client = TestClient(app)
 
     def tearDown(self):
@@ -94,3 +99,44 @@ class ApiTest(unittest.TestCase):
             ["user", "assistant"],
         )
         self.assertEqual(detail["messages"][-1]["sources"][0]["citation_id"], 1)
+
+    def test_stream_accepts_esic_map_context_without_leaking_it_to_history(self):
+        created = self.client.post("/conversations", json={"title": "地图选区测试"})
+        conversation_id = created.json()["data"]["id"]
+        question = "这个区域有哪些观测站点"
+
+        with self.client.stream(
+            "POST",
+            "/agent/chat/stream",
+            json={
+                "question": question,
+                "conversation_id": conversation_id,
+                "map_context": {
+                    "drawn_geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [121.64807177848331, 31.145291852528445],
+                            [122.51079620689507, 31.145291852528445],
+                            [122.51079620689507, 31.926311797831147],
+                            [121.64807177848331, 31.926311797831147],
+                            [121.64807177848331, 31.145291852528445],
+                        ]],
+                        "bbox": [
+                            121.64807177848331,
+                            31.145291852528445,
+                            122.51079620689507,
+                            31.926311797831147,
+                        ],
+                    }
+                },
+            },
+        ) as response:
+            body = "".join(response.iter_text())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: done", body)
+        self.assertIn('"query_type":"polygon"', self.fake_agent.last_question)
+        self.assertIn('"crs":"EPSG:4490"', self.fake_agent.last_question)
+
+        detail = self.client.get(f"/conversations/{conversation_id}").json()["data"]
+        self.assertEqual(detail["messages"][0]["content"], question)

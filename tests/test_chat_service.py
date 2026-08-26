@@ -68,6 +68,58 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_frontend_geometry_reaches_agent_but_is_not_persisted_in_question(self):
+        class CapturingAgent:
+            model_name = "fake-model"
+
+            def __init__(self):
+                self.question = ""
+
+            async def run_stream(self, question, history):
+                del history
+                self.question = question
+                yield AgentEvent(
+                    type="answer_delta",
+                    content="区域内有观测站",
+                    round_number=1,
+                )
+
+        conversation = await conversation_repository.create("地图选区测试")
+        agent = CapturingAgent()
+        service = ChatService()
+        service._agent = agent
+        request = AgentRequest.model_validate(
+            {
+                "message": "这个区域有哪些站点",
+                "conversationId": conversation.id,
+                "sessionId": "session-1",
+                "map_context": {
+                    "drawn_geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [121.1, 29.8],
+                                [122.5, 29.8],
+                                [122.5, 30.7],
+                                [121.1, 30.7],
+                                [121.1, 29.8],
+                            ]
+                        ],
+                        "bbox": [121.1, 29.8, 122.5, 30.7],
+                    }
+                },
+            }
+        )
+
+        events = [event async for event in service.stream_chat(request)]
+
+        self.assertIn('"query_type":"polygon"', agent.question)
+        self.assertEqual(events[-1]["event"], "done")
+        detail = await conversation_repository.get(conversation.id)
+        self.assertEqual(detail.messages[0].content, "这个区域有哪些站点")
+        self.assertNotIn("selected_area", detail.messages[0].content)
+        await service.close()
+
     async def test_stream_maps_agent_events_and_persists_exchange(self):
         conversation = await conversation_repository.create("测试")
         service = ChatService()
