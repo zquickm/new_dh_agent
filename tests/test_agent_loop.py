@@ -521,7 +521,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                         }
                     ],
                 ),
-                (["最终回答"], []),
+                (["最终", "回答"], []),
             ]
         )
         tools = ToolExecutor()
@@ -532,9 +532,119 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
 
         events = [event async for event in agent.run_stream("测试", [])]
 
-        self.assertEqual(events[-1].content, "最终回答")
+        self.assertEqual(
+            [event.content for event in events if event.type == "answer_delta"],
+            ["最终", "回答"],
+        )
         self.assertIsNotNone(llm.calls[0][1])
         self.assertIsNone(llm.calls[1][1])
+        self.assertIn("不得输出 DSML", llm.calls[1][0][0]["content"])
+
+    async def test_last_round_rejects_dsml_without_streaming_it_as_answer(self):
+        llm = FakeLlm(
+            [
+                (
+                    [],
+                    [
+                        {
+                            "id": "call-one",
+                            "name": "Echo",
+                            "args": {"value": "hello"},
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                (
+                    [
+                        "准备继续查询：<|DSM",
+                        'L|tool_calls><|DSML|invoke name="Echo">'
+                        '<|DSML|parameter name="value" string="true">again'
+                        '</|DSML|parameter></|DSML|invoke></|DSML|tool_calls>',
+                    ],
+                    [],
+                ),
+            ]
+        )
+        tools = ToolExecutor()
+        tools.register("Echo", "回显", lambda value: value)
+        agent = AgentLoop(llm, tools)
+        agent.max_rounds = 2
+        agent.force_answer = True
+
+        events = []
+        with self.assertRaisesRegex(ValueError, "最终回答.*DSML"):
+            async for event in agent.run_stream("测试", []):
+                events.append(event)
+        answer = "".join(
+            event.content for event in events if event.type == "answer_delta"
+        )
+        self.assertEqual(answer, "准备继续查询：")
+        self.assertNotIn("DSML", answer)
+
+    async def test_forced_final_answer_streams_citations_before_completion(self):
+        class DelayedCitationLlm:
+            model = "fake-model"
+
+            def __init__(self):
+                self.call_count = 0
+                self.release = asyncio.Event()
+
+            async def stream(self, messages, tools=None, temperature=0):
+                del messages, temperature
+                self.call_count += 1
+                if self.call_count == 1:
+                    yield "", [
+                        {
+                            "id": "call-rag",
+                            "name": "rag_search",
+                            "args": {"query": "测试引用"},
+                            "type": "tool_call",
+                        }
+                    ]
+                    return
+                self.assert_no_tools(tools)
+                yield "第一段<<SRC_", []
+                await self.release.wait()
+                yield "1>>第二段", []
+
+            @staticmethod
+            def assert_no_tools(tools):
+                if tools is not None:
+                    raise AssertionError("最终回答轮次不应绑定工具")
+
+        async def rag_search(query):
+            return {
+                "query": query,
+                "chunks": [
+                    {
+                        "text": "引用依据",
+                        "source": "资料.pdf",
+                        "score": 0.9,
+                    }
+                ],
+            }
+
+        llm = DelayedCitationLlm()
+        tools = ToolExecutor()
+        tools.register("rag_search", "检索内部文档", rag_search)
+        agent = AgentLoop(llm, tools)
+        agent.max_rounds = 2
+        agent.force_answer = True
+        stream = agent.run_stream("测试流式引用", [])
+
+        self.assertEqual((await stream.__anext__()).type, "tool_started")
+        self.assertEqual((await stream.__anext__()).type, "retrieval")
+        self.assertEqual((await stream.__anext__()).type, "tool_finished")
+        first_answer = await asyncio.wait_for(stream.__anext__(), timeout=1)
+
+        self.assertEqual(first_answer.content, "第一段")
+        self.assertFalse(llm.release.is_set())
+        llm.release.set()
+        remaining = [event async for event in stream]
+        self.assertEqual(
+            [event.content for event in remaining],
+            ["[[cite:1]]第二段"],
+        )
 
     async def test_client_events_are_emitted_before_tool_finishes(self):
         llm = FakeLlm(

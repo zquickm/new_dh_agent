@@ -45,12 +45,44 @@ _DSML_ATTRIBUTE_RE = re.compile(
     re.DOTALL,
 )
 _DSML_MARKER_RE = re.compile(rf"<{_DSML_PREFIX}")
+_DSML_OPENERS = ("<|DSML|", "<｜DSML｜")
 
 
 @dataclass(frozen=True)
 class _ParsedDSML:
     content: str
     tool_calls: list[dict[str, Any]]
+
+
+class DSMLStreamGuard:
+    """Reject DSML while retaining only a possible split opener."""
+
+    def __init__(self) -> None:
+        self._pending = ""
+
+    def feed(self, content: str) -> str:
+        self._pending += content
+        if _DSML_MARKER_RE.search(self._pending):
+            raise DSMLParseError("最终回答中不允许出现 DSML 工具调用")
+        keep = max(
+            (
+                length
+                for opener in _DSML_OPENERS
+                for length in range(1, len(opener))
+                if self._pending.endswith(opener[:length])
+            ),
+            default=0,
+        )
+        if not keep:
+            safe, self._pending = self._pending, ""
+            return safe
+        safe = self._pending[:-keep]
+        self._pending = self._pending[-keep:]
+        return safe
+
+    def finish(self) -> None:
+        if self._pending:
+            raise DSMLParseError("最终回答中存在不完整的 DSML 起始标记")
 
 
 def _attributes(source: str) -> dict[str, str]:

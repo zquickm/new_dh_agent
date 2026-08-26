@@ -55,6 +55,15 @@ class LlmClientToolCallTest(unittest.IsolatedAsyncioTestCase):
             }
         ]
 
+    def test_dsml_stream_guard_never_releases_a_partial_opener(self):
+        from agents.llm_client import DSMLParseError, DSMLStreamGuard
+
+        guard = DSMLStreamGuard()
+
+        self.assertEqual(guard.feed("普通正文<|DSM"), "普通正文")
+        with self.assertRaises(DSMLParseError):
+            guard.finish()
+
     async def test_returns_content_and_native_tool_calls(self):
         from agents.llm_client import HelloAgentsLLM
 
