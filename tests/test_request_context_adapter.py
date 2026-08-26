@@ -109,6 +109,23 @@ class RequestContextAdapterTest(unittest.TestCase):
             "普通问题",
         )
 
+    def test_selected_area_is_default_scope_for_implicit_station_request(self):
+        payload = {
+            **FRONTEND_REQUEST,
+            "message": "输出观测站点",
+        }
+        request = AgentRequest.model_validate(payload)
+
+        enriched = enrich_question_with_frontend_context(
+            request.question,
+            request.context,
+        )
+
+        self.assertTrue(enriched.startswith("输出观测站点\n\n"))
+        self.assertIn("都默认限定在 selected_area", enriched)
+        self.assertIn("必须完整使用 selected_area 中的 query_type", enriched)
+        self.assertIn('"query_type":"polygon"', enriched)
+
     def test_rejects_unclosed_polygon(self):
         payload = {
             **FRONTEND_REQUEST,
