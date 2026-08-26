@@ -8,7 +8,11 @@ from agents.tools.executor import ToolOutput
 TOOL_NAME = "map_action"
 TOOL_DESCRIPTION = (
     "驱动前端地图执行可视化动作，不查询或修改业务数据。"
-    "仅在需要定位、标绘、清除图层、展示弹窗/表格、播放时序或轨迹时使用。"
+    "单纯查询、输出或显示观测站点时禁止调用本工具，必须调用 observation_service；"
+    "observation_service.search_stations 会自动发送 CLEAR 和 MARKER_ADD 地图事件，"
+    "不得再调用本工具重复清图、标点、定位或适配站点视野。"
+    "只有用户明确要求额外执行独立的定位、飞行、绘图、清除图层、展示弹窗/表格、"
+    "播放时序或轨迹等地图操作时，才使用本工具。"
     "关键参数：LOCATE.points，MARKER_ADD.markers（每项含 id、name、coordinates），"
     "MARKER_REMOVE.marker_ids，POLYGON_DRAW.coordinates，"
     "CIRCLE_DRAW.center/radius，POPUP_SHOW.coordinates/title/content_html，"

@@ -1,9 +1,14 @@
 import unittest
 
-from agents.tools.map_action import execute_map_action
+from agents.tools.map_action import TOOL_DESCRIPTION, execute_map_action
 
 
 class MapActionToolTest(unittest.TestCase):
+    def test_description_forbids_duplicate_station_rendering(self):
+        self.assertIn("查询、输出或显示观测站点时禁止调用本工具", TOOL_DESCRIPTION)
+        self.assertIn("observation_service.search_stations", TOOL_DESCRIPTION)
+        self.assertIn("不得再调用本工具重复清图、标点", TOOL_DESCRIPTION)
+
     def test_returns_standard_client_event(self):
         output = execute_map_action(
             "fly_to",
