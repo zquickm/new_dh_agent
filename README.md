@@ -75,8 +75,9 @@ SPATIAL_API_KEY=
 - `MARKER_ADD`：添加站点标记，并通过 `fit_bounds=true` 自动适配视野。
 - 单站详情、状态、最新观测、趋势和区间分析会清除旧站点，只保留当前站点标记，
   并通过 `popup_content` 携带可点击查看的站点与观测摘要。
-- 单站联动按 `CLEAR → MARKER_ADD → FLY_TO` 执行；`FLY_TO` 本身只移动视野，
-  使用 `center`（兼容输入 `coordinates`）和 `zoom`，不会清除或创建标记。
+- 单站联动按 `CLEAR → MARKER_ADD → FLY_TO` 执行，保留带观测详情的真实站点标记。
+- 独立调用通用 `FLY_TO` 时，后端会展开为 `CLEAR → MARKER_ADD → FLY_TO`；
+  使用 `center`（兼容输入 `coordinates`）和 `zoom`，并只保留最新定位点。
 - 通用 `map_action` 工具支持地图操作定义中的全部动作类型。
 
 ```text

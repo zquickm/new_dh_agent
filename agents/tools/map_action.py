@@ -13,7 +13,8 @@ TOOL_DESCRIPTION = (
     "不得再调用本工具重复清图、标点、定位或适配站点视野。"
     "只有用户明确要求额外执行独立的定位、飞行、绘图、清除图层、展示弹窗/表格、"
     "播放时序或轨迹等地图操作时，才使用本工具。"
-    "FLY_TO 只移动地图视野，不创建或清除标记；使用 center（兼容 coordinates）和 zoom。"
+    "独立调用 FLY_TO 时会先清除旧的站点和定位标记，再添加目标点标记并移动视野；"
+    "使用 center（兼容 coordinates）和 zoom，可通过 marker_name 指定标记名称。"
     "关键参数：LOCATE.points，MARKER_ADD.markers（每项含 id、name、coordinates），"
     "MARKER_REMOVE.marker_ids，POLYGON_DRAW.coordinates，"
     "CIRCLE_DRAW.center/radius，POPUP_SHOW.coordinates/title/content_html，"
@@ -109,13 +110,42 @@ def execute_map_action(action_type: str, payload: dict[str, Any]) -> ToolOutput:
         )
 
     event = {"action_type": normalized_type, "payload": normalized_payload}
+    client_events = (event,)
+    if normalized_type == "FLY_TO":
+        marker_name = str(payload.get("marker_name") or "定位点").strip() or "定位点"
+        client_events = (
+            {
+                "action_type": "CLEAR",
+                "payload": {
+                    "layer_ids": [
+                        "observation-stations",
+                        "map-location-markers",
+                    ]
+                },
+            },
+            {
+                "action_type": "MARKER_ADD",
+                "payload": {
+                    "layer_id": "map-location-markers",
+                    "markers": [
+                        {
+                            "id": "fly-to-target",
+                            "name": marker_name,
+                            "coordinates": normalized_payload["center"],
+                        }
+                    ],
+                    "fit_bounds": False,
+                },
+            },
+            event,
+        )
     return ToolOutput(
         content={
             "success": True,
             "message": "地图动作已发送",
             "action_type": normalized_type,
         },
-        client_events=(event,),
+        client_events=client_events,
     )
 
 

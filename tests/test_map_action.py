@@ -9,33 +9,58 @@ class MapActionToolTest(unittest.TestCase):
         self.assertIn("observation_service 的站点查询和单站分析", TOOL_DESCRIPTION)
         self.assertIn("不得再调用本工具重复清图、标点", TOOL_DESCRIPTION)
 
-    def test_fly_to_only_moves_the_view(self):
+    def test_fly_to_clears_old_layers_adds_marker_and_moves_the_view(self):
         output = execute_map_action(
             "fly_to",
             {
                 "center": [121.5, 31.2],
                 "zoom": 10,
+                "marker_name": "目标站点",
             },
         )
 
         self.assertEqual(output.content["action_type"], "FLY_TO")
         self.assertEqual(
-            output.client_events,
-            ({
+            [event["action_type"] for event in output.client_events],
+            ["CLEAR", "MARKER_ADD", "FLY_TO"],
+        )
+        self.assertEqual(
+            output.client_events[0]["payload"]["layer_ids"],
+            ["observation-stations", "map-location-markers"],
+        )
+        self.assertEqual(
+            output.client_events[1]["payload"]["markers"],
+            [{
+                "id": "fly-to-target",
+                "name": "目标站点",
+                "coordinates": [121.5, 31.2],
+            }],
+        )
+        self.assertEqual(
+            output.client_events[2],
+            {
                 "action_type": "FLY_TO",
                 "payload": {"center": [121.5, 31.2], "zoom": 10},
-            },),
+            },
         )
 
     def test_fly_to_accepts_coordinates_alias_and_adds_default_zoom(self):
         output = execute_map_action("FLY_TO", {"coordinates": [121.5, 31.2]})
 
         self.assertEqual(
-            output.client_events,
-            ({
+            [event["action_type"] for event in output.client_events],
+            ["CLEAR", "MARKER_ADD", "FLY_TO"],
+        )
+        self.assertEqual(
+            output.client_events[1]["payload"]["markers"][0]["coordinates"],
+            [121.5, 31.2],
+        )
+        self.assertEqual(
+            output.client_events[2],
+            {
                 "action_type": "FLY_TO",
                 "payload": {"center": [121.5, 31.2], "zoom": 12},
-            },),
+            },
         )
 
     def test_clear_accepts_empty_payload(self):
