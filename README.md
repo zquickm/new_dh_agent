@@ -109,7 +109,9 @@ data: {
 ### 地图选区上下文
 
 `/agent/chat/stream` 接受前端通过 `map_context.drawn_geometry` 传入 GeoJSON
-`Polygon`。后端会在接口边界校验坐标并转换为 Agent 可使用的内部上下文；
+`Polygon`，或传入由 `type: "Circle"`、`center` 和 `radius` 表示的圆形选区。
+圆心坐标格式为 `[经度, 纬度]`，半径单位为米。后端会在接口边界校验坐标并转换为
+Agent 可使用的内部上下文；
 `AgentLoop`、LLM 客户端和工具不直接依赖前端字段名。
 同一 `conversation_id` 会保存最近一次有效选区；后续请求未再次携带几何数据时会沿用该选区，
 传入新选区时覆盖旧选区。选区状态不会写入用户消息正文。
@@ -123,6 +125,23 @@ data: {
       "type": "Polygon",
       "coordinates": [[[121.6, 31.1], [122.5, 31.1], [122.5, 31.9], [121.6, 31.9], [121.6, 31.1]]],
       "bbox": [121.6, 31.1, 122.5, 31.9],
+      "crs": "EPSG:4490"
+    }
+  }
+}
+```
+
+圆形选区请求示例：
+
+```json
+{
+  "question": "这个圆形区域有哪些观测站点",
+  "conversation_id": "后端会话 ID",
+  "map_context": {
+    "drawn_geometry": {
+      "type": "Circle",
+      "center": [121.8, 30.4],
+      "radius": 25000,
       "crs": "EPSG:4490"
     }
   }

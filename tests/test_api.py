@@ -141,6 +141,30 @@ class ApiTest(unittest.TestCase):
         detail = self.client.get(f"/conversations/{conversation_id}").json()["data"]
         self.assertEqual(detail["messages"][0]["content"], question)
 
+    def test_stream_accepts_circle_map_context(self):
+        with self.client.stream(
+            "POST",
+            "/agent/chat/stream",
+            json={
+                "question": "这个圆形区域有哪些观测站点",
+                "map_context": {
+                    "drawn_geometry": {
+                        "type": "Circle",
+                        "center": [121.8, 30.4],
+                        "radius": 25000,
+                        "crs": "EPSG:4490",
+                    }
+                },
+            },
+        ) as response:
+            body = "".join(response.iter_text())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: done", body)
+        self.assertIn('"query_type":"circle"', self.fake_agent.last_question)
+        self.assertIn('"center":[121.8,30.4]', self.fake_agent.last_question)
+        self.assertIn('"radius":25000.0', self.fake_agent.last_question)
+
     def test_validation_error_returns_concise_field_path(self):
         response = self.client.post(
             "/agent/chat/stream",

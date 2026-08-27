@@ -95,6 +95,47 @@ class RequestContextAdapterTest(unittest.TestCase):
         self.assertIn('"polygon":[[121.15697263116806', enriched)
         self.assertIn('"crs":"EPSG:4490"', enriched)
 
+    def test_accepts_circle_and_builds_circle_query_context(self):
+        request = AgentRequest.model_validate(
+            {
+                **FRONTEND_REQUEST,
+                "context": {
+                    "drawn_geometry": {
+                        "type": "Circle",
+                        "center": [121.8, 30.4],
+                        "radius": 25000,
+                    }
+                },
+            }
+        )
+
+        enriched = enrich_question_with_frontend_context(
+            request.question,
+            request.context,
+        )
+
+        self.assertIn('"query_type":"circle"', enriched)
+        self.assertIn('"center":[121.8,30.4]', enriched)
+        self.assertIn('"radius":25000.0', enriched)
+        self.assertIn('"crs":"EPSG:4490"', enriched)
+
+    def test_rejects_invalid_circle_geometry(self):
+        invalid_geometries = [
+            {"type": "Circle", "center": [121.8], "radius": 25000},
+            {"type": "Circle", "center": [181, 30.4], "radius": 25000},
+            {"type": "Circle", "center": [121.8, 30.4], "radius": 0},
+            {"type": "Circle", "center": [121.8, 30.4], "radius": float("inf")},
+        ]
+
+        for geometry in invalid_geometries:
+            with self.subTest(geometry=geometry), self.assertRaises(ValidationError):
+                AgentRequest.model_validate(
+                    {
+                        **FRONTEND_REQUEST,
+                        "context": {"drawn_geometry": geometry},
+                    }
+                )
+
     def test_old_request_contract_remains_supported(self):
         request = AgentRequest(
             question="普通问题",

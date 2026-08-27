@@ -14,12 +14,20 @@ def enrich_question_with_frontend_context(
     if geometry is None:
         return question
 
-    selected_area = {
-        "query_type": "polygon",
-        "polygon": geometry.coordinates[0],
-        "bbox": geometry.bbox,
-        "crs": geometry.crs,
-    }
+    if geometry.type == "Circle":
+        selected_area = {
+            "query_type": "circle",
+            "center": geometry.center,
+            "radius": geometry.radius,
+            "crs": geometry.crs,
+        }
+    else:
+        selected_area = {
+            "query_type": "polygon",
+            "polygon": geometry.coordinates[0],
+            "bbox": geometry.bbox,
+            "crs": geometry.crs,
+        }
     serialized = json.dumps(
         {"selected_area": selected_area},
         ensure_ascii=False,

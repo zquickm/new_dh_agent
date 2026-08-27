@@ -208,6 +208,71 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             all("selected_area" not in message.content for message in detail.messages)
         )
 
+    async def test_conversation_switches_from_polygon_to_circle_and_reuses_circle(self):
+        class CapturingAgent:
+            model_name = "fake-model"
+
+            def __init__(self):
+                self.questions = []
+
+            async def run_stream(self, question, history):
+                del history
+                self.questions.append(question)
+                yield AgentEvent(type="answer_delta", content="回答")
+
+        conversation = await conversation_repository.create("圆形选区测试")
+        agent = CapturingAgent()
+        service = ChatService()
+        service._agent = agent
+
+        requests = [
+            AgentRequest.model_validate(
+                {
+                    "message": "矩形区域有哪些站点",
+                    "conversationId": conversation.id,
+                    "map_context": {
+                        "drawn_geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[
+                                [121.1, 29.8],
+                                [122.5, 29.8],
+                                [122.5, 30.7],
+                                [121.1, 30.7],
+                                [121.1, 29.8],
+                            ]],
+                            "bbox": [121.1, 29.8, 122.5, 30.7],
+                        }
+                    },
+                }
+            ),
+            AgentRequest.model_validate(
+                {
+                    "message": "改看这个圆形区域",
+                    "conversationId": conversation.id,
+                    "map_context": {
+                        "drawn_geometry": {
+                            "type": "Circle",
+                            "center": [123.4, 31.2],
+                            "radius": 18000,
+                        }
+                    },
+                }
+            ),
+            AgentRequest(
+                question="这个区域还有哪些站点",
+                conversation_id=conversation.id,
+            ),
+        ]
+        for request in requests:
+            _ = [event async for event in service.stream_chat(request)]
+
+        self.assertIn('"query_type":"polygon"', agent.questions[0])
+        self.assertIn('"query_type":"circle"', agent.questions[1])
+        self.assertIn('"center":[123.4,31.2]', agent.questions[1])
+        self.assertIn('"radius":18000.0', agent.questions[1])
+        self.assertIn('"query_type":"circle"', agent.questions[2])
+        self.assertNotIn('"query_type":"polygon"', agent.questions[2])
+
     async def test_map_area_does_not_leak_between_conversations(self):
         class CapturingAgent:
             model_name = "fake-model"

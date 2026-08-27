@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import (
     AliasChoices,
@@ -18,7 +18,7 @@ class ChatMessage(BaseModel):
     content: str = Field(..., min_length=1)
 
 
-class DrawnGeometry(BaseModel):
+class PolygonGeometry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["Polygon"]
@@ -66,7 +66,7 @@ class DrawnGeometry(BaseModel):
         return {**value, "coordinates": [ring], "bbox": bbox}
 
     @model_validator(mode="after")
-    def validate_geometry(self) -> DrawnGeometry:
+    def validate_geometry(self) -> PolygonGeometry:
         if len(self.coordinates) != 1:
             raise ValueError("当前只支持不含孔洞的 Polygon")
         ring = self.coordinates[0]
@@ -116,6 +116,34 @@ class DrawnGeometry(BaseModel):
         ):
             raise ValueError("bbox 与 Polygon coordinates 不一致")
         return self
+
+
+class CircleGeometry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["Circle"]
+    center: list[float]
+    radius: float
+    crs: Literal["EPSG:4490"] = "EPSG:4490"
+
+    @model_validator(mode="after")
+    def validate_geometry(self) -> CircleGeometry:
+        if len(self.center) != 2:
+            raise ValueError("Circle center 必须为 [经度, 纬度]")
+        lon, lat = self.center
+        if not math.isfinite(lon) or not math.isfinite(lat):
+            raise ValueError("Circle center 经纬度必须是有限数值")
+        if not -180 <= lon <= 180 or not -90 <= lat <= 90:
+            raise ValueError("Circle center 经纬度超出有效范围")
+        if not math.isfinite(self.radius) or self.radius <= 0:
+            raise ValueError("Circle radius 必须是大于 0 的有限数值")
+        return self
+
+
+DrawnGeometry = Annotated[
+    Union[PolygonGeometry, CircleGeometry],
+    Field(discriminator="type"),
+]
 
 
 class FrontendContext(BaseModel):
