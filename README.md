@@ -109,7 +109,7 @@ data: {
 ### 地图选区上下文
 
 `/agent/chat/stream` 接受前端通过 `map_context.drawn_geometry` 传入 GeoJSON
-`Polygon`，或传入由 `type: "Circle"`、`center` 和 `radius` 表示的圆形选区。
+`Polygon`，或传入由 `query_type: "circle"`、`center` 和 `radius` 表示的圆形选区。
 圆心坐标格式为 `[经度, 纬度]`，半径单位为米。后端会在接口边界校验坐标并转换为
 Agent 可使用的内部上下文；
 `AgentLoop`、LLM 客户端和工具不直接依赖前端字段名。
@@ -139,7 +139,7 @@ Agent 可使用的内部上下文；
   "conversation_id": "后端会话 ID",
   "map_context": {
     "drawn_geometry": {
-      "type": "Circle",
+      "query_type": "circle",
       "center": [121.8, 30.4],
       "radius": 25000,
       "crs": "EPSG:4490"
@@ -147,6 +147,10 @@ Agent 可使用的内部上下文；
   }
 }
 ```
+
+若前端复用地图动作契约，也支持
+`{"action_type":"CIRCLE_DRAW","payload":{"center":[121.8,30.4],"radius":25000}}`；
+HTTP Map Action 的驼峰字段 `actionType` 同样会在接口边界转换。
 
 前端不要再把 `[系统上下文]` 或外接矩形说明拼入 `question`，否则会造成上下文
 重复，并污染保存的用户消息。`conversation_id` 应来自后端创建会话接口；若省略，

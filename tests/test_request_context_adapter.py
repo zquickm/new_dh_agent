@@ -119,6 +119,44 @@ class RequestContextAdapterTest(unittest.TestCase):
         self.assertIn('"radius":25000.0', enriched)
         self.assertIn('"crs":"EPSG:4490"', enriched)
 
+    def test_accepts_documented_circle_contract_variants(self):
+        geometries = [
+            {
+                "action_type": "CIRCLE_DRAW",
+                "payload": {"center": [121.8, 30.4], "radius": 25000},
+            },
+            {
+                "actionType": "CIRCLE_DRAW",
+                "payload": {"center": [121.8, 30.4], "radius": 25000},
+            },
+            {
+                "query_type": "circle",
+                "center": [121.8, 30.4],
+                "radius": 25000,
+            },
+            {
+                "type": "circle",
+                "center": [121.8, 30.4],
+                "radius": 25000,
+            },
+        ]
+
+        for geometry in geometries:
+            with self.subTest(geometry=geometry):
+                request = AgentRequest.model_validate(
+                    {
+                        **FRONTEND_REQUEST,
+                        "context": {"drawn_geometry": geometry},
+                    }
+                )
+                enriched = enrich_question_with_frontend_context(
+                    request.question,
+                    request.context,
+                )
+                self.assertIn('"query_type":"circle"', enriched)
+                self.assertIn('"center":[121.8,30.4]', enriched)
+                self.assertIn('"radius":25000.0', enriched)
+
     def test_rejects_invalid_circle_geometry(self):
         invalid_geometries = [
             {"type": "Circle", "center": [121.8], "radius": 25000},

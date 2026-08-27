@@ -149,10 +149,11 @@ class ApiTest(unittest.TestCase):
                 "question": "这个圆形区域有哪些观测站点",
                 "map_context": {
                     "drawn_geometry": {
-                        "type": "Circle",
-                        "center": [121.8, 30.4],
-                        "radius": 25000,
-                        "crs": "EPSG:4490",
+                        "action_type": "CIRCLE_DRAW",
+                        "payload": {
+                            "center": [121.8, 30.4],
+                            "radius": 25000,
+                        },
                     }
                 },
             },

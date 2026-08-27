@@ -151,6 +151,36 @@ class FrontendContext(BaseModel):
 
     drawn_geometry: Optional[DrawnGeometry] = None
 
+    @field_validator("drawn_geometry", mode="before")
+    @classmethod
+    def normalize_drawn_geometry(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        action_type = str(
+            value.get("action_type") or value.get("actionType") or ""
+        ).strip().upper()
+        payload = value.get("payload")
+        if action_type == "CIRCLE_DRAW" and isinstance(payload, dict):
+            return {
+                "type": "Circle",
+                "center": payload.get("center"),
+                "radius": payload.get("radius"),
+                "crs": payload.get("crs") or value.get("crs") or "EPSG:4490",
+            }
+
+        geometry_type = str(
+            value.get("type") or value.get("query_type") or ""
+        ).strip().lower()
+        if geometry_type == "circle":
+            return {
+                "type": "Circle",
+                "center": value.get("center"),
+                "radius": value.get("radius"),
+                "crs": value.get("crs") or "EPSG:4490",
+            }
+        return value
+
 
 class AgentRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")

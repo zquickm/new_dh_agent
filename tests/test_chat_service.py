@@ -251,7 +251,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                     "conversationId": conversation.id,
                     "map_context": {
                         "drawn_geometry": {
-                            "type": "Circle",
+                            "query_type": "circle",
                             "center": [123.4, 31.2],
                             "radius": 18000,
                         }
