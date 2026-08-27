@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -11,6 +12,9 @@ from controller.conversation_controller import router as conversation_router
 from controller.health_controller import router as health_router
 from controller.recommend_controller import router as recommend_router
 from services.chat_service import chat_service
+
+
+logger = logging.getLogger(__name__)
 
 
 # Fail fast when YAML, environment overrides, or required secrets are invalid.
@@ -39,9 +43,23 @@ async def http_error(_request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(_request: Request, exc: RequestValidationError):
+    errors = [
+        {
+            key: value
+            for key, value in error.items()
+            if key not in {"input", "ctx", "url"}
+        }
+        for error in exc.errors()
+    ]
+    logger.warning("Agent request validation failed: %s", errors)
+    message = "; ".join(
+        f"{'.'.join(str(part) for part in error.get('loc', ()))}: "
+        f"{error.get('msg', '请求参数无效')}"
+        for error in errors
+    )
     return JSONResponse(
         status_code=422,
-        content=JsonResult.error(422, str(exc)).model_dump(),
+        content=JsonResult.error(422, message or "请求参数无效").model_dump(),
     )
 
 

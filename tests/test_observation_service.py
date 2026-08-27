@@ -73,6 +73,8 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("不支持跨多个站点批量比较或排名", TOOL_DESCRIPTION)
         self.assertIn("不得编造操作名", TOOL_DESCRIPTION)
         self.assertIn("render_map=false", TOOL_DESCRIPTION)
+        self.assertIn("唯一业务工具", TOOL_DESCRIPTION)
+        self.assertIn("不得改用 database_query", TOOL_DESCRIPTION)
 
     async def test_station_search_returns_model_data_and_ordered_map_actions(self):
         client = FakeSpatialClient()

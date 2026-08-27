@@ -140,3 +140,55 @@ class ApiTest(unittest.TestCase):
 
         detail = self.client.get(f"/conversations/{conversation_id}").json()["data"]
         self.assertEqual(detail["messages"][0]["content"], question)
+
+    def test_validation_error_returns_concise_field_path(self):
+        response = self.client.post(
+            "/agent/chat/stream",
+            json={
+                "question": "输出观测站点",
+                "map_context": {
+                    "drawn_geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[[181, 30], [182, 30], [182, 31], [181, 30]]],
+                        "bbox": [181, 30, 182, 31],
+                    }
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        message = response.json()["message"]
+        self.assertIn("body.map_context.drawn_geometry", message)
+        self.assertNotIn("'input'", message)
+
+    def test_accepts_area_query_after_fly_to_transient_state(self):
+        with self.client.stream(
+            "POST",
+            "/agent/chat/stream",
+            json={
+                "question": "该区域有哪些观测站点",
+                "chat_history": [
+                    {"role": "user", "content": "查询小洋山站水温"},
+                    {"role": "assistant", "content": "已查询小洋山站"},
+                    {"role": "assistant", "content": ""},
+                    {"role": "tool", "content": "FLY_TO"},
+                    {"event": "map_action", "content": "FLY_TO"},
+                ],
+                "map_context": {
+                    "drawn_geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [121.6, 31.1],
+                            [122.5, 31.1],
+                            [122.5, 31.9],
+                            [121.6, 31.9],
+                        ]],
+                        "bbox": [0, 0, 0, 0],
+                    }
+                },
+            },
+        ) as response:
+            body = "".join(response.iter_text())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: done", body)

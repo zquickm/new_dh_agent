@@ -142,7 +142,7 @@ class RequestContextAdapterTest(unittest.TestCase):
         self.assertIn("station_name", enriched)
         self.assertIn("render_map=false", enriched)
 
-    def test_rejects_unclosed_polygon(self):
+    def test_normalizes_unclosed_polygon_and_recomputes_bbox(self):
         payload = {
             **FRONTEND_REQUEST,
             "context": {
@@ -153,14 +153,21 @@ class RequestContextAdapterTest(unittest.TestCase):
                             "coordinates"
                         ][0][:-1]
                     ],
+                    "bbox": [0, 0, 0, 0],
                 }
             },
         }
 
-        with self.assertRaises(ValidationError):
-            AgentRequest.model_validate(payload)
+        request = AgentRequest.model_validate(payload)
+        geometry = request.context.drawn_geometry
 
-    def test_rejects_non_finite_bbox(self):
+        self.assertEqual(geometry.coordinates[0][0], geometry.coordinates[0][-1])
+        self.assertEqual(
+            geometry.bbox,
+            FRONTEND_REQUEST["context"]["drawn_geometry"]["bbox"],
+        )
+
+    def test_recomputes_non_finite_frontend_bbox_from_valid_polygon(self):
         payload = {
             **FRONTEND_REQUEST,
             "context": {
@@ -171,5 +178,48 @@ class RequestContextAdapterTest(unittest.TestCase):
             },
         }
 
+        request = AgentRequest.model_validate(payload)
+
+        self.assertEqual(
+            request.context.drawn_geometry.bbox,
+            FRONTEND_REQUEST["context"]["drawn_geometry"]["bbox"],
+        )
+
+    def test_rejects_non_finite_polygon_coordinate(self):
+        payload = {
+            **FRONTEND_REQUEST,
+            "context": {
+                "drawn_geometry": {
+                    **FRONTEND_REQUEST["context"]["drawn_geometry"],
+                    "coordinates": [[
+                        [float("nan"), 29.8],
+                        [122.5, 29.8],
+                        [122.5, 30.7],
+                        [float("nan"), 29.8],
+                    ]],
+                }
+            },
+        }
+
         with self.assertRaises(ValidationError):
             AgentRequest.model_validate(payload)
+
+    def test_discards_transient_history_from_previous_map_actions(self):
+        payload = {
+            **FRONTEND_REQUEST,
+            "chat_history": [
+                {"role": "user", "content": "小洋山站水温多少"},
+                {"role": "assistant", "content": "小洋山站当前水温为 25℃"},
+                {"role": "assistant", "content": ""},
+                {"role": "tool", "content": "查询完成"},
+                {"event": "map_action", "content": "FLY_TO"},
+            ],
+        }
+
+        request = AgentRequest.model_validate(payload)
+
+        self.assertEqual(len(request.chat_history), 2)
+        self.assertEqual(
+            [message.role for message in request.chat_history],
+            ["user", "assistant"],
+        )

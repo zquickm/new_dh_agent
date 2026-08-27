@@ -4,7 +4,10 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from agents.tools.current_server_time import TOOL_NAME, matches_current_server_time
-from agents.tools.database_query import DatabaseQueryTool
+from agents.tools.database_query import (
+    TOOL_DESCRIPTION as DATABASE_TOOL_DESCRIPTION,
+    DatabaseQueryTool,
+)
 from agents.tools.executor import ToolExecutor, ToolOutput
 from agents.tools.rag_search import RagSearchTool
 from agents.tools.registry import build_tool_executor
@@ -12,6 +15,10 @@ from tool_backends.rag_backend import RagSearchBackend
 
 
 class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
+    def test_database_description_excludes_operational_observation_stations(self):
+        self.assertIn("断面历史调查数据", DATABASE_TOOL_DESCRIPTION)
+        self.assertIn("必须调用 observation_service", DATABASE_TOOL_DESCRIPTION)
+
     async def test_registered_tool_can_be_described_and_executed(self):
         executor = ToolExecutor()
         executor.register("Echo", "回显输入", lambda value: f"result:{value}")

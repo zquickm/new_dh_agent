@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from copy import deepcopy
 
-from agents.agent_loop import AgentLoop
+from agents.agent_loop import SYSTEM_PROMPT, AgentLoop
 from agents.tools.executor import ToolExecutor, ToolOutput
 from agents.tools.registry import build_tool_executor
 from schemas.chat import ChatMessage
@@ -33,6 +33,36 @@ class FakeLlm:
 
 
 class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
+    def test_system_prompt_routes_operational_station_data_to_observation_service(self):
+        self.assertIn("必须优先调用 observation_service", SYSTEM_PROMPT)
+        self.assertIn("不得用它查询 observation_service 管理的观测站", SYSTEM_PROMPT)
+
+    async def test_station_query_does_not_offer_database_tool(self):
+        llm = FakeLlm([(["已完成"], [])])
+        agent = AgentLoop(llm, build_tool_executor())
+
+        _ = [event async for event in agent.run_stream("小洋山站水温多少", [])]
+
+        definitions = llm.calls[0][1]
+        tool_names = {item["function"]["name"] for item in definitions}
+        self.assertIn("observation_service", tool_names)
+        self.assertNotIn("database_query", tool_names)
+        await agent.close()
+
+    async def test_historical_transect_query_keeps_database_tool(self):
+        llm = FakeLlm([(["已完成"], [])])
+        agent = AgentLoop(llm, build_tool_executor())
+
+        _ = [
+            event
+            async for event in agent.run_stream("查询 E2 断面调查水温数据", [])
+        ]
+
+        definitions = llm.calls[0][1]
+        tool_names = {item["function"]["name"] for item in definitions}
+        self.assertIn("database_query", tool_names)
+        await agent.close()
+
     async def test_answers_directly_without_route_call(self):
         llm = FakeLlm([(["直接", "回答"], [])])
         tools = build_tool_executor()

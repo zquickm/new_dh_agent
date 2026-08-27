@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import math
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import (
     AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
+    field_validator,
     model_validator,
 )
 
@@ -24,6 +25,45 @@ class DrawnGeometry(BaseModel):
     coordinates: list[list[list[float]]]
     bbox: list[float]
     crs: Literal["EPSG:4490"] = "EPSG:4490"
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_geometry(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        coordinates = value.get("coordinates")
+        if (
+            not isinstance(coordinates, list)
+            or len(coordinates) != 1
+            or not isinstance(coordinates[0], list)
+            or len(coordinates[0]) < 3
+        ):
+            return value
+
+        ring: list[list[float]] = []
+        for point in coordinates[0]:
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                return value
+            lon, lat = point
+            if isinstance(lon, bool) or isinstance(lat, bool):
+                return value
+            try:
+                normalized_point = [float(lon), float(lat)]
+            except (TypeError, ValueError):
+                return value
+            if not all(math.isfinite(item) for item in normalized_point):
+                return value
+            ring.append(normalized_point)
+
+        if ring[0] != ring[-1]:
+            ring.append(list(ring[0]))
+        bbox = [
+            min(point[0] for point in ring),
+            min(point[1] for point in ring),
+            max(point[0] for point in ring),
+            max(point[1] for point in ring),
+        ]
+        return {**value, "coordinates": [ring], "bbox": bbox}
 
     @model_validator(mode="after")
     def validate_geometry(self) -> DrawnGeometry:
@@ -105,3 +145,26 @@ class AgentRequest(BaseModel):
         default=None,
         validation_alias=AliasChoices("context", "map_context"),
     )
+
+    @field_validator("chat_history", mode="before")
+    @classmethod
+    def discard_transient_frontend_messages(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        transient_types = {"tool", "process", "map_action", "retrieval"}
+        messages = []
+        for item in value:
+            if not isinstance(item, dict):
+                messages.append(item)
+                continue
+            role = str(item.get("role") or "").strip().lower()
+            event_type = str(item.get("event") or item.get("type") or "").strip().lower()
+            content = item.get("content")
+            if role in transient_types or event_type in transient_types:
+                continue
+            if role == "assistant" and (
+                not isinstance(content, str) or not content.strip()
+            ):
+                continue
+            messages.append(item)
+        return messages

@@ -14,8 +14,10 @@ from tool_backends.database_backend import (
 
 TOOL_NAME = "database_query"
 TOOL_DESCRIPTION = (
-    "根据完整的自然语言问题查询只读业务数据库，用于精确数据、统计、"
-    "站点或观测记录。SQL 会经过白名单和只读校验。"
+    "查询授权业务表中的断面历史调查数据，用于 E1/E2/E3 等断面在指定调查日期、"
+    "采样深度下的水文气象、海水化学记录及跨记录统计。不得用于地图选区得到的观测站，"
+    "也不得用于明确站名的站点状态、详情、最新观测、趋势或时间区间数据；这些问题必须调用 "
+    "observation_service。SQL 会经过白名单和只读校验。"
 )
 TOOL_PARAMETERS: dict[str, Any] = {
     "type": "object",

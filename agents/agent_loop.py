@@ -23,7 +23,11 @@ SYSTEM_PROMPT = dedent(
     - 需要实时信息、业务数据或内部文档时，调用合适的工具。
     - 可以根据任务需要连续调用多个工具。
     - 用户明确同时要求报告/文档资料和数据库实测数据时，必须分别调用 rag_search 和 database_query 后再回答。
-    - 需要观测站位置、状态、详情或观测要素数据时，调用 observation_service。
+    - 用户询问地图选区得到的观测站，或明确站名的站点位置、状态、详情、最新观测、趋势、
+      指定时间区间观测数据时，必须优先调用 observation_service；即使问题包含水温、盐度、
+      风、浪、潮位等数据，也不得改用 database_query。
+    - database_query 只用于授权业务表中的断面历史调查数据；用户明确询问 E1/E2/E3 等断面、
+      调查日期、采样深度或跨记录统计时才使用。不得用它查询 observation_service 管理的观测站。
     - 需要操作前端地图时，调用 map_action；该工具只负责可视化，不能代替业务数据查询。
     - 工具返回结果后，继续判断是否还需要调用工具。
     - 信息足够时，直接回答用户，不要描述内部执行过程。
@@ -58,6 +62,7 @@ _INFRASTRUCTURE_MODULES = {
     "httpx",
     "pymysql",
 }
+
 
 
 def _is_serious_tool_error(exc: Exception) -> bool:
