@@ -204,6 +204,7 @@ class AgentLoop:
         ]
         tool_definitions = self.tools.definitions()
         citation_registry = CitationRegistry()
+        observation_map_rendered = False
 
         for round_number in range(1, self.max_rounds + 1):
             is_forced_final_round = (
@@ -301,6 +302,13 @@ class AgentLoop:
                         retrieval_data, observation = rag_result
                     else:
                         retrieval_data = None
+                    if name == "observation_service" and client_events:
+                        observation_map_rendered = True
+                    elif name == "map_action" and observation_map_rendered and any(
+                        event.get("action_type") == "FLY_TO"
+                        for event in client_events
+                    ):
+                        client_events = ()
                     success = True
                 except Exception as exc:
                     _print_serious_tool_error(name, exc)

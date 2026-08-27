@@ -223,7 +223,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"source_key": "<<SRC_1>>"', final_messages[-3]["content"])
         self.assertIn('"avg": 30.1', final_messages[-1]["content"])
 
-    async def test_buffers_text_before_a_later_round_tool_call(self):
+    async def test_suppresses_redundant_fly_to_after_observation_map_events(self):
         llm = FakeLlm(
             [
                 (
@@ -258,6 +258,10 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 client_events=(
                     {"action_type": "CLEAR", "payload": {}},
                     {"action_type": "MARKER_ADD", "payload": {"markers": []}},
+                    {
+                        "action_type": "FLY_TO",
+                        "payload": {"center": [121.4737, 31.2304], "zoom": 12},
+                    },
                 ),
             )
 
@@ -265,6 +269,8 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             return ToolOutput(
                 content={"success": True},
                 client_events=(
+                    {"action_type": "CLEAR", "payload": {}},
+                    {"action_type": "MARKER_ADD", "payload": {"markers": []}},
                     {
                         "action_type": "FLY_TO",
                         "payload": {"center": [121.4737, 31.2304], "zoom": 12},
@@ -285,9 +291,9 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 "tool_started",
                 "map_action",
                 "map_action",
+                "map_action",
                 "tool_finished",
                 "tool_started",
-                "map_action",
                 "tool_finished",
                 "answer_delta",
             ],
@@ -305,6 +311,112 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 event.content for event in events if event.type == "answer_delta"
             ),
             "查询和定位完成",
+        )
+
+    async def test_keeps_standalone_fly_to_map_events(self):
+        llm = FakeLlm(
+            [
+                (
+                    [],
+                    [
+                        {
+                            "id": "call-map",
+                            "name": "map_action",
+                            "args": {},
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                (["定位完成"], []),
+            ]
+        )
+
+        async def map_action():
+            return ToolOutput(
+                content={"success": True},
+                client_events=(
+                    {"action_type": "CLEAR", "payload": {}},
+                    {"action_type": "MARKER_ADD", "payload": {"markers": []}},
+                    {
+                        "action_type": "FLY_TO",
+                        "payload": {"center": [121.4737, 31.2304], "zoom": 12},
+                    },
+                ),
+            )
+
+        tools = ToolExecutor()
+        tools.register("map_action", "地图操作", map_action)
+        agent = AgentLoop(llm, tools)
+
+        events = [event async for event in agent.run_stream("定位上海", [])]
+
+        self.assertEqual(
+            [
+                event.data["action_type"]
+                for event in events
+                if event.type == "map_action"
+            ],
+            ["CLEAR", "MARKER_ADD", "FLY_TO"],
+        )
+
+    async def test_keeps_later_single_station_observation_map_events(self):
+        llm = FakeLlm(
+            [
+                (
+                    [],
+                    [{
+                        "id": "call-area",
+                        "name": "observation_service",
+                        "args": {"operation": "search_stations"},
+                        "type": "tool_call",
+                    }],
+                ),
+                (
+                    [],
+                    [{
+                        "id": "call-station",
+                        "name": "observation_service",
+                        "args": {"operation": "observation_summary"},
+                        "type": "tool_call",
+                    }],
+                ),
+                (["单站查询完成"], []),
+            ]
+        )
+
+        async def observation_service(operation):
+            if operation == "search_stations":
+                client_events = (
+                    {"action_type": "CLEAR", "payload": {}},
+                    {"action_type": "MARKER_ADD", "payload": {"markers": [1, 2]}},
+                )
+            else:
+                client_events = (
+                    {"action_type": "CLEAR", "payload": {}},
+                    {"action_type": "MARKER_ADD", "payload": {"markers": [1]}},
+                    {
+                        "action_type": "FLY_TO",
+                        "payload": {"center": [121.4737, 31.2304], "zoom": 12},
+                    },
+                )
+            return ToolOutput(
+                content={"operation": operation},
+                client_events=client_events,
+            )
+
+        tools = ToolExecutor()
+        tools.register("observation_service", "观测查询", observation_service)
+        agent = AgentLoop(llm, tools)
+
+        events = [event async for event in agent.run_stream("先查区域再查单站", [])]
+
+        self.assertEqual(
+            [
+                event.data["action_type"]
+                for event in events
+                if event.type == "map_action"
+            ],
+            ["CLEAR", "MARKER_ADD", "CLEAR", "MARKER_ADD", "FLY_TO"],
         )
 
     async def test_final_answer_streams_before_the_model_finishes(self):
