@@ -147,13 +147,21 @@ class ApiTest(unittest.TestCase):
             "/agent/chat/stream",
             json={
                 "question": "这个圆形区域有哪些观测站点",
-                "map_context": {
-                    "drawn_geometry": {
-                        "action_type": "CIRCLE_DRAW",
+                "chat_history": [
+                    {"role": "user", "content": "先看前一个区域"},
+                    {"role": "assistant", "content": "已显示前一个区域"},
+                    {
+                        "event": "CIRCLE_DRAW",
                         "payload": {
                             "center": [121.8, 30.4],
                             "radius": 25000,
                         },
+                    },
+                ],
+                "map_context": {
+                    "drawn_geometry": {
+                        "center": [121.8, 30.4],
+                        "radius": 25000,
                     }
                 },
             },

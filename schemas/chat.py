@@ -149,7 +149,10 @@ DrawnGeometry = Annotated[
 class FrontendContext(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    drawn_geometry: Optional[DrawnGeometry] = None
+    drawn_geometry: Optional[DrawnGeometry] = Field(
+        default=None,
+        validation_alias=AliasChoices("drawn_geometry", "drawnGeometry"),
+    )
 
     @field_validator("drawn_geometry", mode="before")
     @classmethod
@@ -172,7 +175,10 @@ class FrontendContext(BaseModel):
         geometry_type = str(
             value.get("type") or value.get("query_type") or ""
         ).strip().lower()
-        if geometry_type == "circle":
+        is_circle_payload = "center" in value and "radius" in value
+        if geometry_type in {"circle", "circle_draw"} or (
+            not geometry_type and is_circle_payload
+        ):
             return {
                 "type": "Circle",
                 "center": value.get("center"),
@@ -201,7 +207,7 @@ class AgentRequest(BaseModel):
     )
     context: Optional[FrontendContext] = Field(
         default=None,
-        validation_alias=AliasChoices("context", "map_context"),
+        validation_alias=AliasChoices("context", "map_context", "mapContext"),
     )
 
     @field_validator("chat_history", mode="before")
@@ -209,20 +215,15 @@ class AgentRequest(BaseModel):
     def discard_transient_frontend_messages(cls, value: Any) -> Any:
         if not isinstance(value, list):
             return value
-        transient_types = {"tool", "process", "map_action", "retrieval"}
         messages = []
         for item in value:
             if not isinstance(item, dict):
-                messages.append(item)
                 continue
             role = str(item.get("role") or "").strip().lower()
-            event_type = str(item.get("event") or item.get("type") or "").strip().lower()
             content = item.get("content")
-            if role in transient_types or event_type in transient_types:
+            if role not in {"system", "user", "assistant"}:
                 continue
-            if role == "assistant" and (
-                not isinstance(content, str) or not content.strip()
-            ):
+            if not isinstance(content, str) or not content.strip():
                 continue
             messages.append(item)
         return messages

@@ -139,6 +139,15 @@ class RequestContextAdapterTest(unittest.TestCase):
                 "center": [121.8, 30.4],
                 "radius": 25000,
             },
+            {
+                "type": "CIRCLE_DRAW",
+                "center": [121.8, 30.4],
+                "radius": 25000,
+            },
+            {
+                "center": [121.8, 30.4],
+                "radius": 25000,
+            },
         ]
 
         for geometry in geometries:
@@ -156,6 +165,28 @@ class RequestContextAdapterTest(unittest.TestCase):
                 self.assertIn('"query_type":"circle"', enriched)
                 self.assertIn('"center":[121.8,30.4]', enriched)
                 self.assertIn('"radius":25000.0', enriched)
+
+    def test_accepts_camel_case_map_context_and_drawn_geometry(self):
+        request = AgentRequest.model_validate(
+            {
+                "message": "这个圆形区域有哪些站点",
+                "mapContext": {
+                    "drawnGeometry": {
+                        "center": [121.8, 30.4],
+                        "radius": 25000,
+                    }
+                },
+            }
+        )
+
+        enriched = enrich_question_with_frontend_context(
+            request.question,
+            request.context,
+        )
+
+        self.assertIn('"query_type":"circle"', enriched)
+        self.assertIn('"center":[121.8,30.4]', enriched)
+        self.assertIn('"radius":25000.0', enriched)
 
     def test_rejects_invalid_circle_geometry(self):
         invalid_geometries = [
@@ -292,6 +323,15 @@ class RequestContextAdapterTest(unittest.TestCase):
                 {"role": "assistant", "content": ""},
                 {"role": "tool", "content": "查询完成"},
                 {"event": "map_action", "content": "FLY_TO"},
+                {
+                    "event": "CIRCLE_DRAW",
+                    "payload": {"center": [121.8, 30.4], "radius": 25000},
+                },
+                {
+                    "type": "circle",
+                    "center": [121.8, 30.4],
+                    "radius": 25000,
+                },
             ],
         }
 
