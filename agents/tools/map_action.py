@@ -9,10 +9,12 @@ TOOL_NAME = "map_action"
 TOOL_DESCRIPTION = (
     "驱动前端地图执行可视化动作，不查询或修改业务数据。"
     "单纯查询、输出或显示观测站点时禁止调用本工具，必须调用 observation_service；"
-    "observation_service.search_stations 会自动发送 CLEAR 和 MARKER_ADD 地图事件，"
+    "observation_service 的站点查询和单站分析会自动发送 CLEAR 和 MARKER_ADD 地图事件，"
     "不得再调用本工具重复清图、标点、定位或适配站点视野。"
     "只有用户明确要求额外执行独立的定位、飞行、绘图、清除图层、展示弹窗/表格、"
     "播放时序或轨迹等地图操作时，才使用本工具。"
+    "FLY_TO 会自动先清除旧的站点和定位标记，再添加中心点标记并执行飞行；"
+    "可通过 payload.marker_name 指定标记名称。"
     "关键参数：LOCATE.points，MARKER_ADD.markers（每项含 id、name、coordinates），"
     "MARKER_REMOVE.marker_ids，POLYGON_DRAW.coordinates，"
     "CIRCLE_DRAW.center/radius，POPUP_SHOW.coordinates/title/content_html，"
@@ -91,11 +93,40 @@ def execute_map_action(action_type: str, payload: dict[str, Any]) -> ToolOutput:
         )
 
     event = {"action_type": normalized_type, "payload": payload}
+    client_events = (event,)
+    if normalized_type == "FLY_TO":
+        marker_name = str(payload.get("marker_name") or "定位点").strip()
+        client_events = (
+            {
+                "action_type": "CLEAR",
+                "payload": {
+                    "layer_ids": [
+                        "observation-stations",
+                        "map-location-markers",
+                    ]
+                },
+            },
+            {
+                "action_type": "MARKER_ADD",
+                "payload": {
+                    "layer_id": "map-location-markers",
+                    "markers": [
+                        {
+                            "id": "fly-to-target",
+                            "name": marker_name,
+                            "coordinates": payload["center"],
+                        }
+                    ],
+                    "fit_bounds": False,
+                },
+            },
+            event,
+        )
     return ToolOutput(
         content={
             "success": True,
             "message": "地图动作已发送",
             "action_type": normalized_type,
         },
-        client_events=(event,),
+        client_events=client_events,
     )

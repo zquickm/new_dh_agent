@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
+from schemas.chat import FrontendContext
 from schemas.conversation import (
     ConversationDetail,
     ConversationMessage,
@@ -19,6 +20,7 @@ def _now() -> str:
 class MemoryConversationRepository:
     def __init__(self) -> None:
         self._items: dict[str, ConversationDetail] = {}
+        self._map_contexts: dict[str, FrontendContext] = {}
         self._lock = asyncio.Lock()
 
     async def create(self, title: str) -> ConversationDetail:
@@ -44,6 +46,24 @@ class MemoryConversationRepository:
                 self._items.values(), key=lambda item: item.updated_at, reverse=True
             )[:limit]
             return [ConversationSummary(**item.model_dump()) for item in items]
+
+    async def get_map_context(
+        self,
+        conversation_id: str,
+    ) -> Optional[FrontendContext]:
+        async with self._lock:
+            context = self._map_contexts.get(conversation_id)
+            return context.model_copy(deep=True) if context is not None else None
+
+    async def save_map_context(
+        self,
+        conversation_id: str,
+        context: FrontendContext,
+    ) -> None:
+        async with self._lock:
+            if conversation_id not in self._items:
+                raise KeyError(conversation_id)
+            self._map_contexts[conversation_id] = context.model_copy(deep=True)
 
     async def save_exchange(
         self,

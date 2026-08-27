@@ -68,6 +68,27 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    def test_all_registered_tool_names_have_chinese_display_names(self):
+        self.assertEqual(
+            {
+                name: ChatService._tool_display_name(name)
+                for name in (
+                    "CurrentServerTime",
+                    "rag_search",
+                    "database_query",
+                    "observation_service",
+                    "map_action",
+                )
+            },
+            {
+                "CurrentServerTime": "当前服务器时间",
+                "rag_search": "知识库检索",
+                "database_query": "数据库查询",
+                "observation_service": "观测分析",
+                "map_action": "地图操作",
+            },
+        )
+
     async def test_frontend_geometry_reaches_agent_but_is_not_persisted_in_question(self):
         class CapturingAgent:
             model_name = "fake-model"
@@ -120,6 +141,122 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("selected_area", detail.messages[0].content)
         await service.close()
 
+    async def test_conversation_reuses_and_overrides_latest_map_area(self):
+        class CapturingAgent:
+            model_name = "fake-model"
+
+            def __init__(self):
+                self.questions = []
+
+            async def run_stream(self, question, history):
+                del history
+                self.questions.append(question)
+                yield AgentEvent(type="answer_delta", content="回答")
+
+        def map_context(min_lon, min_lat, max_lon, max_lat):
+            return {
+                "drawn_geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [min_lon, min_lat],
+                        [max_lon, min_lat],
+                        [max_lon, max_lat],
+                        [min_lon, max_lat],
+                        [min_lon, min_lat],
+                    ]],
+                    "bbox": [min_lon, min_lat, max_lon, max_lat],
+                }
+            }
+
+        conversation = await conversation_repository.create("选区继承测试")
+        agent = CapturingAgent()
+        service = ChatService()
+        service._agent = agent
+
+        requests = [
+            AgentRequest.model_validate(
+                {
+                    "message": "框选区域内有哪些站点",
+                    "conversationId": conversation.id,
+                    "map_context": map_context(121.1, 29.8, 122.5, 30.7),
+                }
+            ),
+            AgentRequest(
+                question="该区域的站点状态怎么样",
+                conversation_id=conversation.id,
+            ),
+            AgentRequest.model_validate(
+                {
+                    "message": "改看这个新区域",
+                    "conversationId": conversation.id,
+                    "map_context": map_context(123.1, 30.8, 124.5, 31.7),
+                }
+            ),
+            AgentRequest(
+                question="该区域有哪些站点",
+                conversation_id=conversation.id,
+            ),
+        ]
+        for request in requests:
+            _ = [event async for event in service.stream_chat(request)]
+
+        self.assertIn('"bbox":[121.1,29.8,122.5,30.7]', agent.questions[1])
+        self.assertIn('"bbox":[123.1,30.8,124.5,31.7]', agent.questions[3])
+        self.assertNotIn('"bbox":[121.1,29.8,122.5,30.7]', agent.questions[3])
+        detail = await conversation_repository.get(conversation.id)
+        self.assertTrue(
+            all("selected_area" not in message.content for message in detail.messages)
+        )
+
+    async def test_map_area_does_not_leak_between_conversations(self):
+        class CapturingAgent:
+            model_name = "fake-model"
+
+            def __init__(self):
+                self.questions = []
+
+            async def run_stream(self, question, history):
+                del history
+                self.questions.append(question)
+                yield AgentEvent(type="answer_delta", content="回答")
+
+        first = await conversation_repository.create("选区会话")
+        second = await conversation_repository.create("普通会话")
+        agent = CapturingAgent()
+        service = ChatService()
+        service._agent = agent
+        context = {
+            "drawn_geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [121.1, 29.8],
+                    [122.5, 29.8],
+                    [122.5, 30.7],
+                    [121.1, 30.7],
+                    [121.1, 29.8],
+                ]],
+                "bbox": [121.1, 29.8, 122.5, 30.7],
+            }
+        }
+
+        first_request = AgentRequest.model_validate(
+            {
+                "message": "框选区域",
+                "conversationId": first.id,
+                "map_context": context,
+            }
+        )
+        _ = [event async for event in service.stream_chat(first_request)]
+        _ = [
+            event
+            async for event in service.stream_chat(
+                AgentRequest(question="该区域呢", conversation_id=second.id)
+            )
+        ]
+
+        self.assertIn("selected_area", agent.questions[0])
+        self.assertNotIn("selected_area", agent.questions[1])
+
     async def test_stream_maps_agent_events_and_persists_exchange(self):
         conversation = await conversation_repository.create("测试")
         service = ChatService()
@@ -144,6 +281,9 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(events[2]["data"]["chunks"][0]["preview"], "检索片段")
         self.assertEqual(events[3]["data"]["status"], "success")
+        self.assertEqual(events[1]["data"]["title"], "算法工具箱：知识库检索")
+        self.assertEqual(events[1]["data"]["summary"], "知识库检索正在执行")
+        self.assertEqual(events[3]["data"]["summary"], "知识库检索执行完成")
         self.assertEqual(events[1]["data"]["step_id"], "call-1")
         self.assertEqual(events[3]["data"]["step_id"], "call-1")
         self.assertEqual(events[3]["data"]["details"]["result_count"], 1)
@@ -154,7 +294,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([message.role for message in detail.messages], ["user", "assistant"])
         self.assertEqual(detail.messages[-1].sources[0]["preview"], "检索片段")
 
-    async def test_answer_agent_buffers_citation_until_tool_round_finishes(self):
+    async def test_answer_agent_streams_citation_before_completion(self):
         class DelayedLlm:
             model = "fake-model"
 
@@ -175,15 +315,18 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                         }
                     ]
                     return
-                self.assert_tools_bound(tools)
+                if self.call_count == 2:
+                    yield "READY_TO_ANSWER", []
+                    return
+                self.assert_tools_not_bound(tools)
                 yield "第一段<<SRC_", []
                 await self.release.wait()
                 yield "1>>第二段", []
 
             @staticmethod
-            def assert_tools_bound(tools):
-                if not tools:
-                    raise AssertionError("最终回答必须由 Answer Agent 直接输出")
+            def assert_tools_not_bound(tools):
+                if tools is not None:
+                    raise AssertionError("最终回答阶段不应绑定工具")
 
         async def rag_search(query):
             return {
@@ -210,19 +353,14 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         initial_blocks = [
             await asyncio.wait_for(stream.__anext__(), timeout=1) for _ in range(4)
         ]
-        pending_token = asyncio.create_task(stream.__anext__())
-        await asyncio.sleep(0.05)
-
         self.assertTrue(initial_blocks[0].startswith("event: conversation\n"))
-        self.assertFalse(pending_token.done())
+        first_token = await asyncio.wait_for(stream.__anext__(), timeout=1)
         self.assertFalse(llm.release.is_set())
-
-        llm.release.set()
-        first_token = await asyncio.wait_for(pending_token, timeout=1)
         self.assertTrue(first_token.startswith("event: token\n"))
         first_payload = json.loads(first_token.split("data: ", 1)[1])
         self.assertEqual(first_payload["data"]["content"], "第一段")
 
+        llm.release.set()
         remaining = [block async for block in stream]
         token_blocks = [
             block for block in remaining if block.startswith("event: token\n")

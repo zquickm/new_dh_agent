@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Optional
 
@@ -8,10 +9,12 @@ from config.settings import get_settings
 from tool_backends.spatial_backend import SpatialServiceClient
 
 
+logger = logging.getLogger(__name__)
+
 TOOL_NAME = "observation_service"
 TOOL_DESCRIPTION = (
     "查询海洋观测站的空间分布、类型、详情、在线状态、最新观测、要素趋势或指定时间区间观测数据。"
-    "需要真实观测站或观测要素数据时使用；search_stations 的结果会自动联动地图。"
+    "需要真实观测站或观测要素数据时使用；站点查询和单站分析结果会自动清除旧站点图层并联动地图。"
     "只能使用 operation 枚举中列出的操作，不得编造操作名。当前不支持跨多个站点批量比较或排名"
     "最新观测值，不能仅凭站点位置判断哪里浪最大；能力不足时应直接说明。"
 )
@@ -131,6 +134,7 @@ class ObservationServiceTool:
         return self._client
 
     async def execute(self, operation: str, **arguments: Any) -> ToolOutput:
+        client_events: tuple[dict[str, Any], ...] = ()
         if operation == "list_station_types":
             data = await self.client.list_station_types()
         elif operation == "search_stations":
@@ -142,28 +146,44 @@ class ObservationServiceTool:
                 client_events=tuple(self._station_map_actions(data)),
             )
         elif operation == "station_status":
-            data = await self.client.query_station_status(
-                self._string_list(arguments.get("tznos"), "tznos", maximum=50)
+            tznos = self._string_list(
+                arguments.get("tznos"), "tznos", maximum=50
             )
+            data = await self.client.query_station_status(tznos)
+            if len(tznos) == 1:
+                client_events = tuple(await self._single_station_map_actions(tznos[0]))
+            else:
+                client_events = tuple(
+                    self._station_map_actions({"stations": data.get("statusList")})
+                )
         elif operation == "station_detail":
-            data = await self.client.get_station_detail(
-                self._required_text(arguments.get("tzno"), "tzno")
+            tzno = self._required_text(arguments.get("tzno"), "tzno")
+            data = await self.client.get_station_detail(tzno)
+            client_events = tuple(
+                self._station_map_actions({"stations": [data]})
             )
         elif operation == "observation_summary":
-            data = await self.client.get_observation_summary(
-                self._required_text(arguments.get("tzno"), "tzno")
-            )
+            tzno = self._required_text(arguments.get("tzno"), "tzno")
+            data = await self.client.get_observation_summary(tzno)
+            client_events = tuple(await self._single_station_map_actions(tzno))
         elif operation == "observation_trend":
+            tzno = self._required_text(arguments.get("tzno"), "tzno")
             data = await self.client.get_element_trend(
-                self._required_text(arguments.get("tzno"), "tzno"),
+                tzno,
                 self._required_text(arguments.get("element"), "element"),
                 self._positive_int(arguments.get("hours", 24), "hours"),
             )
+            client_events = tuple(await self._single_station_map_actions(tzno))
         elif operation == "observation_range":
+            tzno = self._required_text(arguments.get("tzno"), "tzno")
             data = await self._observation_range(arguments)
+            client_events = tuple(await self._single_station_map_actions(tzno))
         else:
             raise ValueError(f"不支持的观测操作：{operation}")
-        return ToolOutput(content={"operation": operation, **data})
+        return ToolOutput(
+            content={"operation": operation, **data},
+            client_events=client_events,
+        )
 
     async def close(self) -> None:
         if self._client is not None:
@@ -235,11 +255,26 @@ class ObservationServiceTool:
             )
         return payload
 
+    async def _single_station_map_actions(
+        self,
+        tzno: str,
+    ) -> list[dict[str, Any]]:
+        try:
+            station = await self.client.get_station_detail(tzno)
+        except Exception:
+            logger.warning(
+                "Failed to load station detail for map marker: tzno=%s",
+                tzno,
+                exc_info=True,
+            )
+            station = None
+        return self._station_map_actions({"stations": [station]})
+
     @staticmethod
     def _station_map_actions(data: dict[str, Any]) -> list[dict[str, Any]]:
         raw_stations = data.get("stations")
         if not isinstance(raw_stations, list):
-            return []
+            raw_stations = []
         markers = []
         for station in raw_stations:
             if not isinstance(station, dict):

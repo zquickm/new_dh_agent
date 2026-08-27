@@ -40,7 +40,13 @@ class FakeSpatialClient:
 
     async def get_station_detail(self, tzno):
         self.calls.append(("get_station_detail", tzno))
-        return {"tzno": tzno, "name": "站点A"}
+        return {
+            "tzno": tzno,
+            "name": "站点A",
+            "type": "shore_station",
+            "lon": 122.1,
+            "lat": 30.2,
+        }
 
     async def get_observation_summary(self, tzno):
         self.calls.append(("get_observation_summary", tzno))
@@ -112,6 +118,48 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
                 }
             ],
         )
+
+    async def test_station_detail_replaces_old_stations_with_one_marker(self):
+        client = FakeSpatialClient()
+        tool = ObservationServiceTool(client)
+
+        output = await tool.execute("station_detail", tzno="A001")
+
+        self.assertEqual(
+            [event["action_type"] for event in output.client_events],
+            ["CLEAR", "MARKER_ADD"],
+        )
+        markers = output.client_events[1]["payload"]["markers"]
+        self.assertEqual(len(markers), 1)
+        self.assertEqual(markers[0]["id"], "A001")
+
+    async def test_single_station_analysis_uses_detail_for_map_marker(self):
+        client = FakeSpatialClient()
+        tool = ObservationServiceTool(client)
+
+        output = await tool.execute("observation_summary", tzno="A001")
+
+        self.assertEqual(
+            client.calls,
+            [
+                ("get_observation_summary", "A001"),
+                ("get_station_detail", "A001"),
+            ],
+        )
+        self.assertEqual(
+            [event["action_type"] for event in output.client_events],
+            ["CLEAR", "MARKER_ADD"],
+        )
+        self.assertEqual(
+            len(output.client_events[1]["payload"]["markers"]),
+            1,
+        )
+
+    def test_missing_station_list_still_clears_previous_station_layer(self):
+        actions = ObservationServiceTool._station_map_actions({})
+
+        self.assertEqual(actions[0]["action_type"], "CLEAR")
+        self.assertEqual(len(actions), 1)
 
     async def test_range_query_validates_and_normalizes_parameters(self):
         client = FakeSpatialClient()

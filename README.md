@@ -73,6 +73,8 @@ SPATIAL_API_KEY=
 
 - `CLEAR`：先清除旧的 `observation-stations` 图层，空结果也会发送。
 - `MARKER_ADD`：添加站点标记，并通过 `fit_bounds=true` 自动适配视野。
+- 单站详情、状态、最新观测、趋势和区间分析会清除旧站点，并只保留当前站点标记。
+- `FLY_TO` 会先清除旧的站点/定位标记，添加目标点标记，再执行地图飞行。
 - 通用 `map_action` 工具支持地图操作定义中的全部动作类型。
 
 ```text
@@ -106,6 +108,8 @@ data: {
 `/agent/chat/stream` 接受前端通过 `map_context.drawn_geometry` 传入 GeoJSON
 `Polygon`。后端会在接口边界校验坐标并转换为 Agent 可使用的内部上下文；
 `AgentLoop`、LLM 客户端和工具不直接依赖前端字段名。
+同一 `conversation_id` 会保存最近一次有效选区；后续请求未再次携带几何数据时会沿用该选区，
+传入新选区时覆盖旧选区。选区状态不会写入用户消息正文。
 
 ```json
 {

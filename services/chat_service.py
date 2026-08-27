@@ -15,6 +15,14 @@ from services.request_context_adapter import enrich_question_with_frontend_conte
 
 logger = logging.getLogger(__name__)
 
+_TOOL_DISPLAY_NAMES = {
+    "CurrentServerTime": "当前服务器时间",
+    "rag_search": "知识库检索",
+    "database_query": "数据库查询",
+    "observation_service": "观测分析",
+    "map_action": "地图操作",
+}
+
 
 class ChatService:
     def __init__(self) -> None:
@@ -53,9 +61,22 @@ class ChatService:
         retrieval_counts: dict[str, int] = {}
         sequence = 0
         try:
+            active_context = request.context
+            if (
+                active_context is not None
+                and active_context.drawn_geometry is not None
+            ):
+                await conversation_repository.save_map_context(
+                    conversation_id,
+                    active_context,
+                )
+            else:
+                active_context = await conversation_repository.get_map_context(
+                    conversation_id
+                )
             agent_question = enrich_question_with_frontend_context(
                 request.question,
-                request.context,
+                active_context,
             )
             async for event in self.agent.run_stream(
                 agent_question, request.chat_history
@@ -63,6 +84,7 @@ class ChatService:
                 sequence += 1
                 if event.type == "tool_started":
                     if get_settings().stream.include_process:
+                        tool_display_name = self._tool_display_name(event.tool_name)
                         yield {
                             "event": "process",
                             "data": self._process_data(
@@ -70,8 +92,8 @@ class ChatService:
                                 "tool",
                                 "tool",
                                 "running",
-                                f"调用工具：{event.tool_name}",
-                                "工具正在执行",
+                                f"算法工具箱：{tool_display_name}",
+                                f"{tool_display_name}正在执行",
                                 sequence,
                                 step_id=event.tool_call_id,
                             ),
@@ -104,10 +126,11 @@ class ChatService:
                     }
                 elif event.type == "tool_finished":
                     if get_settings().stream.include_process:
+                        tool_display_name = self._tool_display_name(event.tool_name)
                         summary = (
                             event.content
                             if get_settings().stream.include_tool_result
-                            else f"{event.tool_name or '工具'}调用{'完成' if event.success else '失败'}"
+                            else f"{tool_display_name}执行{'完成' if event.success else '失败'}"
                         )
                         yield {
                             "event": "process",
@@ -116,7 +139,7 @@ class ChatService:
                                 "tool",
                                 "tool",
                                 "success" if event.success else "failed",
-                                f"调用工具：{event.tool_name}",
+                                f"算法工具箱：{tool_display_name}",
                                 summary,
                                 sequence,
                                 step_id=event.tool_call_id,
@@ -163,6 +186,10 @@ class ChatService:
                     "retryable": True,
                 },
             }
+
+    @staticmethod
+    def _tool_display_name(tool_name: str) -> str:
+        return _TOOL_DISPLAY_NAMES.get(tool_name, "通用算法")
 
     @staticmethod
     def _process_data(

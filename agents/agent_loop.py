@@ -41,6 +41,10 @@ _FINAL_ANSWER_INSTRUCTION = (
     "或其他工具调用协议。请仅根据前面已有的工具结果直接回答；如果现有数据不足，"
     "应明确说明缺少什么数据，禁止编造。"
 )
+_PLANNING_INSTRUCTION = (
+    "当前处于工具规划阶段，只判断是否还需要调用工具。需要工具时只输出工具调用；"
+    "如果无需工具或现有信息已经足够，只输出 READY_TO_ANSWER，不得输出最终回答正文。"
+)
 _INSUFFICIENT_TOOL_DATA_ANSWER = (
     "现有工具结果不足，无法生成可靠答案。请缩小查询范围、指定观测站或补充必要条件后重试。"
 )
@@ -103,6 +107,84 @@ class AgentLoop:
     async def close(self) -> None:
         await self.tools.close()
 
+    async def _stream_final_answer(
+        self,
+        messages: list[dict[str, Any]],
+        citation_registry: CitationRegistry,
+        round_number: int,
+    ) -> AsyncIterator[AgentEvent]:
+        final_messages = [
+            {
+                **messages[0],
+                "content": f"{messages[0]['content']}\n\n{_FINAL_ANSWER_INSTRUCTION}",
+            },
+            *messages[1:],
+        ]
+        citation_buffer = ""
+        dsml_guard = DSMLStreamGuard()
+        dsml_blocked = False
+        has_answer_content = False
+
+        async for content, calls in self.llm.stream(final_messages, None):
+            if calls:
+                raise RuntimeError("模型在最终回答阶段仍返回了工具调用")
+            if not content:
+                continue
+            try:
+                content = dsml_guard.feed(content)
+            except DSMLParseError:
+                dsml_blocked = True
+                break
+            if not content:
+                continue
+
+            has_answer_content = has_answer_content or bool(content.strip())
+            if citation_registry.has_sources:
+                citation_buffer += content
+                content, citation_buffer = citation_registry.transform_stream_buffer(
+                    citation_buffer,
+                    final=False,
+                )
+            if content:
+                yield AgentEvent(
+                    type="answer_delta",
+                    content=content,
+                    round_number=round_number,
+                )
+
+        if not dsml_blocked:
+            try:
+                dsml_guard.finish()
+            except DSMLParseError:
+                dsml_blocked = True
+        if dsml_blocked:
+            yield AgentEvent(
+                type="answer_delta",
+                content=(
+                    f"\n{_INSUFFICIENT_TOOL_DATA_ANSWER}"
+                    if has_answer_content
+                    else _INSUFFICIENT_TOOL_DATA_ANSWER
+                ),
+                round_number=round_number,
+            )
+            return
+
+        if citation_registry.has_sources:
+            tail, citation_buffer = citation_registry.transform_stream_buffer(
+                citation_buffer,
+                final=True,
+            )
+            if citation_buffer:
+                raise RuntimeError("模型未生成有效回答")
+            if tail:
+                yield AgentEvent(
+                    type="answer_delta",
+                    content=tail,
+                    round_number=round_number,
+                )
+        if not has_answer_content:
+            raise RuntimeError("模型未生成有效回答")
+
     async def run_stream(
         self,
         question: str,
@@ -127,125 +209,45 @@ class AgentLoop:
             is_forced_final_round = (
                 self.force_answer and round_number == self.max_rounds
             )
-            available_tools = (
-                None
-                if is_forced_final_round
-                else tool_definitions or None
-            )
-            round_messages = (
-                [
-                    {
-                        **messages[0],
-                        "content": (
-                            f"{messages[0]['content']}\n\n{_FINAL_ANSWER_INSTRUCTION}"
-                        ),
-                    },
-                    *messages[1:],
-                ]
-                if is_forced_final_round
-                else messages
-            )
+            if is_forced_final_round or not tool_definitions:
+                async for event in self._stream_final_answer(
+                    messages,
+                    citation_registry,
+                    round_number,
+                ):
+                    yield event
+                return
+
+            round_messages = [
+                {
+                    **messages[0],
+                    "content": f"{messages[0]['content']}\n\n{_PLANNING_INSTRUCTION}",
+                },
+                *messages[1:],
+            ]
             content_parts: list[str] = []
             tool_calls: list[dict[str, Any]] = []
-            citation_buffer = ""
             has_answer_content = False
-            stream_answer = available_tools is None
-            dsml_guard = DSMLStreamGuard() if is_forced_final_round else None
-            dsml_blocked = False
 
             async for content, calls in self.llm.stream(
-                round_messages, available_tools
+                round_messages, tool_definitions
             ):
-                if content and dsml_guard is not None:
-                    try:
-                        content = dsml_guard.feed(content)
-                    except DSMLParseError:
-                        dsml_blocked = True
-                        break
                 if content:
                     has_answer_content = has_answer_content or bool(content.strip())
-                    if stream_answer:
-                        if citation_registry.has_sources:
-                            citation_buffer += content
-                            transformed, citation_buffer = (
-                                citation_registry.transform_stream_buffer(
-                                    citation_buffer,
-                                    final=False,
-                                )
-                            )
-                        else:
-                            transformed = content
-                        if transformed:
-                            yield AgentEvent(
-                                type="answer_delta",
-                                content=transformed,
-                                round_number=round_number,
-                            )
-                    else:
-                        content_parts.append(content)
+                    content_parts.append(content)
                 if calls:
-                    if is_forced_final_round:
-                        raise RuntimeError("模型在最终回答轮次仍返回了工具调用")
-                    if stream_answer and has_answer_content:
-                        raise RuntimeError("模型同时返回了回答正文和工具调用")
                     tool_calls.extend(calls)
-
-            if dsml_guard is not None and not dsml_blocked:
-                try:
-                    dsml_guard.finish()
-                except DSMLParseError:
-                    dsml_blocked = True
-            if dsml_blocked:
-                yield AgentEvent(
-                    type="answer_delta",
-                    content=(
-                        f"\n{_INSUFFICIENT_TOOL_DATA_ANSWER}"
-                        if has_answer_content
-                        else _INSUFFICIENT_TOOL_DATA_ANSWER
-                    ),
-                    round_number=round_number,
-                )
-                return
 
             content = "".join(content_parts)
             if not tool_calls:
                 if not has_answer_content:
                     raise RuntimeError("模型未生成有效回答")
-                if citation_registry.has_sources:
-                    if not stream_answer:
-                        for part in content_parts:
-                            citation_buffer += part
-                            transformed, citation_buffer = (
-                                citation_registry.transform_stream_buffer(
-                                    citation_buffer,
-                                    final=False,
-                                )
-                            )
-                            if transformed:
-                                yield AgentEvent(
-                                    type="answer_delta",
-                                    content=transformed,
-                                    round_number=round_number,
-                                )
-                    tail, citation_buffer = citation_registry.transform_stream_buffer(
-                        citation_buffer,
-                        final=True,
-                    )
-                    if citation_buffer:
-                        raise RuntimeError("模型未生成有效回答")
-                    if tail:
-                        yield AgentEvent(
-                            type="answer_delta",
-                            content=tail,
-                            round_number=round_number,
-                        )
-                elif not stream_answer:
-                    for part in content_parts:
-                        yield AgentEvent(
-                            type="answer_delta",
-                            content=part,
-                            round_number=round_number,
-                        )
+                async for event in self._stream_final_answer(
+                    messages,
+                    citation_registry,
+                    round_number,
+                ):
+                    yield event
                 return
 
             normalized_calls: list[dict[str, Any]] = []
