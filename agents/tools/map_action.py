@@ -13,12 +13,11 @@ TOOL_DESCRIPTION = (
     "不得再调用本工具重复清图、标点、定位或适配站点视野。"
     "只有用户明确要求额外执行独立的定位、飞行、绘图、清除图层、展示弹窗/表格、"
     "播放时序或轨迹等地图操作时，才使用本工具。"
-    "FLY_TO 会自动先清除旧的站点和定位标记，再添加中心点标记并执行飞行；"
-    "可通过 payload.marker_name 指定标记名称。"
+    "FLY_TO 只移动地图视野，不创建或清除标记；使用 center（兼容 coordinates）和 zoom。"
     "关键参数：LOCATE.points，MARKER_ADD.markers（每项含 id、name、coordinates），"
     "MARKER_REMOVE.marker_ids，POLYGON_DRAW.coordinates，"
     "CIRCLE_DRAW.center/radius，POPUP_SHOW.coordinates/title/content_html，"
-    "TABLE_SHOW.title/columns/data，FLY_TO.center，TIMELINE_PLAY.scene，"
+    "TABLE_SHOW.title/columns/data，FLY_TO.center/zoom，TIMELINE_PLAY.scene，"
     "HEATMAP_SHOW.data_type，TRACK_PLAY.track_type/track_id，"
     "COMPARE_STATIONS.station_ids/data_types；CLEAR 可使用空 payload。"
 )
@@ -67,7 +66,7 @@ _REQUIRED_PAYLOAD_FIELDS: dict[str, tuple[str, ...]] = {
     "POPUP_SHOW": ("coordinates", "title", "content_html"),
     "CLEAR": (),
     "TABLE_SHOW": ("title", "columns", "data"),
-    "FLY_TO": ("center",),
+    "FLY_TO": (),
     "TIMELINE_PLAY": ("scene",),
     "HEATMAP_SHOW": ("data_type",),
     "TRACK_PLAY": ("track_type", "track_id"),
@@ -82,51 +81,47 @@ def execute_map_action(action_type: str, payload: dict[str, Any]) -> ToolOutput:
     if not isinstance(payload, dict):
         raise ValueError("payload 必须为对象")
 
+    normalized_payload = payload
+    if normalized_type == "FLY_TO":
+        location = payload.get("center")
+        if location is None:
+            location = payload.get("coordinates")
+        center = _point(location, "center 或 coordinates")
+        zoom = payload.get("zoom", 12)
+        if isinstance(zoom, bool) or not isinstance(zoom, (int, float)):
+            raise ValueError("FLY_TO zoom 必须为数值")
+        normalized_payload = {
+            **payload,
+            "center": center,
+            "zoom": zoom,
+        }
+        normalized_payload.pop("coordinates", None)
+        normalized_payload.pop("marker_name", None)
+
     missing = [
         field
         for field in _REQUIRED_PAYLOAD_FIELDS[normalized_type]
-        if field not in payload or payload[field] is None
+        if field not in normalized_payload or normalized_payload[field] is None
     ]
     if missing:
         raise ValueError(
             f"{normalized_type} 缺少必填参数：{', '.join(missing)}"
         )
 
-    event = {"action_type": normalized_type, "payload": payload}
-    client_events = (event,)
-    if normalized_type == "FLY_TO":
-        marker_name = str(payload.get("marker_name") or "定位点").strip()
-        client_events = (
-            {
-                "action_type": "CLEAR",
-                "payload": {
-                    "layer_ids": [
-                        "observation-stations",
-                        "map-location-markers",
-                    ]
-                },
-            },
-            {
-                "action_type": "MARKER_ADD",
-                "payload": {
-                    "layer_id": "map-location-markers",
-                    "markers": [
-                        {
-                            "id": "fly-to-target",
-                            "name": marker_name,
-                            "coordinates": payload["center"],
-                        }
-                    ],
-                    "fit_bounds": False,
-                },
-            },
-            event,
-        )
+    event = {"action_type": normalized_type, "payload": normalized_payload}
     return ToolOutput(
         content={
             "success": True,
             "message": "地图动作已发送",
             "action_type": normalized_type,
         },
-        client_events=client_events,
+        client_events=(event,),
     )
+
+
+def _point(value: Any, name: str) -> list[float]:
+    if not isinstance(value, list) or len(value) != 2:
+        raise ValueError(f"FLY_TO {name} 必须包含两个数值")
+    if any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in value):
+        raise ValueError(f"FLY_TO {name} 必须包含两个数值")
+    return [float(value[0]), float(value[1])]

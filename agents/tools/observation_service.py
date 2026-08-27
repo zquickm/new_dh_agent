@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Optional
@@ -11,10 +12,22 @@ from tool_backends.spatial_backend import SpatialServiceClient
 
 logger = logging.getLogger(__name__)
 
+_POPUP_LABELS = {
+    "watertemp": "水温",
+    "salinity": "盐度",
+    "wave_height": "波高",
+    "wind_speed": "风速",
+    "tidal": "潮位",
+    "current_speed": "流速",
+}
+
 TOOL_NAME = "observation_service"
 TOOL_DESCRIPTION = (
     "查询海洋观测站的空间分布、类型、详情、在线状态、最新观测、要素趋势或指定时间区间观测数据。"
     "需要真实观测站或观测要素数据时使用；站点查询和单站分析结果会自动清除旧站点图层并联动地图。"
+    "查询明确指定的站点时，如需先用 search_stations 解析站号，应传 station_name；"
+    "任何仅为解析站号或查找目标地点附近站点的检索都应设置 render_map=false，"
+    "得到站号后再执行单站查询；不得把内部查找的候选站点全部展示到地图。"
     "只能使用 operation 枚举中列出的操作，不得编造操作名。当前不支持跨多个站点批量比较或排名"
     "最新观测值，不能仅凭站点位置判断哪里浪最大；能力不足时应直接说明。"
 )
@@ -69,6 +82,15 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "minItems": 3,
         },
         "station_types": {"type": "array", "items": {"type": "string"}},
+        "station_name": {
+            "type": "string",
+            "description": "search_stations 可选；按站名收窄候选结果",
+        },
+        "render_map": {
+            "type": "boolean",
+            "default": True,
+            "description": "search_stations 是否展示结果；仅为解析站号而检索时设为 false",
+        },
         "tznos": {
             "type": "array",
             "items": {"type": "string"},
@@ -138,12 +160,26 @@ class ObservationServiceTool:
         if operation == "list_station_types":
             data = await self.client.list_station_types()
         elif operation == "search_stations":
+            station_name = arguments.get("station_name")
+            if station_name is not None:
+                station_name = self._required_text(station_name, "station_name")
+            render_map = self._optional_bool(
+                arguments.get("render_map"),
+                "render_map",
+                default=True,
+            )
             data = await self.client.query_stations(
                 self._station_query_payload(arguments)
             )
+            data = self._filter_stations_by_name(
+                data,
+                station_name,
+            )
             return ToolOutput(
                 content={"operation": operation, **data},
-                client_events=tuple(self._station_map_actions(data)),
+                client_events=(
+                    tuple(self._station_map_actions(data)) if render_map else ()
+                ),
             )
         elif operation == "station_status":
             tznos = self._string_list(
@@ -151,7 +187,21 @@ class ObservationServiceTool:
             )
             data = await self.client.query_station_status(tznos)
             if len(tznos) == 1:
-                client_events = tuple(await self._single_station_map_actions(tznos[0]))
+                status_list = data.get("statusList")
+                status_data = next(
+                    (
+                        item
+                        for item in status_list
+                        if isinstance(item, dict) and item.get("tzno") == tznos[0]
+                    ),
+                    None,
+                ) if isinstance(status_list, list) else None
+                client_events = tuple(
+                    await self._single_station_map_actions(
+                        tznos[0],
+                        popup_data=status_data,
+                    )
+                )
             else:
                 client_events = tuple(
                     self._station_map_actions({"stations": data.get("statusList")})
@@ -160,12 +210,18 @@ class ObservationServiceTool:
             tzno = self._required_text(arguments.get("tzno"), "tzno")
             data = await self.client.get_station_detail(tzno)
             client_events = tuple(
-                self._station_map_actions({"stations": [data]})
+                self._station_map_actions(
+                    {"stations": [data]},
+                    popup_data=data,
+                    focus_single=True,
+                )
             )
         elif operation == "observation_summary":
             tzno = self._required_text(arguments.get("tzno"), "tzno")
             data = await self.client.get_observation_summary(tzno)
-            client_events = tuple(await self._single_station_map_actions(tzno))
+            client_events = tuple(
+                await self._single_station_map_actions(tzno, popup_data=data)
+            )
         elif operation == "observation_trend":
             tzno = self._required_text(arguments.get("tzno"), "tzno")
             data = await self.client.get_element_trend(
@@ -173,11 +229,15 @@ class ObservationServiceTool:
                 self._required_text(arguments.get("element"), "element"),
                 self._positive_int(arguments.get("hours", 24), "hours"),
             )
-            client_events = tuple(await self._single_station_map_actions(tzno))
+            client_events = tuple(
+                await self._single_station_map_actions(tzno, popup_data=data)
+            )
         elif operation == "observation_range":
             tzno = self._required_text(arguments.get("tzno"), "tzno")
             data = await self._observation_range(arguments)
-            client_events = tuple(await self._single_station_map_actions(tzno))
+            client_events = tuple(
+                await self._single_station_map_actions(tzno, popup_data=data)
+            )
         else:
             raise ValueError(f"不支持的观测操作：{operation}")
         return ToolOutput(
@@ -255,9 +315,41 @@ class ObservationServiceTool:
             )
         return payload
 
+    @classmethod
+    def _filter_stations_by_name(
+        cls,
+        data: dict[str, Any],
+        station_name: Any,
+    ) -> dict[str, Any]:
+        if station_name is None:
+            return data
+        keyword = cls._station_name_key(
+            cls._required_text(station_name, "station_name")
+        )
+        raw_stations = data.get("stations")
+        if not isinstance(raw_stations, list):
+            raw_stations = []
+        stations = [
+            station
+            for station in raw_stations
+            if isinstance(station, dict)
+            and keyword == cls._station_name_key(station.get("name"))
+        ]
+        return {**data, "total": len(stations), "stations": stations}
+
+    @staticmethod
+    def _station_name_key(value: Any) -> str:
+        text = "".join(str(value or "").split()).casefold()
+        for suffix in ("观测站", "站"):
+            if text.endswith(suffix):
+                return text[: -len(suffix)]
+        return text
+
     async def _single_station_map_actions(
         self,
         tzno: str,
+        *,
+        popup_data: Optional[dict[str, Any]] = None,
     ) -> list[dict[str, Any]]:
         try:
             station = await self.client.get_station_detail(tzno)
@@ -268,10 +360,20 @@ class ObservationServiceTool:
                 exc_info=True,
             )
             station = None
-        return self._station_map_actions({"stations": [station]})
+        return self._station_map_actions(
+            {"stations": [station]},
+            popup_data=popup_data,
+            focus_single=True,
+        )
 
-    @staticmethod
-    def _station_map_actions(data: dict[str, Any]) -> list[dict[str, Any]]:
+    @classmethod
+    def _station_map_actions(
+        cls,
+        data: dict[str, Any],
+        *,
+        popup_data: Optional[dict[str, Any]] = None,
+        focus_single: bool = False,
+    ) -> list[dict[str, Any]]:
         raw_stations = data.get("stations")
         if not isinstance(raw_stations, list):
             raw_stations = []
@@ -297,9 +399,18 @@ class ObservationServiceTool:
                 "name": name,
                 "coordinates": [float(lon), float(lat)],
             }
-            station_type = str(station.get("type") or "").strip()
+            station_type = str(
+                station.get("type") or station.get("station_type") or ""
+            ).strip()
             if station_type:
                 marker["type"] = station_type
+            status = str(station.get("status") or "").strip()
+            if status:
+                marker["status"] = status
+            marker["popup_content"] = cls._station_popup_content(
+                station,
+                popup_data if len(raw_stations) == 1 else None,
+            )
             markers.append(marker)
 
         actions = [
@@ -315,11 +426,84 @@ class ObservationServiceTool:
                     "payload": {
                         "layer_id": "observation-stations",
                         "markers": markers,
-                        "fit_bounds": True,
+                        "fit_bounds": not focus_single,
+                    },
+                }
+            )
+        if focus_single and len(markers) == 1:
+            actions.append(
+                {
+                    "action_type": "FLY_TO",
+                    "payload": {
+                        "center": markers[0]["coordinates"],
+                        "zoom": 12,
                     },
                 }
             )
         return actions
+
+    @classmethod
+    def _station_popup_content(
+        cls,
+        station: dict[str, Any],
+        popup_data: Optional[dict[str, Any]],
+    ) -> dict[str, Any]:
+        fields: list[dict[str, str]] = []
+        seen_labels: set[str] = set()
+
+        def add(label: str, value: Any) -> None:
+            if value is None or value == "" or label in seen_labels:
+                return
+            seen_labels.add(label)
+            fields.append({"label": label, "value": cls._popup_value(value)})
+
+        add("站号", station.get("tzno"))
+        add("站点类型", station.get("station_type") or station.get("type"))
+        for key, label in (
+            ("status", "状态"),
+            ("province", "省份"),
+            ("management", "管理单位"),
+            ("operator", "运营单位"),
+            ("sub_type", "子类型"),
+            ("last_update", "最后更新时间"),
+        ):
+            add(label, station.get(key))
+
+        if isinstance(popup_data, dict):
+            for key, label in (
+                ("status", "状态"),
+                ("lastUpdateTime", "最后数据时间"),
+                ("element", "观测要素"),
+                ("dataType", "数据类型"),
+                ("startTime", "开始时间"),
+                ("endTime", "结束时间"),
+                ("totalCount", "总记录数"),
+                ("returnedCount", "返回记录数"),
+                ("sampled", "是否采样"),
+            ):
+                add(label, popup_data.get(key))
+            for container_key in ("statusRecord", "summary"):
+                values = popup_data.get(container_key)
+                if isinstance(values, dict):
+                    for key, value in values.items():
+                        add(_POPUP_LABELS.get(key, key), value)
+            points = popup_data.get("points")
+            if isinstance(points, list):
+                add("趋势点数", len(points))
+            records = popup_data.get("records")
+            if isinstance(records, list):
+                add("记录数", len(records))
+
+        name = str(station.get("name") or station.get("tzno") or "观测站").strip()
+        return {"title": f"{name} - 观测信息", "fields": fields}
+
+    @staticmethod
+    def _popup_value(value: Any) -> str:
+        if isinstance(value, bool):
+            return "是" if value else "否"
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        return str(value)
 
     @staticmethod
     def _required_text(value: Any, name: str) -> str:
@@ -358,6 +542,14 @@ class ObservationServiceTool:
         if result <= 0:
             raise ValueError(f"{name} 必须大于 0")
         return result
+
+    @staticmethod
+    def _optional_bool(value: Any, name: str, *, default: bool) -> bool:
+        if value is None:
+            return default
+        if not isinstance(value, bool):
+            raise ValueError(f"{name} 必须为布尔值")
+        return value
 
     @staticmethod
     def _required_time(value: Any, name: str) -> datetime:

@@ -126,6 +126,22 @@ class RequestContextAdapterTest(unittest.TestCase):
         self.assertIn("必须完整使用 selected_area 中的 query_type", enriched)
         self.assertIn('"query_type":"polygon"', enriched)
 
+    def test_named_station_takes_priority_over_selected_area_display(self):
+        payload = {
+            **FRONTEND_REQUEST,
+            "message": "小洋山站水温多少",
+        }
+        request = AgentRequest.model_validate(payload)
+
+        enriched = enrich_question_with_frontend_context(
+            request.question,
+            request.context,
+        )
+
+        self.assertIn("单个站点或地点，则该对象优先", enriched)
+        self.assertIn("station_name", enriched)
+        self.assertIn("render_map=false", enriched)
+
     def test_rejects_unclosed_polygon(self):
         payload = {
             **FRONTEND_REQUEST,

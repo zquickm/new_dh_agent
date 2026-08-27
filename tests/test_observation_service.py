@@ -43,7 +43,9 @@ class FakeSpatialClient:
         return {
             "tzno": tzno,
             "name": "站点A",
-            "type": "shore_station",
+            "station_type": "shore_station",
+            "status": "online",
+            "province": "浙江",
             "lon": 122.1,
             "lat": 30.2,
         }
@@ -70,6 +72,7 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("不支持跨多个站点批量比较或排名", TOOL_DESCRIPTION)
         self.assertIn("不得编造操作名", TOOL_DESCRIPTION)
+        self.assertIn("render_map=false", TOOL_DESCRIPTION)
 
     async def test_station_search_returns_model_data_and_ordered_map_actions(self):
         client = FakeSpatialClient()
@@ -127,11 +130,47 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [event["action_type"] for event in output.client_events],
-            ["CLEAR", "MARKER_ADD"],
+            ["CLEAR", "MARKER_ADD", "FLY_TO"],
         )
         markers = output.client_events[1]["payload"]["markers"]
         self.assertEqual(len(markers), 1)
         self.assertEqual(markers[0]["id"], "A001")
+        self.assertEqual(markers[0]["type"], "shore_station")
+        self.assertEqual(markers[0]["status"], "online")
+        self.assertEqual(markers[0]["popup_content"]["title"], "站点A - 观测信息")
+        self.assertIn(
+            {"label": "省份", "value": "浙江"},
+            markers[0]["popup_content"]["fields"],
+        )
+        self.assertEqual(
+            output.client_events[2]["payload"],
+            {"center": [122.1, 30.2], "zoom": 12},
+        )
+
+    async def test_station_lookup_filters_by_name_without_rendering_candidates(self):
+        client = FakeSpatialClient()
+        tool = ObservationServiceTool(client)
+
+        output = await tool.execute(
+            "search_stations",
+            query_type="circle",
+            center=[122.2, 30.3],
+            radius=10000,
+            station_name="站点A站",
+            render_map=False,
+        )
+
+        self.assertEqual(output.content["total"], 1)
+        self.assertEqual(output.content["stations"][0]["tzno"], "A001")
+        self.assertEqual(output.client_events, ())
+        self.assertEqual(
+            client.calls[0][1],
+            {
+                "query_type": "circle",
+                "center": [122.2, 30.3],
+                "radius": 10000.0,
+            },
+        )
 
     async def test_single_station_analysis_uses_detail_for_map_marker(self):
         client = FakeSpatialClient()
@@ -148,11 +187,13 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [event["action_type"] for event in output.client_events],
-            ["CLEAR", "MARKER_ADD"],
+            ["CLEAR", "MARKER_ADD", "FLY_TO"],
         )
-        self.assertEqual(
-            len(output.client_events[1]["payload"]["markers"]),
-            1,
+        marker = output.client_events[1]["payload"]["markers"][0]
+        self.assertEqual(len(output.client_events[1]["payload"]["markers"]), 1)
+        self.assertIn(
+            {"label": "水温", "value": "25.3"},
+            marker["popup_content"]["fields"],
         )
 
     def test_missing_station_list_still_clears_previous_station_layer(self):
@@ -190,6 +231,16 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
                 query_type="circle",
                 center=[122.2, 30.3],
                 radius=0,
+            )
+
+        with self.assertRaisesRegex(ValueError, "station_name"):
+            await tool.execute(
+                "search_stations",
+                query_type="circle",
+                center=[122.2, 30.3],
+                radius=10000,
+                station_name=" ",
+                render_map=False,
             )
 
         self.assertEqual(client.calls, [])
