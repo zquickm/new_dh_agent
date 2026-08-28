@@ -63,7 +63,14 @@ class PolygonGeometry(BaseModel):
             max(point[0] for point in ring),
             max(point[1] for point in ring),
         ]
-        return {**value, "coordinates": [ring], "bbox": bbox}
+        normalized = {
+            "type": value.get("type"),
+            "coordinates": [ring],
+            "bbox": bbox,
+        }
+        if "crs" in value:
+            normalized["crs"] = value["crs"]
+        return normalized
 
     @model_validator(mode="after")
     def validate_geometry(self) -> PolygonGeometry:

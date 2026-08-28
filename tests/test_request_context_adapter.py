@@ -1,3 +1,4 @@
+import math
 import unittest
 
 from pydantic import ValidationError
@@ -294,6 +295,55 @@ class RequestContextAdapterTest(unittest.TestCase):
             request.context.drawn_geometry.bbox,
             FRONTEND_REQUEST["context"]["drawn_geometry"]["bbox"],
         )
+
+    def test_accepts_polygonized_circle_with_radius_and_incorrect_bbox(self):
+        center_lon = 121.45220037635829
+        center_lat = 31.184881234368106
+        ring = [
+            [
+                center_lon + 0.85 * math.cos(2 * math.pi * index / 64),
+                center_lat + 0.75 * math.sin(2 * math.pi * index / 64),
+            ]
+            for index in range(65)
+        ]
+        request = AgentRequest.model_validate(
+            {
+                "sessionId": "1787889840431",
+                "message": "这个区域有哪些站点",
+                "context": {
+                    "drawn_geometry": {
+                        "type": "Polygon",
+                        "coordinates": [ring],
+                        "bbox": [
+                            center_lon,
+                            center_lat - 0.35,
+                            center_lon + 0.77,
+                            center_lat,
+                        ],
+                        "radius": 82991.07555434913,
+                    }
+                },
+            }
+        )
+
+        geometry = request.context.drawn_geometry
+        self.assertEqual(geometry.type, "Polygon")
+        self.assertFalse(hasattr(geometry, "radius"))
+        self.assertEqual(
+            geometry.bbox,
+            [
+                min(point[0] for point in ring),
+                min(point[1] for point in ring),
+                max(point[0] for point in ring),
+                max(point[1] for point in ring),
+            ],
+        )
+        enriched = enrich_question_with_frontend_context(
+            request.question,
+            request.context,
+        )
+        self.assertIn('"query_type":"polygon"', enriched)
+        self.assertIn('"polygon":[[122.30220037635829', enriched)
 
     def test_rejects_non_finite_polygon_coordinate(self):
         payload = {

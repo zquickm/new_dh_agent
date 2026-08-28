@@ -174,6 +174,36 @@ class ApiTest(unittest.TestCase):
         self.assertIn('"center":[121.8,30.4]', self.fake_agent.last_question)
         self.assertIn('"radius":25000.0', self.fake_agent.last_question)
 
+    def test_stream_accepts_polygonized_circle_with_radius_metadata(self):
+        with self.client.stream(
+            "POST",
+            "/agent/chat/stream",
+            json={
+                "sessionId": "1787889840431",
+                "message": "这个区域有哪些站点",
+                "context": {
+                    "drawn_geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [121.45, 31.93],
+                            [122.32, 31.18],
+                            [121.45, 30.44],
+                            [120.58, 31.18],
+                            [121.45, 31.93],
+                        ]],
+                        "bbox": [121.45, 30.83, 122.22, 31.18],
+                        "radius": 82991.07555434913,
+                    }
+                },
+            },
+        ) as response:
+            body = "".join(response.iter_text())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: done", body)
+        self.assertIn('"query_type":"polygon"', self.fake_agent.last_question)
+        self.assertNotIn('"radius"', self.fake_agent.last_question)
+
     def test_validation_error_returns_concise_field_path(self):
         response = self.client.post(
             "/agent/chat/stream",
