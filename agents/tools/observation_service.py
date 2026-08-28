@@ -47,7 +47,12 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "observation_trend",
                 "observation_range",
             ],
-            "description": "要执行的观测服务操作",
+            "description": (
+                "要执行的观测服务操作。参数要求：search_stations 需要 query_type "
+                "及对应几何参数；station_status 需要 tznos；station_detail 和 "
+                "observation_summary 需要 tzno；observation_trend 需要 tzno、element；"
+                "observation_range 需要 tzno、data_type、start_time、end_time。"
+            ),
         },
         "query_type": {
             "type": "string",
@@ -136,6 +141,89 @@ TOOL_PARAMETERS: dict[str, Any] = {
         },
     },
     "required": ["operation"],
+    "allOf": [
+        {
+            "if": {
+                "properties": {"operation": {"const": "search_stations"}},
+                "required": ["operation"],
+            },
+            "then": {"required": ["query_type"]},
+        },
+        {
+            "if": {
+                "properties": {
+                    "operation": {"const": "search_stations"},
+                    "query_type": {"const": "bbox"},
+                },
+                "required": ["operation", "query_type"],
+            },
+            "then": {"required": ["bbox"]},
+        },
+        {
+            "if": {
+                "properties": {
+                    "operation": {"const": "search_stations"},
+                    "query_type": {"const": "circle"},
+                },
+                "required": ["operation", "query_type"],
+            },
+            "then": {"required": ["center", "radius"]},
+        },
+        {
+            "if": {
+                "properties": {
+                    "operation": {"const": "search_stations"},
+                    "query_type": {"const": "polygon"},
+                },
+                "required": ["operation", "query_type"],
+            },
+            "then": {"required": ["polygon"]},
+        },
+        {
+            "if": {
+                "properties": {"operation": {"const": "station_status"}},
+                "required": ["operation"],
+            },
+            "then": {"required": ["tznos"]},
+        },
+        {
+            "if": {
+                "properties": {"operation": {"const": "station_detail"}},
+                "required": ["operation"],
+            },
+            "then": {"required": ["tzno"]},
+        },
+        {
+            "if": {
+                "properties": {
+                    "operation": {"const": "observation_summary"}
+                },
+                "required": ["operation"],
+            },
+            "then": {"required": ["tzno"]},
+        },
+        {
+            "if": {
+                "properties": {"operation": {"const": "observation_trend"}},
+                "required": ["operation"],
+            },
+            "then": {"required": ["tzno", "element"]},
+        },
+        {
+            "if": {
+                "properties": {"operation": {"const": "observation_range"}},
+                "required": ["operation"],
+            },
+            "then": {
+                "required": [
+                    "tzno",
+                    "data_type",
+                    "start_time",
+                    "end_time",
+                ]
+            },
+        },
+    ],
     "additionalProperties": False,
 }
 
@@ -154,6 +242,8 @@ class ObservationServiceTool:
                 timeout=settings.timeout,
                 connect_timeout=settings.connect_timeout,
                 verify_ssl=settings.verify_ssl,
+                max_retries=settings.max_retries,
+                retry_backoff=settings.retry_backoff,
             )
         return self._client
 

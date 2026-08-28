@@ -273,6 +273,72 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"query_type":"circle"', agent.questions[2])
         self.assertNotIn('"query_type":"polygon"', agent.questions[2])
 
+    async def test_single_station_follow_up_uses_history_without_reusing_map_area(self):
+        class CapturingAgent:
+            model_name = "fake-model"
+
+            def __init__(self):
+                self.calls = []
+
+            async def run_stream(self, question, history):
+                self.calls.append((question, history))
+                answers = ["区域内有小洋山站", "小洋山站运行正常", "坐标已查询"]
+                yield AgentEvent(
+                    type="answer_delta",
+                    content=answers[len(self.calls) - 1],
+                )
+
+        conversation = await conversation_repository.create("单站指代测试")
+        agent = CapturingAgent()
+        service = ChatService()
+        service._agent = agent
+        map_context = {
+            "drawn_geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [121.1, 29.8],
+                    [122.5, 29.8],
+                    [122.5, 30.7],
+                    [121.1, 30.7],
+                    [121.1, 29.8],
+                ]],
+                "bbox": [121.1, 29.8, 122.5, 30.7],
+            }
+        }
+
+        requests = [
+            AgentRequest.model_validate(
+                {
+                    "message": "这个区域有哪些站点",
+                    "conversationId": conversation.id,
+                    "map_context": map_context,
+                }
+            ),
+            AgentRequest(
+                question="小洋山站的详情",
+                conversation_id=conversation.id,
+            ),
+            AgentRequest(
+                question="该站点的经纬度是多少",
+                conversation_id=conversation.id,
+            ),
+        ]
+        for request in requests:
+            _ = [event async for event in service.stream_chat(request)]
+
+        question, history = agent.calls[2]
+        self.assertNotIn("selected_area", question)
+        self.assertIn("最近一轮明确讨论的单个站点", question)
+        self.assertEqual(
+            [message.content for message in history],
+            [
+                "这个区域有哪些站点",
+                "区域内有小洋山站",
+                "小洋山站的详情",
+                "小洋山站运行正常",
+            ],
+        )
+
     async def test_map_area_does_not_leak_between_conversations(self):
         class CapturingAgent:
             model_name = "fake-model"
@@ -358,6 +424,53 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         detail = await conversation_repository.get(conversation.id)
         self.assertEqual([message.role for message in detail.messages], ["user", "assistant"])
         self.assertEqual(detail.messages[-1].sources[0]["preview"], "检索片段")
+
+    async def test_failed_tool_process_exposes_safe_failure_reason(self):
+        class FailingAgent:
+            model_name = "fake-model"
+
+            async def run_stream(self, question, history):
+                del question, history
+                yield AgentEvent(
+                    type="tool_started",
+                    round_number=1,
+                    tool_name="observation_service",
+                    tool_call_id="call-observation",
+                )
+                yield AgentEvent(
+                    type="tool_finished",
+                    content="观测工具参数无效：query_type 不能为空",
+                    round_number=1,
+                    tool_name="observation_service",
+                    tool_call_id="call-observation",
+                    success=False,
+                )
+                yield AgentEvent(type="answer_delta", content="请重新选择区域")
+
+        conversation = await conversation_repository.create("失败原因测试")
+        service = ChatService()
+        service._agent = FailingAgent()
+
+        events = [
+            event
+            async for event in service.stream_chat(
+                AgentRequest(
+                    question="查询区域站点",
+                    conversation_id=conversation.id,
+                )
+            )
+        ]
+
+        failed_process = next(
+            event
+            for event in events
+            if event["event"] == "process"
+            and event["data"]["status"] == "failed"
+        )
+        self.assertEqual(
+            failed_process["data"]["summary"],
+            "观测工具参数无效：query_type 不能为空",
+        )
 
     async def test_answer_agent_streams_citation_before_completion(self):
         class DelayedLlm:

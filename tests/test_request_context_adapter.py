@@ -253,6 +253,22 @@ class RequestContextAdapterTest(unittest.TestCase):
         self.assertIn("station_name", enriched)
         self.assertIn("render_map=false", enriched)
 
+    def test_single_station_follow_up_does_not_reuse_selected_area(self):
+        request = AgentRequest.model_validate(
+            {
+                **FRONTEND_REQUEST,
+                "message": "该站点的经纬度是多少",
+            }
+        )
+
+        enriched = enrich_question_with_frontend_context(
+            request.question,
+            request.context,
+        )
+
+        self.assertNotIn("selected_area", enriched)
+        self.assertIn("最近一轮明确讨论的单个站点", enriched)
+
     def test_normalizes_unclosed_polygon_and_recomputes_bbox(self):
         payload = {
             **FRONTEND_REQUEST,

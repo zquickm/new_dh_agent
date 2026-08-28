@@ -29,6 +29,8 @@ tools:
     timeout: 30
     connect_timeout: 5
     verify_ssl: true
+    max_retries: 1
+    retry_backoff: 0.3
   rag:
     base_url: "http://71.10.60.34:18000"
     recall_path: "/rag-platform-default/zsgl/knowledgeRecall"

@@ -1,6 +1,6 @@
 import unittest
 
-from agents.tools.observation_service import ObservationServiceTool
+from agents.tools.observation_service import TOOL_PARAMETERS, ObservationServiceTool
 
 
 class FakeSpatialClient:
@@ -67,6 +67,37 @@ class FakeSpatialClient:
 
 
 class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
+    def test_schema_declares_operation_specific_required_arguments(self):
+        requirements = {
+            condition["if"]["properties"]["operation"]["const"]: set(
+                condition["then"]["required"]
+            )
+            for condition in TOOL_PARAMETERS["allOf"]
+            if "operation" in condition["if"]["properties"]
+            and "query_type" not in condition["if"]["properties"]
+        }
+
+        self.assertEqual(requirements["search_stations"], {"query_type"})
+        self.assertEqual(requirements["station_status"], {"tznos"})
+        self.assertEqual(requirements["station_detail"], {"tzno"})
+        self.assertEqual(requirements["observation_summary"], {"tzno"})
+        self.assertEqual(requirements["observation_trend"], {"tzno", "element"})
+        self.assertEqual(
+            requirements["observation_range"],
+            {"tzno", "data_type", "start_time", "end_time"},
+        )
+
+        geometry_requirements = {
+            condition["if"]["properties"]["query_type"]["const"]: set(
+                condition["then"]["required"]
+            )
+            for condition in TOOL_PARAMETERS["allOf"]
+            if "query_type" in condition["if"]["properties"]
+        }
+        self.assertEqual(geometry_requirements["bbox"], {"bbox"})
+        self.assertEqual(geometry_requirements["circle"], {"center", "radius"})
+        self.assertEqual(geometry_requirements["polygon"], {"polygon"})
+
     def test_description_states_cross_station_ranking_limit(self):
         from agents.tools.observation_service import TOOL_DESCRIPTION
 

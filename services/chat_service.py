@@ -8,7 +8,7 @@ from uuid import uuid4
 from agents.agent_loop import AgentLoop, build_agent_loop
 from config.settings import get_settings
 from repositories.memory_conversation_repository import conversation_repository
-from schemas.chat import AgentRequest
+from schemas.chat import AgentRequest, ChatMessage
 from services.citation_service import CitationService
 from services.request_context_adapter import enrich_question_with_frontend_context
 
@@ -45,13 +45,20 @@ class ChatService:
         run_id = str(uuid4())
         conversation_id = request.conversation_id
         if not conversation_id:
-            conversation_id = (await conversation_repository.create("新会话")).id
-        elif await conversation_repository.get(conversation_id) is None:
-            yield {
-                "event": "error",
-                "data": {"message": "会话不存在", "error_code": "CONVERSATION_NOT_FOUND", "retryable": False},
-            }
-            return
+            conversation = await conversation_repository.create("新会话")
+            conversation_id = conversation.id
+        else:
+            conversation = await conversation_repository.get(conversation_id)
+            if conversation is None:
+                yield {
+                    "event": "error",
+                    "data": {
+                        "message": "会话不存在",
+                        "error_code": "CONVERSATION_NOT_FOUND",
+                        "retryable": False,
+                    },
+                }
+                return
         yield {
             "event": "conversation",
             "data": {"conversation_id": conversation_id, "run_id": run_id},
@@ -78,8 +85,12 @@ class ChatService:
                 request.question,
                 active_context,
             )
+            history = request.chat_history or [
+                ChatMessage(role=message.role, content=message.content)
+                for message in conversation.messages
+            ]
             async for event in self.agent.run_stream(
-                agent_question, request.chat_history
+                agent_question, history
             ):
                 sequence += 1
                 if event.type == "tool_started":
@@ -129,7 +140,8 @@ class ChatService:
                         tool_display_name = self._tool_display_name(event.tool_name)
                         summary = (
                             event.content
-                            if get_settings().stream.include_tool_result
+                            if not event.success
+                            or get_settings().stream.include_tool_result
                             else f"{tool_display_name}执行{'完成' if event.success else '失败'}"
                         )
                         yield {

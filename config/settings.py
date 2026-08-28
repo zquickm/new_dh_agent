@@ -200,6 +200,8 @@ class SpatialToolSettings(BaseModel):
     timeout: float = Field(default=30, gt=0)
     connect_timeout: float = Field(default=5, gt=0)
     verify_ssl: bool = True
+    max_retries: int = Field(default=1, ge=0, le=5)
+    retry_backoff: float = Field(default=0.3, ge=0, le=10)
 
 
 class ToolSettings(BaseModel):

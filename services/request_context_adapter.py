@@ -5,6 +5,41 @@ import json
 from schemas.chat import FrontendContext
 
 
+_SINGLE_STATION_REFERENCES = (
+    "该站点",
+    "这个站点",
+    "此站点",
+    "该观测站",
+    "这个观测站",
+    "此观测站",
+    "刚才的站点",
+    "刚才的观测站",
+)
+_SINGLE_STATION_ATTRIBUTES = (
+    "经纬度",
+    "坐标",
+    "位置",
+    "详情",
+    "状态",
+    "水温",
+    "盐度",
+    "风速",
+    "波高",
+    "潮位",
+)
+
+
+def _is_single_station_follow_up(question: str) -> bool:
+    compact_question = "".join(question.split())
+    if any(reference in compact_question for reference in _SINGLE_STATION_REFERENCES):
+        return True
+    return any(
+        pronoun in compact_question and attribute in compact_question
+        for pronoun in ("它的", "其")
+        for attribute in _SINGLE_STATION_ATTRIBUTES
+    )
+
+
 def enrich_question_with_frontend_context(
     question: str,
     context: FrontendContext | None,
@@ -13,6 +48,15 @@ def enrich_question_with_frontend_context(
     geometry = context.drawn_geometry if context is not None else None
     if geometry is None:
         return question
+
+    if _is_single_station_follow_up(question):
+        return (
+            f"{question}\n\n"
+            "[会话指代规则：本轮提到的单个站点，仅指最近一轮明确讨论的单个站点。"
+            "必须从会话历史继承该站点的名称或站号，不得使用之前的地图选区重新查询、"
+            "列出或展示区域内全部站点。若会话历史无法唯一确定该站点，应请用户明确站名，"
+            "不得回退为区域查询。]"
+        )
 
     if geometry.type == "Circle":
         selected_area = {

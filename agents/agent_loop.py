@@ -26,6 +26,8 @@ SYSTEM_PROMPT = dedent(
     - 用户询问地图选区得到的观测站，或明确站名的站点位置、状态、详情、最新观测、趋势、
       指定时间区间观测数据时，必须优先调用 observation_service；即使问题包含水温、盐度、
       风、浪、潮位等数据，也不得改用 database_query。
+    - 用户用“该站点”“这个站点”“它”等单数指代继续提问时，只能继承最近一轮明确讨论的
+      单个站点；不得回退到更早的地图选区，也不得改成查询或展示选区内全部站点。
     - database_query 只用于授权业务表中的断面历史调查数据；用户明确询问 E1/E2/E3 等断面、
       调查日期、采样深度或跨记录统计时才使用。不得用它查询 observation_service 管理的观测站。
     - 需要操作前端地图时，调用 map_action；该工具只负责可视化，不能代替业务数据查询。
@@ -326,6 +328,9 @@ class AgentLoop:
                             "operation 和参数；如果现有操作无法完成问题，应明确说明能力不足，"
                             "不得编造新的 operation。"
                         )
+                    elif name == "observation_service":
+                        detail = str(exc).strip() or type(exc).__name__
+                        observation = f"观测服务调用失败：{detail}"
                     else:
                         observation = "工具执行失败"
                     retrieval_data = None

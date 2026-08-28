@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Optional
 
 import aiohttp
+
+
+logger = logging.getLogger(__name__)
 
 
 class SpatialServiceError(RuntimeError):
@@ -19,12 +23,16 @@ class SpatialServiceClient:
         timeout: float,
         connect_timeout: float,
         verify_ssl: bool,
+        max_retries: int = 0,
+        retry_backoff: float = 0.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
         self.connect_timeout = connect_timeout
         self.verify_ssl = verify_ssl
+        self.max_retries = max(0, max_retries)
+        self.retry_backoff = max(0.0, retry_backoff)
         self._session: Optional[aiohttp.ClientSession] = None
         self._session_lock = asyncio.Lock()
 
@@ -112,31 +120,63 @@ class SpatialServiceClient:
         if not self.api_key:
             raise SpatialServiceError("空间服务 API Key 未配置")
 
-        session = await self._get_session()
-        request_timeout = aiohttp.ClientTimeout(
-            total=self.timeout,
-            connect=min(self.timeout, self.connect_timeout),
-        )
-        try:
-            async with session.request(
+        body: Any = None
+        attempts = self.max_retries + 1
+        for attempt in range(attempts):
+            retryable_error: Optional[BaseException] = None
+            try:
+                session = await self._get_session()
+                request_timeout = aiohttp.ClientTimeout(
+                    total=self.timeout,
+                    connect=min(self.timeout, self.connect_timeout),
+                )
+                async with session.request(
+                    method,
+                    f"{self.base_url}{path}",
+                    json=json,
+                    params=params,
+                    headers={"X-API-Key": self.api_key},
+                    ssl=self.verify_ssl,
+                    timeout=request_timeout,
+                ) as response:
+                    if not 200 <= response.status < 300:
+                        error = SpatialServiceError(
+                            f"空间服务返回 HTTP {response.status}"
+                        )
+                        if response.status == 429 or response.status >= 500:
+                            retryable_error = error
+                        else:
+                            raise error
+                    else:
+                        try:
+                            body = await response.json(content_type=None)
+                        except (aiohttp.ContentTypeError, ValueError) as exc:
+                            raise SpatialServiceError(
+                                "空间服务返回了无效 JSON"
+                            ) from exc
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                retryable_error = exc
+
+            if retryable_error is None:
+                break
+            if attempt + 1 >= attempts:
+                if isinstance(retryable_error, SpatialServiceError):
+                    raise retryable_error
+                raise SpatialServiceError("空间服务请求失败") from retryable_error
+
+            delay = self.retry_backoff * (2**attempt)
+            logger.warning(
+                "Spatial service attempt %s/%s failed; retrying in %.2fs: "
+                "method=%s path=%s error_type=%s",
+                attempt + 1,
+                attempts,
+                delay,
                 method,
-                f"{self.base_url}{path}",
-                json=json,
-                params=params,
-                headers={"X-API-Key": self.api_key},
-                ssl=self.verify_ssl,
-                timeout=request_timeout,
-            ) as response:
-                if not 200 <= response.status < 300:
-                    raise SpatialServiceError(
-                        f"空间服务返回 HTTP {response.status}"
-                    )
-                try:
-                    body = await response.json(content_type=None)
-                except (aiohttp.ContentTypeError, ValueError) as exc:
-                    raise SpatialServiceError("空间服务返回了无效 JSON") from exc
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-            raise SpatialServiceError("空间服务请求失败") from exc
+                path,
+                type(retryable_error).__name__,
+            )
+            if delay:
+                await asyncio.sleep(delay)
 
         if not isinstance(body, dict):
             raise SpatialServiceError("空间服务响应结构无效")
