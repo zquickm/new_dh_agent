@@ -20,6 +20,18 @@ _POPUP_LABELS = {
     "tidal": "潮位",
     "current_speed": "流速",
 }
+_GLOBAL_STATION_BBOX = [-180.0, -90.0, 180.0, 90.0]
+_STATION_TYPE_ALIASES = {
+    "buoy": "buoy",
+    "浮标": "buoy",
+    "浮标站": "buoy",
+    "浮标观测站": "buoy",
+    "radar": "radar",
+    "radar_station": "radar",
+    "雷达": "radar",
+    "雷达站": "radar",
+    "雷达观测站": "radar",
+}
 
 TOOL_NAME = "observation_service"
 TOOL_DESCRIPTION = (
@@ -88,7 +100,13 @@ TOOL_PARAMETERS: dict[str, Any] = {
             },
             "minItems": 3,
         },
-        "station_types": {"type": "array", "items": {"type": "string"}},
+        "station_types": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "站点类型编码；浮标、浮标站使用 buoy，雷达、雷达站使用 radar"
+            ),
+        },
         "station_name": {
             "type": "string",
             "description": "search_stations 可选；按站名收窄候选结果",
@@ -377,6 +395,12 @@ class ObservationServiceTool:
         )
 
     def _station_query_payload(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if arguments.get("station_name") is not None:
+            arguments = {
+                **arguments,
+                "query_type": "bbox",
+                "bbox": list(_GLOBAL_STATION_BBOX),
+            }
         query_type = self._required_text(arguments.get("query_type"), "query_type")
         payload: dict[str, Any] = {"query_type": query_type}
         if query_type == "bbox":
@@ -402,10 +426,20 @@ class ObservationServiceTool:
         else:
             raise ValueError("query_type 只能为 bbox、circle 或 polygon")
         if arguments.get("station_types") is not None:
-            payload["station_types"] = self._string_list(
-                arguments["station_types"], "station_types"
+            payload["station_types"] = self._normalize_station_types(
+                arguments["station_types"]
             )
         return payload
+
+    @classmethod
+    def _normalize_station_types(cls, value: Any) -> list[str]:
+        normalized: list[str] = []
+        for station_type in cls._string_list(value, "station_types"):
+            key = "".join(station_type.split()).casefold()
+            canonical = _STATION_TYPE_ALIASES.get(key, station_type)
+            if canonical not in normalized:
+                normalized.append(canonical)
+        return normalized
 
     @classmethod
     def _filter_stations_by_name(
@@ -432,7 +466,16 @@ class ObservationServiceTool:
     @staticmethod
     def _station_name_key(value: Any) -> str:
         text = "".join(str(value or "").split()).casefold()
-        for suffix in ("观测站", "站"):
+        for suffix in (
+            "浮标观测站",
+            "观测平台",
+            "平台站",
+            "观测站",
+            "浮标站",
+            "平台",
+            "浮标",
+            "站",
+        ):
             if text.endswith(suffix):
                 return text[: -len(suffix)]
         return text

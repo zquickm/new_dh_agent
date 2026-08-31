@@ -235,6 +235,9 @@ class RequestContextAdapterTest(unittest.TestCase):
         self.assertTrue(enriched.startswith("输出观测站点\n\n"))
         self.assertIn("都默认限定在 selected_area", enriched)
         self.assertIn("必须完整使用 selected_area 中的 query_type", enriched)
+        self.assertIn("浮标、浮标站使用 buoy", enriched)
+        self.assertIn("雷达、雷达站使用 radar", enriched)
+        self.assertIn("selected_area 是本轮唯一有效选区", enriched)
         self.assertIn('"query_type":"polygon"', enriched)
 
     def test_named_station_takes_priority_over_selected_area_display(self):

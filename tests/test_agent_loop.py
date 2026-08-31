@@ -389,6 +389,72 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             ["CLEAR", "MARKER_ADD", "FLY_TO"],
         )
 
+    async def test_keeps_fly_to_marker_after_area_station_rendering(self):
+        llm = FakeLlm(
+            [
+                (
+                    [],
+                    [{
+                        "id": "call-area",
+                        "name": "observation_service",
+                        "args": {},
+                        "type": "tool_call",
+                    }],
+                ),
+                (
+                    [],
+                    [{
+                        "id": "call-map",
+                        "name": "map_action",
+                        "args": {},
+                        "type": "tool_call",
+                    }],
+                ),
+                (["定位完成"], []),
+            ]
+        )
+
+        async def observation_service():
+            return ToolOutput(
+                content={"total": 2},
+                client_events=(
+                    {"action_type": "CLEAR", "payload": {}},
+                    {
+                        "action_type": "MARKER_ADD",
+                        "payload": {"markers": [1, 2]},
+                    },
+                ),
+            )
+
+        async def map_action():
+            return ToolOutput(
+                content={"success": True},
+                client_events=(
+                    {"action_type": "CLEAR", "payload": {}},
+                    {"action_type": "MARKER_ADD", "payload": {"markers": [1]}},
+                    {
+                        "action_type": "FLY_TO",
+                        "payload": {"center": [121.5, 31.2], "zoom": 12},
+                    },
+                ),
+            )
+
+        tools = ToolExecutor()
+        tools.register("observation_service", "观测查询", observation_service)
+        tools.register("map_action", "地图操作", map_action)
+        agent = AgentLoop(llm, tools)
+
+        events = [event async for event in agent.run_stream("查询后定位", [])]
+
+        self.assertEqual(
+            [
+                event.data["action_type"]
+                for event in events
+                if event.type == "map_action"
+            ],
+            ["CLEAR", "MARKER_ADD", "CLEAR", "MARKER_ADD", "FLY_TO"],
+        )
+
     async def test_keeps_later_single_station_observation_map_events(self):
         llm = FakeLlm(
             [

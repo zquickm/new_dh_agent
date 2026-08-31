@@ -259,7 +259,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 }
             ),
             AgentRequest(
-                question="这个区域还有哪些站点",
+                question="只保留这个区域内的雷达站",
                 conversation_id=conversation.id,
             ),
         ]
@@ -272,6 +272,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"radius":18000.0', agent.questions[1])
         self.assertIn('"query_type":"circle"', agent.questions[2])
         self.assertNotIn('"query_type":"polygon"', agent.questions[2])
+        self.assertIn("雷达、雷达站使用 radar", agent.questions[2])
 
     async def test_single_station_follow_up_uses_history_without_reusing_map_area(self):
         class CapturingAgent:

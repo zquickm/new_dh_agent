@@ -142,6 +142,50 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_circle_station_filter_normalizes_buoy_alias(self):
+        client = FakeSpatialClient()
+        tool = ObservationServiceTool(client)
+
+        await tool.execute(
+            "search_stations",
+            query_type="circle",
+            center=[122.2, 30.3],
+            radius=10000,
+            station_types=["浮标站", "buoy"],
+        )
+
+        self.assertEqual(
+            client.calls[0][1],
+            {
+                "query_type": "circle",
+                "center": [122.2, 30.3],
+                "radius": 10000.0,
+                "station_types": ["buoy"],
+            },
+        )
+
+    async def test_circle_station_filter_normalizes_radar_alias(self):
+        client = FakeSpatialClient()
+        tool = ObservationServiceTool(client)
+
+        await tool.execute(
+            "search_stations",
+            query_type="circle",
+            center=[122.2, 30.3],
+            radius=10000,
+            station_types=["雷达站", "radar_station"],
+        )
+
+        self.assertEqual(
+            client.calls[0][1],
+            {
+                "query_type": "circle",
+                "center": [122.2, 30.3],
+                "radius": 10000.0,
+                "station_types": ["radar"],
+            },
+        )
+
     def test_empty_station_result_clears_previous_station_layer(self):
         actions = ObservationServiceTool._station_map_actions({"stations": []})
 
@@ -180,7 +224,7 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
             {"center": [122.1, 30.2], "zoom": 12},
         )
 
-    async def test_station_lookup_filters_by_name_without_rendering_candidates(self):
+    async def test_station_lookup_ignores_old_area_and_normalizes_platform_suffix(self):
         client = FakeSpatialClient()
         tool = ObservationServiceTool(client)
 
@@ -189,7 +233,7 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
             query_type="circle",
             center=[122.2, 30.3],
             radius=10000,
-            station_name="站点A站",
+            station_name="站点A平台",
             render_map=False,
         )
 
@@ -199,9 +243,8 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             client.calls[0][1],
             {
-                "query_type": "circle",
-                "center": [122.2, 30.3],
-                "radius": 10000.0,
+                "query_type": "bbox",
+                "bbox": [-180.0, -90.0, 180.0, 90.0],
             },
         )
 
