@@ -153,6 +153,31 @@ DrawnGeometry = Annotated[
 ]
 
 
+def _polygonized_circle_center(coordinates: Any) -> Optional[list[float]]:
+    if (
+        not isinstance(coordinates, list)
+        or len(coordinates) != 1
+        or not isinstance(coordinates[0], list)
+        or len(coordinates[0]) < 3
+    ):
+        return None
+    points: list[list[float]] = []
+    for point in coordinates[0]:
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            return None
+        try:
+            normalized = [float(point[0]), float(point[1])]
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(item) for item in normalized):
+            return None
+        points.append(normalized)
+    return [
+        (min(point[0] for point in points) + max(point[0] for point in points)) / 2,
+        (min(point[1] for point in points) + max(point[1] for point in points)) / 2,
+    ]
+
+
 class FrontendContext(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -183,6 +208,17 @@ class FrontendContext(BaseModel):
             value.get("type") or value.get("query_type") or ""
         ).strip().lower()
         is_circle_payload = "center" in value and "radius" in value
+        if geometry_type == "polygon" and "radius" in value:
+            center = value.get("center") or _polygonized_circle_center(
+                value.get("coordinates")
+            )
+            if center is not None:
+                return {
+                    "type": "Circle",
+                    "center": center,
+                    "radius": value.get("radius"),
+                    "crs": value.get("crs") or "EPSG:4490",
+                }
         if geometry_type in {"circle", "circle_draw"} or (
             not geometry_type and is_circle_payload
         ):
