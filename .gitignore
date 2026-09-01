@@ -3,7 +3,6 @@
 __pycache__/
 .idea
 wheelhouse
+logs/
 *.py[cod]
-
-# Local environment files may contain API keys or database passwords.
-env copy.txt
+打包部署.command

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from time import perf_counter
 from typing import Optional
 from uuid import uuid4
 
@@ -42,6 +43,7 @@ class ChatService:
             self._agent = None
 
     async def stream_chat(self, request: AgentRequest) -> AsyncIterator[dict]:
+        started_at = perf_counter()
         run_id = str(uuid4())
         conversation_id = request.conversation_id
         if not conversation_id:
@@ -50,6 +52,13 @@ class ChatService:
         else:
             conversation = await conversation_repository.get(conversation_id)
             if conversation is None:
+                logger.warning(
+                    "chat_rejected run_id=%s conversation_id=%s question=%r "
+                    "reason=conversation_not_found",
+                    run_id,
+                    conversation_id,
+                    request.question,
+                )
                 yield {
                     "event": "error",
                     "data": {
@@ -89,8 +98,19 @@ class ChatService:
                 ChatMessage(role=message.role, content=message.content)
                 for message in conversation.messages
             ]
+            logger.info(
+                "chat_started run_id=%s conversation_id=%s question=%r "
+                "agent_question=%r history=%r",
+                run_id,
+                conversation_id,
+                request.question,
+                agent_question,
+                history,
+            )
             async for event in self.agent.run_stream(
-                agent_question, history
+                agent_question,
+                history,
+                run_id=run_id,
             ):
                 sequence += 1
                 if event.type == "tool_started":
@@ -176,6 +196,15 @@ class ChatService:
             message = await conversation_repository.save_exchange(
                 conversation_id, request.question, answer, cited_sources
             )
+            logger.info(
+                "chat_completed run_id=%s conversation_id=%s duration_ms=%.1f "
+                "answer=%r sources=%r",
+                run_id,
+                conversation_id,
+                (perf_counter() - started_at) * 1000,
+                answer,
+                cited_sources,
+            )
             yield {
                 "event": "done",
                 "data": {
@@ -188,8 +217,16 @@ class ChatService:
                     "assistant_message_id": message.id,
                 },
             }
-        except Exception:
-            logger.exception("Agent chat stream failed")
+        except Exception as exc:
+            logger.exception(
+                "chat_failed run_id=%s conversation_id=%s duration_ms=%.1f "
+                "question=%r exception_type=%s",
+                run_id,
+                conversation_id,
+                (perf_counter() - started_at) * 1000,
+                request.question,
+                type(exc).__name__,
+            )
             yield {
                 "event": "error",
                 "data": {

@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from common.logging_config import configure_logging
 from common.json_result import JsonResult
 from config.settings import get_settings
 from controller.agent_controller import router as agent_router
@@ -14,16 +15,19 @@ from controller.recommend_controller import router as recommend_router
 from services.chat_service import chat_service
 
 
+settings = get_settings()
+configure_logging(settings.logging)
 logger = logging.getLogger(__name__)
 
 
-# Fail fast when YAML, environment overrides, or required secrets are invalid.
-get_settings()
-
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    yield
-    await chat_service.close()
+    logger.info("application_started profile=%s", settings.app_profile)
+    try:
+        yield
+    finally:
+        await chat_service.close()
+        logger.info("application_stopped")
 
 
 app = FastAPI(title="New DH ReAct Agent", lifespan=lifespan)
@@ -66,10 +70,11 @@ async def validation_error(_request: Request, exc: RequestValidationError):
 if __name__ == "__main__":
     import uvicorn
 
-    settings = get_settings().server
+    server = settings.server
     uvicorn.run(
         "main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=settings.reload,
+        host=server.host,
+        port=server.port,
+        reload=server.reload,
+        log_config=None,
     )

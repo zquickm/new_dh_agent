@@ -24,6 +24,7 @@ class SettingsTest(unittest.TestCase):
                 "APP_PROFILE": "dev",
                 "NEW_DH_LLM__API_KEY": "test-key",
                 "NEW_DH_REACT__MAX_ROUNDS": "7",
+                "NEW_DH_LOGGING__LEVEL": "DEBUG",
             },
             clear=False,
         ):
@@ -33,6 +34,7 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(settings.server.host, "127.0.0.1")
             self.assertTrue(settings.server.reload)
             self.assertEqual(settings.react.max_rounds, 7)
+            self.assertEqual(settings.logging.level, "DEBUG")
             self.assertEqual(settings.llm.model, "dsv4")
 
     def test_system_environment_profile_has_priority(self):

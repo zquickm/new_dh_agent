@@ -21,6 +21,11 @@ stream:
   include_process: true
   include_tool_result: false
 
+logging:
+  level: INFO
+  directory: logs
+  retention_days: 14
+
 tools:
   execution_timeout: 300
   spatial:

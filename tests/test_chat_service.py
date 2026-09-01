@@ -14,8 +14,8 @@ from services.chat_service import ChatService
 class FakeAgent:
     model_name = "fake-model"
 
-    async def run_stream(self, question, history):
-        del question, history
+    async def run_stream(self, question, history, run_id="-"):
+        del question, history, run_id
         yield AgentEvent(
             type="tool_started",
             round_number=1,
@@ -96,8 +96,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.question = ""
 
-            async def run_stream(self, question, history):
-                del history
+            async def run_stream(self, question, history, run_id="-"):
+                del history, run_id
                 self.question = question
                 yield AgentEvent(
                     type="answer_delta",
@@ -148,8 +148,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.questions = []
 
-            async def run_stream(self, question, history):
-                del history
+            async def run_stream(self, question, history, run_id="-"):
+                del history, run_id
                 self.questions.append(question)
                 yield AgentEvent(type="answer_delta", content="回答")
 
@@ -215,8 +215,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.questions = []
 
-            async def run_stream(self, question, history):
-                del history
+            async def run_stream(self, question, history, run_id="-"):
+                del history, run_id
                 self.questions.append(question)
                 yield AgentEvent(type="answer_delta", content="回答")
 
@@ -281,7 +281,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.calls = []
 
-            async def run_stream(self, question, history):
+            async def run_stream(self, question, history, run_id="-"):
+                del run_id
                 self.calls.append((question, history))
                 answers = ["区域内有小洋山站", "小洋山站运行正常", "坐标已查询"]
                 yield AgentEvent(
@@ -347,8 +348,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.questions = []
 
-            async def run_stream(self, question, history):
-                del history
+            async def run_stream(self, question, history, run_id="-"):
+                del history, run_id
                 self.questions.append(question)
                 yield AgentEvent(type="answer_delta", content="回答")
 
@@ -393,12 +394,13 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         conversation = await conversation_repository.create("测试")
         service = ChatService()
         service._agent = FakeAgent()
-        events = [
-            event
-            async for event in service.stream_chat(
-                AgentRequest(question="问题", conversation_id=conversation.id)
-            )
-        ]
+        with self.assertLogs("services.chat_service", level="INFO") as captured:
+            events = [
+                event
+                async for event in service.stream_chat(
+                    AgentRequest(question="完整用户问题", conversation_id=conversation.id)
+                )
+            ]
         self.assertEqual(
             [event["event"] for event in events],
             [
@@ -425,13 +427,14 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         detail = await conversation_repository.get(conversation.id)
         self.assertEqual([message.role for message in detail.messages], ["user", "assistant"])
         self.assertEqual(detail.messages[-1].sources[0]["preview"], "检索片段")
+        self.assertIn("完整用户问题", "\n".join(captured.output))
 
     async def test_failed_tool_process_exposes_safe_failure_reason(self):
         class FailingAgent:
             model_name = "fake-model"
 
-            async def run_stream(self, question, history):
-                del question, history
+            async def run_stream(self, question, history, run_id="-"):
+                del question, history, run_id
                 yield AgentEvent(
                     type="tool_started",
                     round_number=1,
@@ -553,8 +556,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         class MapAgent:
             model_name = "fake-model"
 
-            async def run_stream(self, question, history):
-                del question, history
+            async def run_stream(self, question, history, run_id="-"):
+                del question, history, run_id
                 yield AgentEvent(
                     type="map_action",
                     data={

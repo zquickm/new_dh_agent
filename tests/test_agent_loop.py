@@ -707,7 +707,15 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         tools.register("database_query", "查询数据库", database_query)
         agent = AgentLoop(llm, tools)
 
-        events = [event async for event in agent.run_stream("删除数据", [])]
+        with self.assertLogs("agents.agent_loop", level="INFO") as captured:
+            events = [
+                event
+                async for event in agent.run_stream(
+                    "删除数据",
+                    [],
+                    run_id="run-test",
+                )
+            ]
 
         self.assertEqual(
             [event.type for event in events],
@@ -716,6 +724,11 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(events[1].success)
         self.assertEqual(events[1].content, "工具执行失败")
         self.assertEqual(llm.calls[1][0][-1]["content"], "工具执行失败")
+        log_output = "\n".join(captured.output)
+        self.assertIn("run_id=run-test", log_output)
+        self.assertIn("tool=database_query", log_output)
+        self.assertIn("arguments={'question': '删除数据'}", log_output)
+        self.assertIn("ValueError: 只允许执行只读查询", log_output)
 
     async def test_last_round_can_force_answer_without_tools(self):
         llm = FakeLlm(

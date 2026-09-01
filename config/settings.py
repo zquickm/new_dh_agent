@@ -117,6 +117,12 @@ class StreamSettings(BaseModel):
     include_tool_result: bool = False
 
 
+class LoggingSettings(BaseModel):
+    level: str = "INFO"
+    directory: str = "logs"
+    retention_days: int = Field(default=14, ge=1, le=365)
+
+
 class RerankSettings(BaseModel):
     enabled: bool = True
     base_url: str = ""
@@ -218,6 +224,7 @@ class Settings(BaseSettings):
     react: ReactSettings = Field(default_factory=ReactSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
     stream: StreamSettings = Field(default_factory=StreamSettings)
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
     tools: ToolSettings = Field(default_factory=ToolSettings)
 
     model_config = SettingsConfigDict(

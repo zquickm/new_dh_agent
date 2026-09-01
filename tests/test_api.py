@@ -13,7 +13,8 @@ class FakeAgent:
     def __init__(self):
         self.last_question = None
 
-    async def run_stream(self, question, history):
+    async def run_stream(self, question, history, run_id="-"):
+        del run_id
         self.last_question = question
         del history
         yield AgentEvent(

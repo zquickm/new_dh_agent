@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import sys
-import traceback
+import logging
 from collections.abc import AsyncIterator
 from textwrap import dedent
-from typing import Any, Optional
+from time import perf_counter
+from typing import Any
 
 from agents.citations import CitationRegistry, strip_citation_markers
 from agents.events import AgentEvent
@@ -13,6 +13,9 @@ from agents.tools.executor import ToolExecutor
 from agents.tools.registry import build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage
+
+
+logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = dedent(
@@ -42,50 +45,6 @@ SYSTEM_PROMPT = dedent(
     """
 ).strip()
 
-_BACKEND_TOOL_NAMES = {"database_query", "observation_service", "rag_search"}
-_INFRASTRUCTURE_MODULES = {
-    "aiohttp",
-    "aiomysql",
-    "asyncmy",
-    "httpcore",
-    "httpx",
-    "pymysql",
-}
-
-
-
-def _is_serious_tool_error(exc: Exception) -> bool:
-    current: Optional[BaseException] = exc
-    visited: set[int] = set()
-    while current is not None and id(current) not in visited:
-        visited.add(id(current))
-        error_name = type(current).__name__
-        module_root = type(current).__module__.partition(".")[0]
-        if error_name in {"DatabaseToolError", "RagToolError"}:
-            current = current.__cause__ or current.__context__
-            continue
-        if isinstance(
-            current,
-            (ConnectionError, TimeoutError, OSError, AttributeError, TypeError, KeyError),
-        ):
-            return True
-        if module_root in _INFRASTRUCTURE_MODULES:
-            return True
-        if isinstance(current, (ValueError, LookupError)) or module_root == "sqlglot":
-            current = current.__cause__ or current.__context__
-            continue
-        return True
-    return False
-
-
-def _print_serious_tool_error(tool_name: str, exc: Exception) -> None:
-    if tool_name not in _BACKEND_TOOL_NAMES or not _is_serious_tool_error(exc):
-        return
-    print(f"Serious error while executing tool {tool_name}:", file=sys.stdout)
-    traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stdout)
-    sys.stdout.flush()
-
-
 class AgentLoop:
     def __init__(self, llm: HelloAgentsLLM, tools: ToolExecutor) -> None:
         settings = get_settings()
@@ -105,6 +64,7 @@ class AgentLoop:
         self,
         question: str,
         history: list[ChatMessage],
+        run_id: str = "-",
     ) -> AsyncIterator[AgentEvent]:
         limit = get_settings().conversation.max_history_messages
         messages: list[dict[str, Any]] = [
@@ -122,8 +82,15 @@ class AgentLoop:
         citation_registry = CitationRegistry()
         observation_map_rendered = False
         has_streamed_content = False
+        logger.info(
+            "agent_started run_id=%s question=%r history=%r",
+            run_id,
+            question,
+            history,
+        )
 
         for round_number in range(1, self.max_rounds + 1):
+            round_started_at = perf_counter()
             is_forced_final_round = (
                 self.force_answer and round_number == self.max_rounds
             )
@@ -136,6 +103,16 @@ class AgentLoop:
                 None
                 if is_forced_final_round or not tool_definitions
                 else tool_definitions
+            )
+            logger.info(
+                "llm_round_started run_id=%s round=%s messages=%r tools=%r",
+                run_id,
+                round_number,
+                messages,
+                [
+                    item.get("function", {}).get("name")
+                    for item in available_tools or []
+                ],
             )
 
             async for content, calls in self.llm.stream(
@@ -216,19 +193,48 @@ class AgentLoop:
                     "tool_calls": normalized_calls,
                 }
             )
+            logger.info(
+                "llm_round_completed run_id=%s round=%s duration_ms=%.1f "
+                "content=%r tool_calls=%r",
+                run_id,
+                round_number,
+                (perf_counter() - round_started_at) * 1000,
+                content,
+                normalized_calls,
+            )
 
             if not normalized_calls:
                 if not has_answer_content:
                     raise RuntimeError("模型未生成有效回答")
+                logger.info(
+                    "agent_completed run_id=%s round=%s reason=stop",
+                    run_id,
+                    round_number,
+                )
                 return
 
             if round_number == self.max_rounds:
                 if not has_answer_content:
                     raise RuntimeError("AgentLoop 达到最大轮数但未生成回答")
+                logger.info(
+                    "agent_completed run_id=%s round=%s reason=max_rounds",
+                    run_id,
+                    round_number,
+                )
                 return
 
             for tool_call in normalized_calls:
                 name = tool_call["name"]
+                tool_started_at = perf_counter()
+                logger.info(
+                    "tool_started run_id=%s round=%s tool=%s call_id=%s "
+                    "arguments=%r",
+                    run_id,
+                    round_number,
+                    name,
+                    tool_call["id"],
+                    tool_call["args"],
+                )
                 yield AgentEvent(
                     type="tool_started",
                     round_number=round_number,
@@ -262,7 +268,17 @@ class AgentLoop:
                         client_events = ()
                     success = True
                 except Exception as exc:
-                    _print_serious_tool_error(name, exc)
+                    logger.exception(
+                        "tool_failed run_id=%s round=%s tool=%s call_id=%s "
+                        "duration_ms=%.1f arguments=%r exception_type=%s",
+                        run_id,
+                        round_number,
+                        name,
+                        tool_call["id"],
+                        (perf_counter() - tool_started_at) * 1000,
+                        tool_call["args"],
+                        type(exc).__name__,
+                    )
                     if name == "observation_service" and isinstance(
                         exc, ValueError
                     ):
@@ -280,6 +296,19 @@ class AgentLoop:
                     retrieval_data = None
                     client_events = ()
                     success = False
+
+                if success:
+                    logger.info(
+                        "tool_completed run_id=%s round=%s tool=%s call_id=%s "
+                        "duration_ms=%.1f result=%r client_events=%r",
+                        run_id,
+                        round_number,
+                        name,
+                        tool_call["id"],
+                        (perf_counter() - tool_started_at) * 1000,
+                        observation,
+                        client_events,
+                    )
 
                 if retrieval_data is not None:
                     yield AgentEvent(
