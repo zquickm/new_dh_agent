@@ -14,18 +14,11 @@ class FakeLlm:
     def __init__(self, responses):
         self.responses = iter(responses)
         self.calls = []
-        self.pending_answer = None
 
     async def stream(self, messages, tools=None, temperature=0):
         del temperature
         self.calls.append((deepcopy(messages), tools))
-        if tools is None and self.pending_answer is not None:
-            content_parts, self.pending_answer = self.pending_answer, None
-            tool_calls = []
-        else:
-            content_parts, tool_calls = next(self.responses)
-            if tools is not None and content_parts and not tool_calls:
-                self.pending_answer = content_parts
+        content_parts, tool_calls = next(self.responses)
         for content in content_parts:
             yield content, []
         if tool_calls:
@@ -88,10 +81,8 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(messages[-1]["content"], "解释赤潮")
         self.assertTrue(all(item["type"] == "function" for item in definitions))
-        self.assertIn("READY_TO_ANSWER", messages[0]["content"])
-        final_messages, final_tools = llm.calls[1]
-        self.assertIsNone(final_tools)
-        self.assertIn("不得输出 DSML", final_messages[0]["content"])
+        self.assertEqual(len(llm.calls), 1)
+        self.assertNotIn("READY_TO_ANSWER", messages[0]["content"])
         await agent.close()
 
     async def test_native_tool_call_is_executed_before_answer(self):
@@ -128,7 +119,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"datetime"', second_messages[-1]["content"])
         await agent.close()
 
-    async def test_discards_pre_tool_text_instead_of_streaming_it_as_answer(self):
+    async def test_streams_and_keeps_text_from_every_round(self):
         tool_call = {
             "id": "call-time",
             "name": "CurrentServerTime",
@@ -147,11 +138,17 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             "".join(event.content for event in events if event.type == "answer_delta"),
-            "查询完成",
+            "正在查询\n\n查询完成",
         )
         self.assertEqual(
             [event.type for event in events],
-            ["tool_started", "tool_finished", "answer_delta"],
+            [
+                "answer_delta",
+                "tool_started",
+                "tool_finished",
+                "answer_delta",
+                "answer_delta",
+            ],
         )
         await agent.close()
 
@@ -323,8 +320,10 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 "map_action",
                 "map_action",
                 "tool_finished",
+                "answer_delta",
                 "tool_started",
                 "tool_finished",
+                "answer_delta",
                 "answer_delta",
             ],
         )
@@ -340,7 +339,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             "".join(
                 event.content for event in events if event.type == "answer_delta"
             ),
-            "查询和定位完成",
+            "接下来定位地图\n\n查询和定位完成",
         )
 
     async def test_keeps_standalone_fly_to_map_events(self):
@@ -536,11 +535,6 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                         }
                     ]
                     return
-                if self.call_count == 2:
-                    yield "READY_TO_ANSWER", []
-                    return
-                if tools is not None:
-                    raise AssertionError("最终回答阶段不应绑定工具")
                 yield "第一段", []
                 await self.release.wait()
                 yield "第二段", []
@@ -585,11 +579,6 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                         }
                     ]
                     return
-                if self.call_count == 2:
-                    yield "READY_TO_ANSWER", []
-                    return
-                if tools is not None:
-                    raise AssertionError("最终回答阶段不应绑定工具")
                 yield "第一段<<SRC_", []
                 await self.release.wait()
                 yield "1>>第二段", []
@@ -618,7 +607,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await stream.__anext__()).type, "tool_finished")
         first_answer = await asyncio.wait_for(stream.__anext__(), timeout=1)
         self.assertFalse(llm.release.is_set())
-        self.assertIsNone(llm.calls[-1][1])
+        self.assertIsNotNone(llm.calls[-1][1])
 
         llm.release.set()
         remaining = [event async for event in stream]
@@ -759,50 +748,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(llm.calls[0][1])
         self.assertIsNone(llm.calls[1][1])
-        self.assertIn("不得输出 DSML", llm.calls[1][0][0]["content"])
-
-    async def test_last_round_rejects_dsml_without_streaming_it_as_answer(self):
-        llm = FakeLlm(
-            [
-                (
-                    [],
-                    [
-                        {
-                            "id": "call-one",
-                            "name": "Echo",
-                            "args": {"value": "hello"},
-                            "type": "tool_call",
-                        }
-                    ],
-                ),
-                (
-                    [
-                        "准备继续查询：<|DSM",
-                        'L|tool_calls><|DSML|invoke name="Echo">'
-                        '<|DSML|parameter name="value" string="true">again'
-                        '</|DSML|parameter></|DSML|invoke></|DSML|tool_calls>',
-                    ],
-                    [],
-                ),
-            ]
-        )
-        tools = ToolExecutor()
-        tools.register("Echo", "回显", lambda value: value)
-        agent = AgentLoop(llm, tools)
-        agent.max_rounds = 2
-        agent.force_answer = True
-
-        events = [event async for event in agent.run_stream("测试", [])]
-        answer = "".join(
-            event.content for event in events if event.type == "answer_delta"
-        )
-        self.assertEqual(
-            answer,
-            "准备继续查询：\n"
-            "现有工具结果不足，无法生成可靠答案。"
-            "请缩小查询范围、指定观测站或补充必要条件后重试。",
-        )
-        self.assertNotIn("DSML", answer)
+        self.assertNotIn("READY_TO_ANSWER", llm.calls[1][0][0]["content"])
 
     async def test_forced_final_answer_streams_citations_before_completion(self):
         class DelayedCitationLlm:
