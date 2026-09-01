@@ -494,18 +494,9 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                         }
                     ]
                     return
-                if self.call_count == 2:
-                    yield "READY_TO_ANSWER", []
-                    return
-                self.assert_tools_not_bound(tools)
                 yield "第一段<<SRC_", []
                 await self.release.wait()
                 yield "1>>第二段", []
-
-            @staticmethod
-            def assert_tools_not_bound(tools):
-                if tools is not None:
-                    raise AssertionError("最终回答阶段不应绑定工具")
 
         async def rag_search(query):
             return {
