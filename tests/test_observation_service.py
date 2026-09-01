@@ -4,9 +4,25 @@ from agents.tools.observation_service import TOOL_PARAMETERS, ObservationService
 
 
 class FakeSpatialClient:
-    def __init__(self):
+    def __init__(self, stations=None):
         self.calls = []
         self.closed = False
+        self.stations = stations if stations is not None else [
+            {
+                "tzno": "A001",
+                "name": "站点A",
+                "type": "shore_station",
+                "lon": 122.1,
+                "lat": 30.2,
+            },
+            {
+                "tzno": "A002",
+                "name": "站点B",
+                "type": "buoy",
+                "lon": 122.4,
+                "lat": 30.5,
+            },
+        ]
 
     async def list_station_types(self):
         self.calls.append(("list_station_types",))
@@ -15,23 +31,8 @@ class FakeSpatialClient:
     async def query_stations(self, payload):
         self.calls.append(("query_stations", payload))
         return {
-            "total": 2,
-            "stations": [
-                {
-                    "tzno": "A001",
-                    "name": "站点A",
-                    "type": "shore_station",
-                    "lon": 122.1,
-                    "lat": 30.2,
-                },
-                {
-                    "tzno": "A002",
-                    "name": "站点B",
-                    "type": "buoy",
-                    "lon": 122.4,
-                    "lat": 30.5,
-                },
-            ],
+            "total": len(self.stations),
+            "stations": self.stations,
         }
 
     async def query_station_status(self, tznos):
@@ -106,6 +107,7 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("render_map=false", TOOL_DESCRIPTION)
         self.assertIn("唯一业务工具", TOOL_DESCRIPTION)
         self.assertIn("不得改用 database_query", TOOL_DESCRIPTION)
+        self.assertIn("不得取消过滤重新查询全部站点", TOOL_DESCRIPTION)
 
     async def test_station_search_returns_model_data_and_ordered_map_actions(self):
         client = FakeSpatialClient()
@@ -120,13 +122,14 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(output.content["operation"], "search_stations")
-        self.assertEqual(output.content["total"], 2)
+        self.assertEqual(output.content["total"], 1)
+        self.assertEqual(output.content["type_counts"], {"shore_station": 1})
         self.assertEqual(
             [item["action_type"] for item in output.client_events],
             ["CLEAR", "MARKER_ADD"],
         )
         markers = output.client_events[1]["payload"]["markers"]
-        self.assertEqual([item["id"] for item in markers], ["A001", "A002"])
+        self.assertEqual([item["id"] for item in markers], ["A001"])
         self.assertEqual(
             output.client_events[0]["payload"]["layer_ids"],
             ["observation-stations"],
@@ -138,9 +141,106 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
                 "query_type": "circle",
                 "center": [122.2, 30.3],
                 "radius": 10000.0,
-                "station_types": ["shore_station"],
             },
         )
+
+    async def test_circle_station_filter_normalizes_buoy_alias(self):
+        client = FakeSpatialClient()
+        tool = ObservationServiceTool(client)
+
+        output = await tool.execute(
+            "search_stations",
+            query_type="circle",
+            center=[122.2, 30.3],
+            radius=10000,
+            station_types=["浮标站", "buoy"],
+        )
+
+        self.assertEqual(
+            client.calls[0][1],
+            {
+                "query_type": "circle",
+                "center": [122.2, 30.3],
+                "radius": 10000.0,
+            },
+        )
+        self.assertEqual(output.content["total"], 1)
+        self.assertEqual(output.content["type_counts"], {"buoy": 1})
+        self.assertEqual(
+            [item["tzno"] for item in output.content["stations"]],
+            ["A002"],
+        )
+        self.assertEqual(
+            [item["id"] for item in output.client_events[1]["payload"]["markers"]],
+            ["A002"],
+        )
+
+    async def test_circle_station_filter_normalizes_radar_alias(self):
+        client = FakeSpatialClient(
+            stations=[
+                {
+                    "tzno": "R001",
+                    "name": "衢山",
+                    "type": "radar_station",
+                    "lon": 122.2,
+                    "lat": 30.3,
+                },
+                {
+                    "tzno": "R001",
+                    "name": "衢山重复记录",
+                    "type": "radar_station",
+                    "lon": 122.2,
+                    "lat": 30.3,
+                },
+                {
+                    "tzno": "R002",
+                    "name": "西码头雷达站",
+                    "type": "shore_station",
+                    "lon": 122.4,
+                    "lat": 30.5,
+                },
+                {
+                    "tzno": "B001",
+                    "name": "舟山浮标",
+                    "type": "buoy",
+                    "lon": 122.6,
+                    "lat": 30.7,
+                },
+                {
+                    "tzno": "R003",
+                    "name": "无坐标雷达站",
+                    "type": "radar",
+                    "lon": 122.8,
+                    "lat": None,
+                },
+            ]
+        )
+        tool = ObservationServiceTool(client)
+
+        output = await tool.execute(
+            "search_stations",
+            query_type="circle",
+            center=[122.2, 30.3],
+            radius=10000,
+            station_types=["雷达站", "radar_station"],
+        )
+
+        self.assertEqual(
+            client.calls[0][1],
+            {
+                "query_type": "circle",
+                "center": [122.2, 30.3],
+                "radius": 10000.0,
+            },
+        )
+        self.assertEqual(output.content["total"], 2)
+        self.assertEqual(output.content["type_counts"], {"radar": 2})
+        self.assertEqual(
+            [item["tzno"] for item in output.content["stations"]],
+            ["R001", "R002"],
+        )
+        markers = output.client_events[1]["payload"]["markers"]
+        self.assertEqual([item["id"] for item in markers], ["R001", "R002"])
 
     def test_empty_station_result_clears_previous_station_layer(self):
         actions = ObservationServiceTool._station_map_actions({"stations": []})
@@ -180,7 +280,7 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
             {"center": [122.1, 30.2], "zoom": 12},
         )
 
-    async def test_station_lookup_filters_by_name_without_rendering_candidates(self):
+    async def test_station_lookup_ignores_old_area_and_normalizes_platform_suffix(self):
         client = FakeSpatialClient()
         tool = ObservationServiceTool(client)
 
@@ -189,7 +289,7 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
             query_type="circle",
             center=[122.2, 30.3],
             radius=10000,
-            station_name="站点A站",
+            station_name="站点A平台",
             render_map=False,
         )
 
@@ -199,9 +299,8 @@ class ObservationServiceToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             client.calls[0][1],
             {
-                "query_type": "circle",
-                "center": [122.2, 30.3],
-                "radius": 10000.0,
+                "query_type": "bbox",
+                "bbox": [-180.0, -90.0, 180.0, 90.0],
             },
         )
 

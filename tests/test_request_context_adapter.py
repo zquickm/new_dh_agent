@@ -235,6 +235,9 @@ class RequestContextAdapterTest(unittest.TestCase):
         self.assertTrue(enriched.startswith("输出观测站点\n\n"))
         self.assertIn("都默认限定在 selected_area", enriched)
         self.assertIn("必须完整使用 selected_area 中的 query_type", enriched)
+        self.assertIn("浮标、浮标站使用 buoy", enriched)
+        self.assertIn("雷达、雷达站使用 radar", enriched)
+        self.assertIn("selected_area 是本轮唯一有效选区", enriched)
         self.assertIn('"query_type":"polygon"', enriched)
 
     def test_named_station_takes_priority_over_selected_area_display(self):
@@ -312,7 +315,7 @@ class RequestContextAdapterTest(unittest.TestCase):
             FRONTEND_REQUEST["context"]["drawn_geometry"]["bbox"],
         )
 
-    def test_accepts_polygonized_circle_with_radius_and_incorrect_bbox(self):
+    def test_restores_polygonized_circle_from_radius_metadata(self):
         center_lon = 121.45220037635829
         center_lat = 31.184881234368106
         ring = [
@@ -343,23 +346,18 @@ class RequestContextAdapterTest(unittest.TestCase):
         )
 
         geometry = request.context.drawn_geometry
-        self.assertEqual(geometry.type, "Polygon")
-        self.assertFalse(hasattr(geometry, "radius"))
-        self.assertEqual(
-            geometry.bbox,
-            [
-                min(point[0] for point in ring),
-                min(point[1] for point in ring),
-                max(point[0] for point in ring),
-                max(point[1] for point in ring),
-            ],
-        )
+        self.assertEqual(geometry.type, "Circle")
+        self.assertAlmostEqual(geometry.center[0], center_lon)
+        self.assertAlmostEqual(geometry.center[1], center_lat)
+        self.assertEqual(geometry.radius, 82991.07555434913)
         enriched = enrich_question_with_frontend_context(
             request.question,
             request.context,
         )
-        self.assertIn('"query_type":"polygon"', enriched)
-        self.assertIn('"polygon":[[122.30220037635829', enriched)
+        self.assertIn('"query_type":"circle"', enriched)
+        self.assertIn('"center":[121.45220037635829,31.184881234368106]', enriched)
+        self.assertIn('"radius":82991.07555434913', enriched)
+        self.assertNotIn('"polygon"', enriched)
 
     def test_rejects_non_finite_polygon_coordinate(self):
         payload = {

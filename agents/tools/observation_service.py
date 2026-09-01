@@ -20,6 +20,18 @@ _POPUP_LABELS = {
     "tidal": "潮位",
     "current_speed": "流速",
 }
+_GLOBAL_STATION_BBOX = [-180.0, -90.0, 180.0, 90.0]
+_STATION_TYPE_ALIASES = {
+    "buoy": "buoy",
+    "浮标": "buoy",
+    "浮标站": "buoy",
+    "浮标观测站": "buoy",
+    "radar": "radar",
+    "radar_station": "radar",
+    "雷达": "radar",
+    "雷达站": "radar",
+    "雷达观测站": "radar",
+}
 
 TOOL_NAME = "observation_service"
 TOOL_DESCRIPTION = (
@@ -30,6 +42,8 @@ TOOL_DESCRIPTION = (
     "查询明确指定的站点时，如需先用 search_stations 解析站号，应传 station_name；"
     "任何仅为解析站号或查找目标地点附近站点的检索都应设置 render_map=false，"
     "得到站号后再执行单站查询；不得把内部查找的候选站点全部展示到地图。"
+    "search_stations 返回的 total、type_counts 和 stations 已按同一结果集完成类型过滤与去重；"
+    "指定 station_types 后不得取消过滤重新查询全部站点。"
     "只能使用 operation 枚举中列出的操作，不得编造操作名。当前不支持跨多个站点批量比较或排名"
     "最新观测值，不能仅凭站点位置判断哪里浪最大；能力不足时应直接说明。"
 )
@@ -88,7 +102,13 @@ TOOL_PARAMETERS: dict[str, Any] = {
             },
             "minItems": 3,
         },
-        "station_types": {"type": "array", "items": {"type": "string"}},
+        "station_types": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "站点类型编码；浮标、浮标站使用 buoy，雷达、雷达站使用 radar"
+            ),
+        },
         "station_name": {
             "type": "string",
             "description": "search_stations 可选；按站名收窄候选结果",
@@ -260,12 +280,16 @@ class ObservationServiceTool:
                 "render_map",
                 default=True,
             )
-            data = await self.client.query_stations(
-                self._station_query_payload(arguments)
-            )
+            query_payload = self._station_query_payload(arguments)
+            requested_station_types = query_payload.pop("station_types", None)
+            data = await self.client.query_stations(query_payload)
             data = self._filter_stations_by_name(
                 data,
                 station_name,
+            )
+            data = self._normalize_station_search_result(
+                data,
+                requested_station_types,
             )
             return ToolOutput(
                 content={"operation": operation, **data},
@@ -377,6 +401,12 @@ class ObservationServiceTool:
         )
 
     def _station_query_payload(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if arguments.get("station_name") is not None:
+            arguments = {
+                **arguments,
+                "query_type": "bbox",
+                "bbox": list(_GLOBAL_STATION_BBOX),
+            }
         query_type = self._required_text(arguments.get("query_type"), "query_type")
         payload: dict[str, Any] = {"query_type": query_type}
         if query_type == "bbox":
@@ -402,10 +432,94 @@ class ObservationServiceTool:
         else:
             raise ValueError("query_type 只能为 bbox、circle 或 polygon")
         if arguments.get("station_types") is not None:
-            payload["station_types"] = self._string_list(
-                arguments["station_types"], "station_types"
+            payload["station_types"] = self._normalize_station_types(
+                arguments["station_types"]
             )
         return payload
+
+    @classmethod
+    def _normalize_station_types(cls, value: Any) -> list[str]:
+        normalized: list[str] = []
+        for station_type in cls._string_list(value, "station_types"):
+            key = "".join(station_type.split()).casefold()
+            canonical = _STATION_TYPE_ALIASES.get(key, station_type)
+            if canonical not in normalized:
+                normalized.append(canonical)
+        return normalized
+
+    @classmethod
+    def _normalize_station_search_result(
+        cls,
+        data: dict[str, Any],
+        station_types: Any,
+    ) -> dict[str, Any]:
+        requested_types = (
+            set(cls._normalize_station_types(station_types))
+            if station_types is not None
+            else None
+        )
+        raw_stations = data.get("stations")
+        if not isinstance(raw_stations, list):
+            raw_stations = []
+
+        stations: list[dict[str, Any]] = []
+        seen_station_ids: set[str] = set()
+        type_counts: dict[str, int] = {}
+        for station in raw_stations:
+            if not isinstance(station, dict):
+                continue
+            marker_data = cls._station_marker_data(station)
+            if marker_data is None:
+                continue
+            station_id = marker_data[0].casefold()
+            if station_id in seen_station_ids:
+                continue
+            station_type = cls._canonical_station_type(station)
+            if requested_types is not None and station_type not in requested_types:
+                continue
+            seen_station_ids.add(station_id)
+            stations.append(station)
+            type_key = station_type or "unknown"
+            type_counts[type_key] = type_counts.get(type_key, 0) + 1
+
+        return {
+            **data,
+            "total": len(stations),
+            "type_counts": type_counts,
+            "stations": stations,
+        }
+
+    @staticmethod
+    def _canonical_station_type(station: dict[str, Any]) -> str:
+        name = "".join(str(station.get("name") or "").split()).casefold()
+        if "雷达" in name:
+            return "radar"
+        if "浮标" in name:
+            return "buoy"
+        raw_type = str(
+            station.get("type") or station.get("station_type") or ""
+        ).strip()
+        key = "".join(raw_type.split()).casefold()
+        return _STATION_TYPE_ALIASES.get(key, raw_type)
+
+    @staticmethod
+    def _station_marker_data(
+        station: dict[str, Any],
+    ) -> Optional[tuple[str, str, float, float]]:
+        tzno = str(station.get("tzno") or "").strip()
+        name = str(station.get("name") or "").strip()
+        lon = station.get("lon")
+        lat = station.get("lat")
+        if (
+            not tzno
+            or not name
+            or isinstance(lon, bool)
+            or isinstance(lat, bool)
+            or not isinstance(lon, (int, float))
+            or not isinstance(lat, (int, float))
+        ):
+            return None
+        return tzno, name, float(lon), float(lat)
 
     @classmethod
     def _filter_stations_by_name(
@@ -432,7 +546,16 @@ class ObservationServiceTool:
     @staticmethod
     def _station_name_key(value: Any) -> str:
         text = "".join(str(value or "").split()).casefold()
-        for suffix in ("观测站", "站"):
+        for suffix in (
+            "浮标观测站",
+            "观测平台",
+            "平台站",
+            "观测站",
+            "浮标站",
+            "平台",
+            "浮标",
+            "站",
+        ):
             if text.endswith(suffix):
                 return text[: -len(suffix)]
         return text
@@ -473,23 +596,14 @@ class ObservationServiceTool:
         for station in raw_stations:
             if not isinstance(station, dict):
                 continue
-            tzno = str(station.get("tzno") or "").strip()
-            name = str(station.get("name") or "").strip()
-            lon = station.get("lon")
-            lat = station.get("lat")
-            if (
-                not tzno
-                or not name
-                or isinstance(lon, bool)
-                or isinstance(lat, bool)
-                or not isinstance(lon, (int, float))
-                or not isinstance(lat, (int, float))
-            ):
+            marker_data = cls._station_marker_data(station)
+            if marker_data is None:
                 continue
+            tzno, name, lon, lat = marker_data
             marker = {
                 "id": tzno,
                 "name": name,
-                "coordinates": [float(lon), float(lat)],
+                "coordinates": [lon, lat],
             }
             station_type = str(
                 station.get("type") or station.get("station_type") or ""
