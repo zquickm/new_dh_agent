@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from agents.citations import CitationRegistry, strip_citation_markers
 from agents.events import AgentEvent
-from agents.llm_client import DSMLParseError, DSMLStreamGuard, HelloAgentsLLM
+from agents.llm_client import HelloAgentsLLM
 from agents.tools.executor import ToolExecutor
 from agents.tools.registry import build_tool_executor
 from config.settings import get_settings
@@ -43,18 +43,14 @@ SYSTEM_PROMPT = dedent(
 ).strip()
 
 _FINAL_ANSWER_INSTRUCTION = (
-    "当前已经进入最终回答轮次，不得继续调用任何工具，也不得输出 DSML、tool_calls "
-    "或其他工具调用协议。请仅根据前面已有的工具结果直接回答；如果现有数据不足，"
+    "当前已经进入最终回答轮次，不得继续调用任何工具。"
+    "请仅根据前面已有的工具结果直接回答；如果现有数据不足，"
     "应明确说明缺少什么数据，禁止编造。"
 )
 _PLANNING_INSTRUCTION = (
     "当前处于工具规划阶段，只判断是否还需要调用工具。需要工具时只输出工具调用；"
     "如果无需工具或现有信息已经足够，只输出 READY_TO_ANSWER，不得输出最终回答正文。"
 )
-_INSUFFICIENT_TOOL_DATA_ANSWER = (
-    "现有工具结果不足，无法生成可靠答案。请缩小查询范围、指定观测站或补充必要条件后重试。"
-)
-
 _BACKEND_TOOL_NAMES = {"database_query", "observation_service", "rag_search"}
 _INFRASTRUCTURE_MODULES = {
     "aiohttp",
@@ -128,20 +124,11 @@ class AgentLoop:
             *messages[1:],
         ]
         citation_buffer = ""
-        dsml_guard = DSMLStreamGuard()
-        dsml_blocked = False
         has_answer_content = False
 
         async for content, calls in self.llm.stream(final_messages, None):
             if calls:
                 raise RuntimeError("模型在最终回答阶段仍返回了工具调用")
-            if not content:
-                continue
-            try:
-                content = dsml_guard.feed(content)
-            except DSMLParseError:
-                dsml_blocked = True
-                break
             if not content:
                 continue
 
@@ -158,23 +145,6 @@ class AgentLoop:
                     content=content,
                     round_number=round_number,
                 )
-
-        if not dsml_blocked:
-            try:
-                dsml_guard.finish()
-            except DSMLParseError:
-                dsml_blocked = True
-        if dsml_blocked:
-            yield AgentEvent(
-                type="answer_delta",
-                content=(
-                    f"\n{_INSUFFICIENT_TOOL_DATA_ANSWER}"
-                    if has_answer_content
-                    else _INSUFFICIENT_TOOL_DATA_ANSWER
-                ),
-                round_number=round_number,
-            )
-            return
 
         if citation_registry.has_sources:
             tail, citation_buffer = citation_registry.transform_stream_buffer(

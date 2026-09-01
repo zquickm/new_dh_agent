@@ -91,7 +91,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("READY_TO_ANSWER", messages[0]["content"])
         final_messages, final_tools = llm.calls[1]
         self.assertIsNone(final_tools)
-        self.assertIn("不得输出 DSML", final_messages[0]["content"])
+        self.assertIn("不得继续调用任何工具", final_messages[0]["content"])
         await agent.close()
 
     async def test_native_tool_call_is_executed_before_answer(self):
@@ -693,50 +693,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(llm.calls[0][1])
         self.assertIsNone(llm.calls[1][1])
-        self.assertIn("不得输出 DSML", llm.calls[1][0][0]["content"])
-
-    async def test_last_round_rejects_dsml_without_streaming_it_as_answer(self):
-        llm = FakeLlm(
-            [
-                (
-                    [],
-                    [
-                        {
-                            "id": "call-one",
-                            "name": "Echo",
-                            "args": {"value": "hello"},
-                            "type": "tool_call",
-                        }
-                    ],
-                ),
-                (
-                    [
-                        "准备继续查询：<|DSM",
-                        'L|tool_calls><|DSML|invoke name="Echo">'
-                        '<|DSML|parameter name="value" string="true">again'
-                        '</|DSML|parameter></|DSML|invoke></|DSML|tool_calls>',
-                    ],
-                    [],
-                ),
-            ]
-        )
-        tools = ToolExecutor()
-        tools.register("Echo", "回显", lambda value: value)
-        agent = AgentLoop(llm, tools)
-        agent.max_rounds = 2
-        agent.force_answer = True
-
-        events = [event async for event in agent.run_stream("测试", [])]
-        answer = "".join(
-            event.content for event in events if event.type == "answer_delta"
-        )
-        self.assertEqual(
-            answer,
-            "准备继续查询：\n"
-            "现有工具结果不足，无法生成可靠答案。"
-            "请缩小查询范围、指定观测站或补充必要条件后重试。",
-        )
-        self.assertNotIn("DSML", answer)
+        self.assertIn("不得继续调用任何工具", llm.calls[1][0][0]["content"])
 
     async def test_forced_final_answer_streams_citations_before_completion(self):
         class DelayedCitationLlm:
