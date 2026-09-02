@@ -74,7 +74,7 @@ tools:
       verify_ssl: true
   database:
     information_dir: database_information
-    query_guide_file: "断面数据_AI_SQL查询指南.md"
+    query_guide_file: "数据库_AI_SQL查询指南.md"
     host: "71.10.60.132"
     port: 3310
     user: "dh_agent_reader"

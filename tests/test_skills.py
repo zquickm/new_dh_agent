@@ -51,6 +51,19 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
                 "Always query the observation service before drawing the map.",
             )
 
+    def test_project_transect_database_skill_contains_domain_routing(self):
+        project_root = Path(__file__).resolve().parents[1]
+        catalog = SkillCatalog(project_root / "skills")
+
+        skill = catalog.load("transect-database-query")
+
+        self.assertIn("E1", skill.description)
+        self.assertIn("database_query", skill.instructions)
+        self.assertIn("observation_service", skill.instructions)
+        self.assertIn("rag_search", skill.instructions)
+        self.assertIn("只统计有效数值", skill.instructions)
+        self.assertIn("站位代码以 E2 开头", skill.instructions)
+
     def test_load_rejects_names_outside_the_catalog(self):
         with tempfile.TemporaryDirectory() as directory:
             catalog = self._create_skill(Path(directory))

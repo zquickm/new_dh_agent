@@ -61,6 +61,9 @@ description: 查询或分析业务观测站时使用。
 任务相关时，通过 `load_skill` 加载正文；文件路径不会暴露给模型。Skill 根目录由
 `skills.directory` 配置，默认是项目下的 `skills`。
 
+项目内置 `transect-database-query` Skill，负责断面历史调查数据的查询路由、
+条件组织和结果解释；底层 `database_query` 保持为通用只读数据库工具。
+
 RAG、重排、数据库和 SQL 生成模型的地址、超时、重试、知识库 ID、数据库账号等
 普通参数统一配置在 `config/application.yaml`，不同环境的差异写入对应的
 `application-{profile}.yaml`。
@@ -179,7 +182,8 @@ HTTP Map Action 的驼峰字段 `actionType` 同样会在接口边界转换。
 数据库账号必须是专用只读账号，只授予 `SELECT` 权限。
 
 数据库工具仅允许查询 `database_information/` 中具有 DDL 文件的授权表。
-修改表范围时，需要同时更新对应 DDL 和 `断面数据_AI_SQL查询指南.md`。
+修改表范围时，需要同时更新对应 DDL、通用 `数据库_AI_SQL查询指南.md`，以及涉及
+业务语义的 Skill 说明。
 
 ### RAG 检索片段流事件
 
