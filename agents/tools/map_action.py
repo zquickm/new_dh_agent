@@ -43,7 +43,9 @@ TOOL_PARAMETERS: dict[str, Any] = {
         "action_type": {
             "type": "string",
             "enum": list(MAP_ACTION_TYPES),
-            "description": "地图动作类型",
+            "description": (
+                "要执行的地图动作类型；payload 必须使用对应动作所需的字段。"
+            ),
         },
         "payload": {
             "type": "object",
@@ -52,6 +54,185 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "MARKER_ADD 的 markers 每项至少包含 id、name、coordinates；"
                 "其余动作使用工具描述列出的必填字段。"
             ),
+            "properties": {
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "number",
+                            "description": "按点坐标位置排列的经度或纬度，单位为度。",
+                        },
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "一个定位点，格式为 [经度,纬度]。",
+                    },
+                    "description": "LOCATE 必填的定位点坐标数组。",
+                },
+                "markers": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "description": "一个需要添加到地图的标记。",
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "description": "标记的唯一 ID，用于后续移除或更新。",
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "标记在地图上展示的名称。",
+                            },
+                            "coordinates": {
+                                "type": "array",
+                                "items": {
+                                    "type": "number",
+                                    "description": (
+                                        "按点坐标位置排列的经度或纬度，单位为度。"
+                                    ),
+                                },
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "description": "标记位置，格式为 [经度,纬度]。",
+                            },
+                            "type": {
+                                "type": "string",
+                                "description": "可选的标记或站点类型。",
+                            },
+                            "status": {
+                                "type": "string",
+                                "description": "可选的标记或站点状态。",
+                            },
+                            "popup_content": {
+                                "type": "object",
+                                "description": "可选的标记弹窗结构化内容。",
+                            },
+                        },
+                        "required": ["id", "name", "coordinates"],
+                    },
+                    "description": "MARKER_ADD 必填的地图标记数组。",
+                },
+                "marker_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "description": "一个需要移除的标记 ID。",
+                    },
+                    "description": "MARKER_REMOVE 必填的标记 ID 列表。",
+                },
+                "coordinates": {
+                    "type": "array",
+                    "items": {
+                        "description": "一个坐标数值，或多边形中的一个点坐标。"
+                    },
+                    "description": (
+                        "POLYGON_DRAW 必填时格式为 [[经度,纬度],...]；"
+                        "POPUP_SHOW 或兼容的 FLY_TO 输入时格式为 [经度,纬度]。"
+                    ),
+                },
+                "center": {
+                    "type": "array",
+                    "items": {
+                        "type": "number",
+                        "description": "按点坐标位置排列的经度或纬度，单位为度。",
+                    },
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "description": (
+                        "CIRCLE_DRAW 或 FLY_TO 的中心位置，格式为 [经度,纬度]。"
+                    ),
+                },
+                "radius": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "description": "CIRCLE_DRAW 必填的圆半径，单位为米，必须大于 0。",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "POPUP_SHOW 或 TABLE_SHOW 必填的展示标题。",
+                },
+                "content_html": {
+                    "type": "string",
+                    "description": "POPUP_SHOW 必填的弹窗 HTML 内容。",
+                },
+                "columns": {
+                    "type": "array",
+                    "items": {
+                        "description": "一个表格列定义，字段应与前端地图契约一致。"
+                    },
+                    "description": "TABLE_SHOW 必填的表格列定义数组。",
+                },
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "description": "一条与 columns 对应的表格数据记录。"
+                    },
+                    "description": "TABLE_SHOW 必填的表格数据记录数组。",
+                },
+                "zoom": {
+                    "type": "number",
+                    "default": 12,
+                    "description": "FLY_TO 的地图缩放级别，省略时默认 12。",
+                },
+                "marker_name": {
+                    "type": "string",
+                    "default": "定位点",
+                    "description": (
+                        "FLY_TO 自动添加的目标点标记名称，省略时默认“定位点”。"
+                    ),
+                },
+                "scene": {
+                    "description": "TIMELINE_PLAY 必填的时序播放场景数据。",
+                },
+                "data_type": {
+                    "type": "string",
+                    "description": "HEATMAP_SHOW 必填的热力图业务数据类型。",
+                },
+                "track_type": {
+                    "type": "string",
+                    "description": "TRACK_PLAY 必填的轨迹类型。",
+                },
+                "track_id": {
+                    "type": "string",
+                    "description": "TRACK_PLAY 必填的轨迹唯一 ID。",
+                },
+                "station_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "description": "一个参与对比的观测站 ID。",
+                    },
+                    "description": "COMPARE_STATIONS 必填的观测站 ID 列表。",
+                },
+                "data_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "description": "一个需要对比的业务数据类型。",
+                    },
+                    "description": "COMPARE_STATIONS 必填的数据类型列表。",
+                },
+                "layer_id": {
+                    "type": "string",
+                    "description": "MARKER_ADD 可选的目标图层 ID。",
+                },
+                "layer_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "description": "一个需要清除的地图图层 ID。",
+                    },
+                    "description": (
+                        "CLEAR 可选的图层 ID 列表；省略时表示清除 Map Action 创建的全部图层。"
+                    ),
+                },
+                "fit_bounds": {
+                    "type": "boolean",
+                    "description": (
+                        "MARKER_ADD 是否根据全部标记自动调整地图视野。"
+                    ),
+                },
+            },
         },
     },
     "required": ["action_type", "payload"],

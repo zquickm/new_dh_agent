@@ -50,6 +50,30 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    def test_registered_tool_parameter_nodes_have_descriptions(self):
+        missing = []
+
+        def inspect_schema(schema, path):
+            for name, node in schema.get("properties", {}).items():
+                node_path = f"{path}.{name}" if path else name
+                if not str(node.get("description") or "").strip():
+                    missing.append(node_path)
+                inspect_schema(node, node_path)
+
+                items = node.get("items")
+                if isinstance(items, dict):
+                    item_path = f"{node_path}[]"
+                    if not str(items.get("description") or "").strip():
+                        missing.append(item_path)
+                    inspect_schema(items, item_path)
+
+        executor = build_tool_executor()
+        for definition in executor.definitions():
+            function = definition["function"]
+            inspect_schema(function["parameters"], function["name"])
+
+        self.assertEqual(missing, [])
+
     async def test_no_argument_tool_accepts_native_empty_arguments(self):
         executor = build_tool_executor()
 

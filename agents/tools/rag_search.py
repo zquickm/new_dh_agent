@@ -14,27 +14,58 @@ TOOL_DESCRIPTION = (
 TOOL_PARAMETERS: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "query": {"type": "string", "minLength": 1},
+        "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "用于知识库召回的完整问题或检索语句，应保留关键主题、实体和时间条件，"
+                "不得为空。"
+            ),
+        },
         "top_k": {
             "type": "integer",
             "minimum": 1,
             "maximum": 20,
             "default": 20,
+            "description": (
+                "最终返回给模型的相关文档片段数量上限，范围 1 到 20；省略时默认 20。"
+            ),
         },
         "filters": {
             "type": "object",
+            "description": (
+                "可选的知识库检索范围过滤条件；省略时使用服务端配置的授权范围。"
+            ),
             "properties": {
                 "knowledge_ids": {
                     "type": "array",
-                    "items": {"type": "string"},
+                    "items": {
+                        "type": "string",
+                        "description": "一个服务端已授权的知识库 ID。",
+                    },
+                    "description": (
+                        "限定检索的知识库 ID 列表，只能使用服务端已授权的 ID；"
+                        "省略或传空数组时使用全部已配置知识库。"
+                    ),
                 },
                 "dept_ids": {
                     "type": "array",
-                    "items": {"type": "string"},
+                    "items": {
+                        "type": "string",
+                        "description": "一个服务端已授权的部门 ID。",
+                    },
+                    "description": (
+                        "限定检索的部门 ID 列表，只能使用服务端已授权的 ID；"
+                        "省略或传空数组时使用全部已配置部门。"
+                    ),
                 },
                 "tags": {
                     "type": "array",
-                    "items": {"type": "string"},
+                    "items": {
+                        "type": "string",
+                        "description": "一个用于缩小检索范围的文档标签。",
+                    },
+                    "description": "可选的文档标签列表，仅返回符合标签条件的内容。",
                 },
             },
             "additionalProperties": False,

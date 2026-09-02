@@ -22,12 +22,23 @@ TOOL_DESCRIPTION = (
 TOOL_PARAMETERS: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "question": {"type": "string", "minLength": 1},
+        "question": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "需要从授权业务表回答的完整自然语言问题，应包含相关断面、调查日期、"
+                "采样深度、指标或统计要求，不得为空。"
+            ),
+        },
         "limit": {
             "type": "integer",
             "minimum": 1,
             "maximum": 1000,
             "default": 100,
+            "description": (
+                "本次查询请求返回的最大记录数，范围 1 到 1000，省略时默认 100；"
+                "实际返回数量还受服务端安全上限限制。"
+            ),
         },
     },
     "required": ["question"],
