@@ -17,6 +17,9 @@ react:
 conversation:
   max_history_messages: 20
 
+skills:
+  directory: skills
+
 stream:
   include_process: true
   include_tool_result: false

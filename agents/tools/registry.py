@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from functools import partial
+from typing import Optional
+
+from agents.skills import SkillCatalog
 from agents.tools.current_server_time import (
     TOOL_DESCRIPTION,
     TOOL_NAME,
@@ -19,6 +23,12 @@ from agents.tools.map_action import (
     TOOL_PARAMETERS as MAP_ACTION_TOOL_PARAMETERS,
     execute_map_action,
 )
+from agents.tools.load_skill import (
+    TOOL_DESCRIPTION as LOAD_SKILL_TOOL_DESCRIPTION,
+    TOOL_NAME as LOAD_SKILL_TOOL_NAME,
+    TOOL_PARAMETERS as LOAD_SKILL_TOOL_PARAMETERS,
+    load_skill,
+)
 from agents.tools.observation_service import (
     TOOL_DESCRIPTION as OBSERVATION_TOOL_DESCRIPTION,
     TOOL_NAME as OBSERVATION_TOOL_NAME,
@@ -34,8 +44,22 @@ from agents.tools.rag_search import (
 from config.settings import get_settings
 
 
-def build_tool_executor() -> ToolExecutor:
-    executor = ToolExecutor(get_settings().tools.execution_timeout)
+def build_skill_catalog() -> SkillCatalog:
+    return SkillCatalog(get_settings().skills.resolved_directory())
+
+
+def build_tool_executor(
+    skill_catalog: Optional[SkillCatalog] = None,
+) -> ToolExecutor:
+    settings = get_settings()
+    catalog = skill_catalog if skill_catalog is not None else build_skill_catalog()
+    executor = ToolExecutor(settings.tools.execution_timeout)
+    executor.register(
+        LOAD_SKILL_TOOL_NAME,
+        LOAD_SKILL_TOOL_DESCRIPTION,
+        partial(load_skill, catalog),
+        LOAD_SKILL_TOOL_PARAMETERS,
+    )
     executor.register(
         TOOL_NAME,
         TOOL_DESCRIPTION,

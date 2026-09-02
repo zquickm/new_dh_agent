@@ -206,6 +206,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             set(executor.tools),
             {
+                "load_skill",
                 "CurrentServerTime",
                 "rag_search",
                 "database_query",

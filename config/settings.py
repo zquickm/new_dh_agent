@@ -112,6 +112,14 @@ class ConversationSettings(BaseModel):
     max_history_messages: int = Field(default=20, ge=1, le=100)
 
 
+class SkillSettings(BaseModel):
+    directory: str = "skills"
+
+    def resolved_directory(self) -> Path:
+        path = Path(self.directory)
+        return path if path.is_absolute() else PROJECT_DIR / path
+
+
 class StreamSettings(BaseModel):
     include_process: bool = True
     include_tool_result: bool = False
@@ -223,6 +231,7 @@ class Settings(BaseSettings):
     llm: LLMSettings
     react: ReactSettings = Field(default_factory=ReactSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
+    skills: SkillSettings = Field(default_factory=SkillSettings)
     stream: StreamSettings = Field(default_factory=StreamSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     tools: ToolSettings = Field(default_factory=ToolSettings)

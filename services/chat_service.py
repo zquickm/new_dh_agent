@@ -17,6 +17,7 @@ from services.request_context_adapter import enrich_question_with_frontend_conte
 logger = logging.getLogger(__name__)
 
 _TOOL_DISPLAY_NAMES = {
+    "load_skill": "技能加载",
     "CurrentServerTime": "当前服务器时间",
     "rag_search": "知识库检索",
     "database_query": "数据库查询",

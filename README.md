@@ -42,6 +42,25 @@ Agent 已注册四个业务工具：
 - `observation_service`：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据。
 - `map_action`：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
 
+## Skill 按需加载
+
+Skill 放在 `skills/<skill-name>/SKILL.md`。文件使用 YAML frontmatter 提供索引信息，
+正文保存完整操作说明：
+
+```markdown
+---
+name: station-analysis
+description: 查询或分析业务观测站时使用。
+---
+
+这里编写完整操作说明。
+```
+
+模型通过结构化 `tools` 参数获取可用 Tool 的名称、描述和参数 Schema；system prompt
+不再重复这部分内容，只额外提供 Skill 的 `name`、`description`。模型判断 Skill 与
+任务相关时，通过 `load_skill` 加载正文；文件路径不会暴露给模型。Skill 根目录由
+`skills.directory` 配置，默认是项目下的 `skills`。
+
 RAG、重排、数据库和 SQL 生成模型的地址、超时、重试、知识库 ID、数据库账号等
 普通参数统一配置在 `config/application.yaml`，不同环境的差异写入对应的
 `application-{profile}.yaml`。
