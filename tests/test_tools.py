@@ -9,7 +9,7 @@ from agents.tools.database_query import (
     DatabaseQueryTool,
 )
 from agents.tools.executor import ToolExecutor, ToolOutput
-from agents.tools.rag_search import RagSearchTool
+from agents.tools.rag_search import RagSearchTool, expand_query_synonyms
 from agents.tools.registry import build_tool_executor
 from tool_backends.rag_backend import RagSearchBackend
 
@@ -178,6 +178,22 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rag_tool.backend.arguments, ("赤潮", 20, {}))
         self.assertEqual(database_result["question"], "E2 平均盐度")
         self.assertEqual(database_result["limit"], 1000)
+
+    async def test_rag_expands_synonyms_before_search(self):
+        class FakeRagBackend:
+            async def search(self, query, top_k, filters):
+                self.query = query
+                return []
+
+        rag_tool = RagSearchTool(FakeRagBackend())
+        result = await rag_tool.execute("请分析7月DO的达标率")
+
+        self.assertEqual(rag_tool.backend.query, "请分析7月DO（溶解氧）的达标率")
+        self.assertEqual(result["query"], "请分析7月DO（溶解氧）的达标率")
+        self.assertEqual(
+            expand_query_synonyms("DO（溶解氧）和pH值"),
+            "DO（溶解氧）和pH值",
+        )
 
     def test_rag_parser_preserves_page_index_and_line(self):
         chunks = RagSearchBackend._parse_recall(

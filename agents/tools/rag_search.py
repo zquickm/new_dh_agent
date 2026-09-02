@@ -1,9 +1,68 @@
 from __future__ import annotations
 
+import csv
+import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Optional
 
 from config.settings import get_settings
 from tool_backends.rag_backend import RagSearchBackend
+
+
+SYNONYM_FILE = Path(__file__).resolve().parents[2] / "config" / "rag_synonyms.csv"
+
+
+@lru_cache
+def _synonym_matcher() -> tuple[re.Pattern[str], dict[str, str], set[str]]:
+    aliases: dict[str, str] = {}
+    standards: set[str] = set()
+    tokens: set[str] = set()
+    with SYNONYM_FILE.open(encoding="utf-8") as synonym_file:
+        rows = csv.reader(synonym_file)
+        next(rows)
+        for standard, *synonyms in rows:
+            standards.add(standard.casefold())
+            tokens.add(standard)
+            for synonym in synonyms:
+                aliases.setdefault(synonym.casefold(), standard)
+                tokens.add(synonym)
+    ordered_tokens = sorted(tokens, key=len, reverse=True)
+    pattern = re.compile("|".join(map(re.escape, ordered_tokens)), re.I)
+    return pattern, aliases, standards
+
+
+def expand_query_synonyms(query: str) -> str:
+    """Append the standard term after aliases found in a RAG query."""
+    pattern, aliases, standards = _synonym_matcher()
+
+    def replace(match: re.Match[str]) -> str:
+        synonym = match.group()
+        key = synonym.casefold()
+        standard = aliases.get(key)
+        if standard is None or key in standards:
+            return synonym
+
+        start, end = match.span()
+        if (
+            start
+            and synonym[0].isascii()
+            and synonym[0].isalnum()
+            and query[start - 1].isascii()
+            and query[start - 1].isalnum()
+        ) or (
+            end < len(query)
+            and synonym[-1].isascii()
+            and synonym[-1].isalnum()
+            and query[end].isascii()
+            and query[end].isalnum()
+        ):
+            return synonym
+        if query.startswith((f"（{standard}）", f"({standard})"), end):
+            return synonym
+        return f"{synonym}（{standard}）"
+
+    return pattern.sub(replace, query)
 
 
 TOOL_NAME = "rag_search"
@@ -126,6 +185,7 @@ class RagSearchTool:
         query = query.strip()
         if not query:
             raise ValueError("query 不能为空")
+        query = expand_query_synonyms(query)
         top_k = min(max(int(top_k), 1), 20)
         chunks = await self.backend.search(query, top_k, filters or {})
         return {
