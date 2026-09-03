@@ -131,11 +131,22 @@ class AgentLoop:
                 if is_forced_final_round or not tool_definitions
                 else tool_definitions
             )
+            round_status = (
+                f"当前是第 {round_number}/{self.max_rounds} 轮；"
+                f"第 {self.max_rounds} 轮只允许最终回答。"
+            )
+            round_messages = [
+                {
+                    **messages[0],
+                    "content": f"{messages[0]['content']}\n\n{round_status}",
+                },
+                *messages[1:],
+            ]
             logger.info(
                 "llm_round_started run_id=%s round=%s messages=%r tools=%r",
                 run_id,
                 round_number,
-                messages,
+                round_messages,
                 [
                     item.get("function", {}).get("name")
                     for item in available_tools or []
@@ -143,7 +154,7 @@ class AgentLoop:
             )
 
             async for content, calls in self.llm.stream(
-                messages,
+                round_messages,
                 available_tools,
             ):
                 if content:
