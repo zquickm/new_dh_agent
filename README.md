@@ -35,12 +35,14 @@ NEW_DH_LLM__API_KEY=your-key
 
 ## RAG、数据库、观测与地图工具
 
-Agent 已注册四个业务工具：
+Agent 已注册四个业务工具（括号内为协议调用标识）：
 
-- `rag_search`：检索内部知识库并返回文档片段和来源。
-- `database_query`：将自然语言问题转换成只读 SQL，并查询授权业务表。
-- `observation_service`：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据。
-- `map_action`：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
+- 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
+- 数据库查询（`database_query`）：将自然语言问题转换成只读 SQL，并查询授权业务表。
+- 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据。
+- 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
+
+框架还注册了技能加载（`load_skill`）和当前服务器时间（`CurrentServerTime`）两个工具。
 
 ## Skill 按需加载
 
@@ -49,7 +51,7 @@ Skill 放在 `skills/<skill-name>/SKILL.md`。文件使用 YAML frontmatter 提�
 
 ```markdown
 ---
-name: station-analysis
+name: 观测站分析
 description: 查询或分析业务观测站时使用。
 ---
 
@@ -61,7 +63,7 @@ description: 查询或分析业务观测站时使用。
 任务相关时，通过 `load_skill` 加载正文；文件路径不会暴露给模型。Skill 根目录由
 `skills.directory` 配置，默认是项目下的 `skills`。
 
-项目内置 `transect-database-query` Skill，负责断面历史调查数据的查询路由、
+项目内置“断面数据库查询” Skill，负责断面历史调查数据的查询路由、
 条件组织和结果解释；底层 `database_query` 保持为通用只读数据库工具。
 
 RAG、重排、数据库和 SQL 生成模型的地址、超时、重试、知识库 ID、数据库账号等
@@ -198,7 +200,7 @@ data: {
   "message": "success",
   "data": {
     "tool_call_id": "call-rag-1",
-    "tool_name": "rag_search",
+    "tool_name": "东溟知识库检索",
     "query": "东海赤潮相关资料",
     "result_count": 1,
     "chunks": [

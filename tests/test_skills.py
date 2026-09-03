@@ -25,11 +25,11 @@ class FakeLlm:
 
 class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
     def _create_skill(self, root: Path) -> SkillCatalog:
-        directory = root / "station-analysis"
+        directory = root / "观测站分析"
         directory.mkdir()
         (directory / "SKILL.md").write_text(
             "---\n"
-            "name: station-analysis\n"
+            "name: 观测站分析\n"
             "description: Analyze operational observation stations.\n"
             "---\n\n"
             "Always query the observation service before drawing the map.\n",
@@ -42,10 +42,10 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
             catalog = self._create_skill(Path(directory))
 
             summaries = catalog.summaries()
-            skill = catalog.load("station-analysis")
+            skill = catalog.load("观测站分析")
 
             self.assertEqual(len(summaries), 1)
-            self.assertEqual(summaries[0].name, "station-analysis")
+            self.assertEqual(summaries[0].name, "观测站分析")
             self.assertEqual(
                 skill.instructions,
                 "Always query the observation service before drawing the map.",
@@ -55,7 +55,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         project_root = Path(__file__).resolve().parents[1]
         catalog = SkillCatalog(project_root / "skills")
 
-        skill = catalog.load("transect-database-query")
+        skill = catalog.load("断面数据库查询")
 
         self.assertIn("E1", skill.description)
         self.assertIn("仅按年月询问各类要素对比", skill.description)
@@ -75,7 +75,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
             catalog = self._create_skill(Path(directory))
 
             with self.assertRaises(LookupError):
-                catalog.load("../station-analysis")
+                catalog.load("../观测站分析")
 
     async def test_registry_exposes_and_executes_load_skill(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -83,10 +83,10 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
             executor = build_tool_executor(catalog)
 
             result = json.loads(
-                await executor.execute("load_skill", {"name": "station-analysis"})
+                await executor.execute("load_skill", {"name": "观测站分析"})
             )
 
-            self.assertEqual(result["name"], "station-analysis")
+            self.assertEqual(result["name"], "观测站分析")
             self.assertIn("observation service", result["instructions"])
             await executor.close()
 
@@ -107,7 +107,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("当前可用工具：", system_prompt)
             self.assertNotIn("按名称加载一个可用 Skill", system_prompt)
             self.assertIn(
-                "- station-analysis: Analyze operational observation stations.",
+                "- 观测站分析: Analyze operational observation stations.",
                 system_prompt,
             )
             self.assertNotIn("Always query the observation service", system_prompt)
@@ -125,7 +125,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
                             {
                                 "id": "call-skill",
                                 "name": "load_skill",
-                                "args": {"name": "station-analysis"},
+                                "args": {"name": "观测站分析"},
                             }
                         ],
                     ),

@@ -11,7 +11,7 @@ _FRONTMATTER = re.compile(
     r"\A---\s*\r?\n(?P<metadata>.*?)\r?\n---\s*(?:\r?\n|\Z)",
     re.DOTALL,
 )
-_VALID_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_VALID_NAME = re.compile(r"^[a-z0-9\u4e00-\u9fff]+(?:-[a-z0-9\u4e00-\u9fff]+)*$")
 
 
 @dataclass(frozen=True)

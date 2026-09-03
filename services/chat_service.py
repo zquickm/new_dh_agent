@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _TOOL_DISPLAY_NAMES = {
     "load_skill": "技能加载",
     "CurrentServerTime": "当前服务器时间",
-    "rag_search": "知识库检索",
+    "rag_search": "东溟知识库检索",
     "database_query": "数据库查询",
     "observation_service": "观测分析",
     "map_action": "地图操作",
@@ -131,7 +131,10 @@ class ChatService:
                             ),
                         }
                 elif event.type == "retrieval":
-                    data = event.data or {}
+                    data = {
+                        **(event.data or {}),
+                        "tool_name": self._tool_display_name(event.tool_name),
+                    }
                     if event.sources is not None:
                         registered_sources = event.sources
                     result_count = data.get("result_count")
