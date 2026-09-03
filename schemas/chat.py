@@ -239,7 +239,10 @@ class AgentRequest(BaseModel):
         min_length=1,
         validation_alias=AliasChoices("question", "message"),
     )
-    chat_history: list[ChatMessage] = Field(default_factory=list)
+    chat_history: list[ChatMessage] = Field(
+        default_factory=list,
+        description="兼容旧客户端字段；服务端仅使用当前用户会话的已保存历史，不采信此字段",
+    )
     conversation_id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("conversation_id", "conversationId"),

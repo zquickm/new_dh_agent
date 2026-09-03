@@ -23,6 +23,46 @@ Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
 缺少或不匹配时服务返回 HTTP 403。该校验使用纯 ASGI 中间件，不会缓冲 SSE
 流式响应。
 
+### 用户身份与对话隔离
+
+请求链路为：前端携带 `Authorization: Bearer <JWT>` → Nginx → dh-gateway →
+本服务。JWT 由网关验证，本服务不重复解析 JWT；在内部 Token 校验通过后，
+对话接口还必须携带网关写入的以下 Header：
+
+| Header | 要求 |
+| --- | --- |
+| `X-User-Id` | 当前登录用户的正整数 ID，范围为 Java Long 正数范围，不能重复传入 |
+| `X-Auth-Source` | 必须为 `dh-gateway`，不能重复传入 |
+
+`X-Username`、`X-Token-Id` 不作为归属依据，因此修改用户名或重新登录不会改变
+会话所属用户。请求体和查询参数中的 `user_id`、`userId` 不能覆盖网关身份。
+
+- `POST /conversations`：为当前用户创建会话。
+- `GET /conversations`：仅返回当前用户的会话，先按用户过滤再排序、限制条数。
+- `GET /conversations/{id}`：仅允许查看自己的会话。
+- `POST /agent/chat/stream`：只允许续写自己的会话；未传 `conversation_id` 时，
+  自动为当前用户创建会话，通过首个 `conversation` SSE 事件返回 ID。
+- 历史消息、引用来源、地图选区上下文和消息写入均按用户与会话 ID 隔离。
+
+以上是本服务路径；前端经过网关时使用 `/api/conversations`、
+`/api/agent/chat/stream` 等带 `/api` 前缀的路径。
+缺少或无效的用户身份返回 HTTP 401；他人的会话和不存在的会话统一返回 HTTP 404。
+流式接口在发送 SSE 前检查会话归属，失败时返回普通 JSON 错误，不会先发送 HTTP 200。
+
+前端无需也不应自行设置上述身份 Header，只需携带 JWT。前端保存并复用服务端返回的
+`conversation_id`（兼容 `conversationId`）；`sessionId` 不是会话 ID 或用户身份。
+`chat_history` 字段仍可传入，但服务端不采信其内容，模型历史只来自当前用户会话的
+服务端记录。退出或切换账号时，前端仍应清空本地会话缓存并取消旧账号的流式请求，
+防止页面残留之前已下载的内容。
+
+安全前提：网关必须清除客户端伪造的身份 Header 并重新写入；服务端口应通过绑定地址、
+防火墙等措施限制为仅允许网关访问。`X-Auth-Source` 本身不是密码，不能代替网络隔离
+或内部 Token。生产环境不可使用默认内部 Token。
+
+当前会话仍使用进程内存存储：重启后历史清空，不同 worker/实例之间不共享。
+此改动没有增加数据库持久化，暂应使用单 worker；若需要重启恢复或多实例部署，
+需后续增加带 `user_id` 归属字段的共享持久化存储。
+
 当前大模型服务不需要鉴权时，`NEW_DH_LLM__API_KEY` 可以留空或省略；如果服务需要鉴权，再配置真实 Key：
 
 ```dotenv

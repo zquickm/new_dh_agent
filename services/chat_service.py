@@ -43,15 +43,17 @@ class ChatService:
                 await close()
             self._agent = None
 
-    async def stream_chat(self, request: AgentRequest) -> AsyncIterator[dict]:
+    async def stream_chat(
+        self, request: AgentRequest, *, user_id: str
+    ) -> AsyncIterator[dict]:
         started_at = perf_counter()
         run_id = str(uuid4())
         conversation_id = request.conversation_id
         if not conversation_id:
-            conversation = await conversation_repository.create("新会话")
+            conversation = await conversation_repository.create("新会话", user_id=user_id)
             conversation_id = conversation.id
         else:
-            conversation = await conversation_repository.get(conversation_id)
+            conversation = await conversation_repository.get(conversation_id, user_id=user_id)
             if conversation is None:
                 logger.warning(
                     "chat_rejected run_id=%s conversation_id=%s question=%r "
@@ -86,16 +88,19 @@ class ChatService:
                 await conversation_repository.save_map_context(
                     conversation_id,
                     active_context,
+                    user_id=user_id,
                 )
             else:
                 active_context = await conversation_repository.get_map_context(
-                    conversation_id
+                    conversation_id, user_id=user_id
                 )
             agent_question = enrich_question_with_frontend_context(
                 request.question,
                 active_context,
             )
-            history = request.chat_history or [
+            # The authenticated conversation is the sole source of history.
+            # Ignore client history (including stale history after account switches).
+            history = [
                 ChatMessage(role=message.role, content=message.content)
                 for message in conversation.messages
             ]
@@ -198,7 +203,8 @@ class ChatService:
                 answer, registered_sources
             )
             message = await conversation_repository.save_exchange(
-                conversation_id, request.question, answer, cited_sources
+                conversation_id, request.question, answer, cited_sources,
+                user_id=user_id,
             )
             logger.info(
                 "chat_completed run_id=%s conversation_id=%s duration_ms=%.1f "

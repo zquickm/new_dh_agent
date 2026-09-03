@@ -19,11 +19,13 @@ def _now() -> str:
 
 class MemoryConversationRepository:
     def __init__(self) -> None:
-        self._items: dict[str, ConversationDetail] = {}
-        self._map_contexts: dict[str, FrontendContext] = {}
+        # Owner is part of every storage key; it is never supplied by the body
+        # and is not exposed in the public ConversationDetail schema.
+        self._items: dict[tuple[str, str], ConversationDetail] = {}
+        self._map_contexts: dict[tuple[str, str], FrontendContext] = {}
         self._lock = asyncio.Lock()
 
-    async def create(self, title: str) -> ConversationDetail:
+    async def create(self, title: str, *, user_id: str) -> ConversationDetail:
         now = _now()
         item = ConversationDetail(
             id=uuid4().hex,
@@ -32,38 +34,50 @@ class MemoryConversationRepository:
             updated_at=now,
         )
         async with self._lock:
-            self._items[item.id] = item
+            self._items[(user_id, item.id)] = item
         return item.model_copy(deep=True)
 
-    async def get(self, conversation_id: str) -> Optional[ConversationDetail]:
+    async def get(
+        self, conversation_id: str, *, user_id: str
+    ) -> Optional[ConversationDetail]:
         async with self._lock:
-            item = self._items.get(conversation_id)
+            item = self._items.get((user_id, conversation_id))
             return item.model_copy(deep=True) if item else None
 
-    async def list(self, limit: int) -> list[ConversationSummary]:
+    async def list(self, limit: int, *, user_id: str) -> list[ConversationSummary]:
         async with self._lock:
             items = sorted(
-                self._items.values(), key=lambda item: item.updated_at, reverse=True
+                (item for (owner, _), item in self._items.items() if owner == user_id),
+                key=lambda item: item.updated_at,
+                reverse=True,
             )[:limit]
             return [ConversationSummary(**item.model_dump()) for item in items]
 
     async def get_map_context(
         self,
         conversation_id: str,
+        *,
+        user_id: str,
     ) -> Optional[FrontendContext]:
         async with self._lock:
-            context = self._map_contexts.get(conversation_id)
+            key = (user_id, conversation_id)
+            if key not in self._items:
+                return None
+            context = self._map_contexts.get(key)
             return context.model_copy(deep=True) if context is not None else None
 
     async def save_map_context(
         self,
         conversation_id: str,
         context: FrontendContext,
+        *,
+        user_id: str,
     ) -> None:
         async with self._lock:
-            if conversation_id not in self._items:
+            key = (user_id, conversation_id)
+            if key not in self._items:
                 raise KeyError(conversation_id)
-            self._map_contexts[conversation_id] = context.model_copy(deep=True)
+            self._map_contexts[key] = context.model_copy(deep=True)
 
     async def save_exchange(
         self,
@@ -71,6 +85,8 @@ class MemoryConversationRepository:
         question: str,
         answer: str,
         sources: list[dict],
+        *,
+        user_id: str,
     ) -> ConversationMessage:
         now = _now()
         user = ConversationMessage(
@@ -87,7 +103,7 @@ class MemoryConversationRepository:
             sources=sources,
         )
         async with self._lock:
-            item = self._items.get(conversation_id)
+            item = self._items.get((user_id, conversation_id))
             if item is None:
                 raise KeyError(conversation_id)
             item.messages.extend((user, assistant))
@@ -95,7 +111,7 @@ class MemoryConversationRepository:
             item.updated_at = now
             if item.title == "新会话":
                 item.title = question[:30]
-        return assistant
+        return assistant.model_copy(deep=True)
 
 
 conversation_repository = MemoryConversationRepository()
