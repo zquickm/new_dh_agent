@@ -3,6 +3,10 @@ server:
   port: 8000
   reload: false
 
+internal_request:
+  header_name: X-DH-Internal-Token
+  token: "dh-internal-token-change-in-production"
+
 llm:
   model: "dsv4"
   base_url: "http://71.10.60.31:8900/v1"

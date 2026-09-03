@@ -17,6 +17,12 @@
 APP_PROFILE=dev
 ```
 
+所有 HTTP 请求必须携带配置项 `internal_request.header_name` 指定的内部
+Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
+读取；生产环境必须设置随机值，并与 Nginx、Gateway、其他微服务保持一致。
+缺少或不匹配时服务返回 HTTP 403。该校验使用纯 ASGI 中间件，不会缓冲 SSE
+流式响应。
+
 当前大模型服务不需要鉴权时，`NEW_DH_LLM__API_KEY` 可以留空或省略；如果服务需要鉴权，再配置真实 Key：
 
 ```dotenv

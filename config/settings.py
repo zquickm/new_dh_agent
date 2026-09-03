@@ -95,6 +95,11 @@ class ServerSettings(BaseModel):
     reload: bool = False
 
 
+class InternalRequestSettings(BaseModel):
+    header_name: str = "X-DH-Internal-Token"
+    token: SecretStr = Field(min_length=16)
+
+
 class LLMSettings(BaseModel):
     model: str
     base_url: str
@@ -220,6 +225,7 @@ class ToolSettings(BaseModel):
 class Settings(BaseSettings):
     app_profile: str = Field(default_factory=get_active_profile, validation_alias="APP_PROFILE")
     server: ServerSettings = Field(default_factory=ServerSettings)
+    internal_request: InternalRequestSettings
     llm: LLMSettings
     react: ReactSettings = Field(default_factory=ReactSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)

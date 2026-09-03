@@ -36,6 +36,8 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(settings.react.max_rounds, 7)
             self.assertEqual(settings.logging.level, "DEBUG")
             self.assertEqual(settings.llm.model, "dsv4")
+            self.assertEqual(settings.internal_request.header_name, "X-DH-Internal-Token")
+            self.assertTrue(settings.internal_request.token.get_secret_value())
 
     def test_system_environment_profile_has_priority(self):
         with patch.dict(os.environ, {"APP_PROFILE": "prod"}, clear=False):

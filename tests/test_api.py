@@ -7,6 +7,10 @@ from main import app
 from services.chat_service import chat_service
 
 
+INTERNAL_HEADER = "X-DH-Internal-Token"
+INTERNAL_TOKEN = "dh-internal-token-change-in-production"
+
+
 class FakeAgent:
     model_name = "fake-model"
 
@@ -63,6 +67,7 @@ class ApiTest(unittest.TestCase):
         self.fake_agent = FakeAgent()
         chat_service._agent = self.fake_agent
         self.client = TestClient(app)
+        self.client.headers[INTERNAL_HEADER] = INTERNAL_TOKEN
 
     def tearDown(self):
         chat_service._agent = self.previous_agent
@@ -100,6 +105,13 @@ class ApiTest(unittest.TestCase):
             ["user", "assistant"],
         )
         self.assertEqual(detail["messages"][-1]["sources"][0]["citation_id"], 1)
+
+    def test_rejects_request_without_gateway_internal_header(self):
+        with TestClient(app) as direct_client:
+            response = direct_client.get("/health")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], 403)
 
     def test_stream_accepts_esic_map_context_without_leaking_it_to_history(self):
         created = self.client.post("/conversations", json={"title": "地图选区测试"})
