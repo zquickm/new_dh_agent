@@ -1,15 +1,19 @@
 import asyncio
 import sys
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from tool_backends.database_backend import (
     DatabaseConnectionError,
+    DatabaseInformationCatalog,
     DatabaseQueryBackend,
     MysqlReadonlyGateway,
+    ReadonlySqlValidator,
     SqlExecutionError,
     SqlGenerationError,
+    SqlValidationError,
 )
 
 
@@ -22,7 +26,11 @@ class FakeCatalog:
 
 
 class FakeLlm:
-    def __init__(self, response="SELECT COUNT(*) FROM section_stations", error=None):
+    def __init__(
+        self,
+        response="SELECT COUNT(*) FROM dwd_as_chemistry_observations_i_d",
+        error=None,
+    ):
         self.response = response
         self.error = error
         self.calls = 0
@@ -43,11 +51,11 @@ class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
             port=3306,
             user="reader",
             password="secret",
-            database="document",
+            database="donghai_dwd",
             connect_timeout=connect_timeout,
             query_timeout=1,
             configured_max_rows=50,
-            allowed_tables=("section_stations",),
+            allowed_tables=("dwd_as_chemistry_observations_i_d",),
             pool_max_size=1,
             ssl_enabled=False,
             ssl_ca=None,
@@ -70,6 +78,87 @@ class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
                 await self.gateway()._get_pool()
 
         self.assertEqual(received_options["minsize"], 1)
+
+    def test_catalog_authorizes_only_current_doris_observation_tables(self):
+        project_root = Path(__file__).resolve().parents[1]
+        catalog = DatabaseInformationCatalog(
+            project_root / "database_information",
+            guide_filename="数据库_AI_SQL查询指南.md",
+        )
+
+        self.assertEqual(
+            catalog.available_tables,
+            (
+                "dwd_as_chemistry_observations_i_d",
+                "dwd_as_hydromet_observations_i_d",
+            ),
+        )
+        schemas = catalog.read_all_schemas()
+        self.assertIn("ENGINE=OLAP", schemas)
+        self.assertNotIn("section_stations", schemas)
+
+    def test_sql_prompt_uses_current_doris_query_rules(self):
+        prompt = DatabaseQueryBackend._SYSTEM_PROMPT
+
+        self.assertIn("Apache Doris", prompt)
+        self.assertIn("未要求各站或逐站就禁止按站位分组", prompt)
+        self.assertIn("未指定口径时只计算 AVG 和 COUNT", prompt)
+        self.assertIn("字符串列默认作为文本处理", prompt)
+        self.assertIn("metrics 使用 JSON_OBJECT", prompt)
+        self.assertIn("禁止 FULL OUTER JOIN", prompt)
+
+    def test_validator_accepts_new_tables_and_rejects_old_tables(self):
+        validator = ReadonlySqlValidator()
+        allowed_tables = (
+            "dwd_as_chemistry_observations_i_d",
+            "dwd_as_hydromet_observations_i_d",
+        )
+
+        sql = validator.validate(
+            "SELECT AVG(temperature_c) AS avg_temperature_c "
+            "FROM dwd_as_chemistry_observations_i_d "
+            "WHERE UPPER(TRIM(station_name)) LIKE 'E2%'",
+            50,
+            allowed_tables,
+        )
+
+        self.assertIn("dwd_as_chemistry_observations_i_d", sql)
+        self.assertIn("LIMIT 51", sql)
+        with self.assertRaises(SqlValidationError):
+            validator.validate(
+                "SELECT * FROM section_stations",
+                50,
+                allowed_tables,
+            )
+
+    async def test_execute_uses_doris_timeout_without_transaction_wrapper(self):
+        gateway = self.gateway()
+        cursor = AsyncMock()
+        cursor.fetchall.return_value = [(1,)]
+        cursor.description = (("value",),)
+
+        cursor_context = MagicMock()
+        cursor_context.__aenter__ = AsyncMock(return_value=cursor)
+        cursor_context.__aexit__ = AsyncMock(return_value=None)
+        connection = MagicMock()
+        connection.cursor.return_value = cursor_context
+
+        connection_context = MagicMock()
+        connection_context.__aenter__ = AsyncMock(return_value=connection)
+        connection_context.__aexit__ = AsyncMock(return_value=None)
+        pool = MagicMock()
+        pool.acquire.return_value = connection_context
+        gateway._get_pool = AsyncMock(return_value=pool)
+
+        result = await gateway._execute("SELECT 1", 10)
+
+        self.assertEqual(
+            cursor.execute.await_args_list,
+            [call("SET query_timeout = 1"), call("SELECT 1")],
+        )
+        self.assertNotIn("START TRANSACTION", str(cursor.execute.await_args_list))
+        self.assertNotIn("rollback", str(connection.mock_calls))
+        self.assertEqual(result["rows"], [{"value": 1}])
 
     async def test_sql_generation_failure_is_wrapped_and_not_retried(self):
         llm = FakeLlm(error=RuntimeError("upstream 502"))

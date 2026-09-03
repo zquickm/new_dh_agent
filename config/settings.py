@@ -197,7 +197,7 @@ class DatabaseToolSettings(BaseModel):
     port: int = Field(default=3306, ge=1, le=65535)
     user: str = "readonly_user"
     password: SecretStr = SecretStr("")
-    name: str = "document"
+    name: str = "donghai_dwd"
     connect_timeout: float = Field(default=5, gt=0)
     query_timeout: float = Field(default=10, gt=0)
     max_rows: int = Field(default=1000, ge=1)

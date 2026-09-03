@@ -17,6 +17,7 @@ from tool_backends.rag_backend import RagSearchBackend
 class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
     def test_database_description_is_generic_and_excludes_observation_stations(self):
         self.assertIn("授权业务表", DATABASE_TOOL_DESCRIPTION)
+        self.assertIn("Apache Doris", DATABASE_TOOL_DESCRIPTION)
         self.assertIn("必须调用 observation_service", DATABASE_TOOL_DESCRIPTION)
         self.assertNotIn("断面", DATABASE_TOOL_DESCRIPTION)
 

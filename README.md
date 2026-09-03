@@ -38,7 +38,7 @@ NEW_DH_LLM__API_KEY=your-key
 Agent 已注册四个业务工具（括号内为协议调用标识）：
 
 - 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
-- 数据库查询（`database_query`）：将自然语言问题转换成只读 SQL，并查询授权业务表。
+- 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
 - 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
 
@@ -183,8 +183,10 @@ HTTP Map Action 的驼峰字段 `actionType` 同样会在接口边界转换。
 `DEEPSEEK_API_KEY`，并在 `tools.database.sql_llm` 中配置独立模型地址和名称。
 数据库账号必须是专用只读账号，只授予 `SELECT` 权限。
 
+断面数据库使用 `donghai_dwd` schema；查询协议使用 Doris 的 MySQL 兼容接口。
+
 数据库工具仅允许查询 `database_information/` 中具有 DDL 文件的授权表。
-修改表范围时，需要同时更新对应 DDL、通用 `数据库_AI_SQL查询指南.md`，以及涉及
+修改表范围时，需要同时更新对应 DDL、断面 `数据库_AI_SQL查询指南.md`，以及涉及
 业务语义的 Skill 说明。
 
 ### RAG 检索片段流事件

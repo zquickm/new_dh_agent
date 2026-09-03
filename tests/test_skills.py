@@ -62,12 +62,15 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("database_query", skill.instructions)
         self.assertIn("observation_service", skill.instructions)
         self.assertIn("rag_search", skill.instructions)
-        self.assertIn("只统计有效数值", skill.instructions)
-        self.assertIn("站位代码以 E2 开头", skill.instructions)
+        self.assertIn("station_name", skill.instructions)
+        self.assertIn("E1/E2/E3", skill.instructions)
         self.assertIn("按本系统的断面业务默认口径处理", skill.instructions)
         self.assertIn("跨期各类要素对比", skill.instructions)
         self.assertIn("温度数据概况", skill.instructions)
         self.assertIn("水质描述性评价", skill.instructions)
+        self.assertIn("未指定统计口径时", skill.instructions)
+        self.assertIn("不得按站点或日期直接连接原始观测行", skill.instructions)
+        self.assertIn("不得用普通平均值表示主导风向", skill.instructions)
         self.assertIn("不得把有限站位结果外推", skill.instructions)
 
     def test_load_rejects_names_outside_the_catalog(self):

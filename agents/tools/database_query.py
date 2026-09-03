@@ -14,7 +14,8 @@ from tool_backends.database_backend import (
 
 TOOL_NAME = "database_query"
 TOOL_DESCRIPTION = (
-    "将自然语言问题转换为只读 SQL，查询授权业务表并返回结构化结果。"
+    "将自然语言问题转换为 Apache Doris（MySQL 兼容方言）只读 SQL，"
+    "查询授权业务表并返回结构化结果。"
     "不得用于地图选区得到的业务观测站，也不得用于明确站名的站点状态、详情、"
     "最新观测、趋势或时间区间数据；这些问题必须调用 observation_service。"
     "SQL 会经过授权表白名单和只读校验。"
