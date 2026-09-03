@@ -21,6 +21,10 @@ react:
 conversation:
   max_history_messages: 20
 
+sensitive_words:
+  enabled: true
+  file: config/sensitive_words.csv
+
 skills:
   directory: skills
 

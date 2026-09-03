@@ -117,6 +117,15 @@ class ConversationSettings(BaseModel):
     max_history_messages: int = Field(default=20, ge=1, le=100)
 
 
+class SensitiveWordSettings(BaseModel):
+    enabled: bool = True
+    file: str = "config/sensitive_words.csv"
+
+    def resolved_file(self) -> Path:
+        path = Path(self.file)
+        return path if path.is_absolute() else PROJECT_DIR / path
+
+
 class SkillSettings(BaseModel):
     directory: str = "skills"
 
@@ -237,6 +246,9 @@ class Settings(BaseSettings):
     llm: LLMSettings
     react: ReactSettings = Field(default_factory=ReactSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
+    sensitive_words: SensitiveWordSettings = Field(
+        default_factory=SensitiveWordSettings
+    )
     skills: SkillSettings = Field(default_factory=SkillSettings)
     stream: StreamSettings = Field(default_factory=StreamSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
