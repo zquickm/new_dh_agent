@@ -58,11 +58,17 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         skill = catalog.load("transect-database-query")
 
         self.assertIn("E1", skill.description)
+        self.assertIn("仅按年月询问各类要素对比", skill.description)
         self.assertIn("database_query", skill.instructions)
         self.assertIn("observation_service", skill.instructions)
         self.assertIn("rag_search", skill.instructions)
         self.assertIn("只统计有效数值", skill.instructions)
         self.assertIn("站位代码以 E2 开头", skill.instructions)
+        self.assertIn("按本系统的断面业务默认口径处理", skill.instructions)
+        self.assertIn("跨期各类要素对比", skill.instructions)
+        self.assertIn("温度数据概况", skill.instructions)
+        self.assertIn("水质描述性评价", skill.instructions)
+        self.assertIn("不得把有限站位结果外推", skill.instructions)
 
     def test_load_rejects_names_outside_the_catalog(self):
         with tempfile.TemporaryDirectory() as directory:
