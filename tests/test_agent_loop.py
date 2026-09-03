@@ -762,7 +762,11 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(llm.calls[0][1])
         self.assertIsNone(llm.calls[1][1])
-        self.assertNotIn("READY_TO_ANSWER", llm.calls[1][0][0]["content"])
+        self.assertIn("当前是第 1/2 轮", llm.calls[0][0][0]["content"])
+        final_instruction = llm.calls[1][0][0]
+        self.assertEqual(final_instruction["role"], "system")
+        self.assertIn("当前是第 2/2 轮", final_instruction["content"])
+        self.assertIn("第 2 轮只允许最终回答", final_instruction["content"])
 
     async def test_forced_final_answer_streams_citations_before_completion(self):
         class DelayedCitationLlm:
