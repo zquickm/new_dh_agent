@@ -376,7 +376,7 @@ class DatabaseQueryBackend:
 4. 不得生成 INSERT、UPDATE、DELETE、DROP、ALTER、CREATE、TRUNCATE、
    SELECT INTO、存储过程、文件输出或加锁语句。
 5. 只能使用指南和 DDL 中真实存在的表、字段及关系。
-6. 完整保留用户给出的日期、断面、站点和其他过滤条件。
+6. 完整保留用户给出的日期、对象和其他过滤条件。
 7. 在 SQL 中完成过滤、分组和聚合，避免返回大量无关原始记录。
 8. 不必添加 LIMIT，执行器会强制限制最大返回行数。
 """
@@ -414,7 +414,7 @@ class DatabaseQueryBackend:
         )
         guide_filename = os.getenv(
             "DATABASE_QUERY_GUIDE_FILE",
-            "断面数据_AI_SQL查询指南.md",
+            "数据库_AI_SQL查询指南.md",
         ).strip()
         catalog = DatabaseInformationCatalog(
             root,

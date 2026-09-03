@@ -14,10 +14,10 @@ from tool_backends.database_backend import (
 
 TOOL_NAME = "database_query"
 TOOL_DESCRIPTION = (
-    "查询授权业务表中的断面历史调查数据，用于 E1/E2/E3 等断面在指定调查日期、"
-    "采样深度下的水文气象、海水化学记录及跨记录统计。不得用于地图选区得到的观测站，"
-    "也不得用于明确站名的站点状态、详情、最新观测、趋势或时间区间数据；这些问题必须调用 "
-    "observation_service。SQL 会经过白名单和只读校验。"
+    "将自然语言问题转换为只读 SQL，查询授权业务表并返回结构化结果。"
+    "不得用于地图选区得到的业务观测站，也不得用于明确站名的站点状态、详情、"
+    "最新观测、趋势或时间区间数据；这些问题必须调用 observation_service。"
+    "SQL 会经过授权表白名单和只读校验。"
 )
 TOOL_PARAMETERS: dict[str, Any] = {
     "type": "object",
@@ -26,8 +26,8 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "type": "string",
             "minLength": 1,
             "description": (
-                "需要从授权业务表回答的完整自然语言问题，应包含相关断面、调查日期、"
-                "采样深度、指标或统计要求，不得为空。"
+                "需要从授权业务表回答的完整自然语言问题，应保留用户指定的过滤条件、"
+                "指标、排序、分组和统计要求，不得为空。"
             ),
         },
         "limit": {

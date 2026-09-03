@@ -28,9 +28,10 @@ class FakeLlm:
 class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
     def test_system_prompt_routes_operational_station_data_to_observation_service(self):
         self.assertIn("必须优先调用 observation_service", SYSTEM_PROMPT)
-        self.assertIn("不得用它查询 observation_service 管理的观测站", SYSTEM_PROMPT)
+        self.assertIn("也不得改用 database_query", SYSTEM_PROMPT)
+        self.assertNotIn("断面历史调查数据", SYSTEM_PROMPT)
 
-    async def test_station_query_does_not_offer_database_tool(self):
+    async def test_station_query_keeps_generic_database_tool_available(self):
         llm = FakeLlm([(["已完成"], [])])
         agent = AgentLoop(llm, build_tool_executor())
 
@@ -39,7 +40,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         definitions = llm.calls[0][1]
         tool_names = {item["function"]["name"] for item in definitions}
         self.assertIn("observation_service", tool_names)
-        self.assertNotIn("database_query", tool_names)
+        self.assertIn("database_query", tool_names)
         await agent.close()
 
     async def test_historical_transect_query_keeps_database_tool(self):

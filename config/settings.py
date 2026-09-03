@@ -192,7 +192,7 @@ class SqlLlmSettings(BaseModel):
 
 class DatabaseToolSettings(BaseModel):
     information_dir: str = "database_information"
-    query_guide_file: str = "断面数据_AI_SQL查询指南.md"
+    query_guide_file: str = "数据库_AI_SQL查询指南.md"
     host: str = "127.0.0.1"
     port: int = Field(default=3306, ge=1, le=65535)
     user: str = "readonly_user"

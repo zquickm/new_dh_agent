@@ -15,9 +15,10 @@ from tool_backends.rag_backend import RagSearchBackend
 
 
 class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
-    def test_database_description_excludes_operational_observation_stations(self):
-        self.assertIn("断面历史调查数据", DATABASE_TOOL_DESCRIPTION)
+    def test_database_description_is_generic_and_excludes_observation_stations(self):
+        self.assertIn("授权业务表", DATABASE_TOOL_DESCRIPTION)
         self.assertIn("必须调用 observation_service", DATABASE_TOOL_DESCRIPTION)
+        self.assertNotIn("断面", DATABASE_TOOL_DESCRIPTION)
 
     async def test_registered_tool_can_be_described_and_executed(self):
         executor = ToolExecutor()
