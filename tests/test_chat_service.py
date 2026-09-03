@@ -73,6 +73,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             {
                 name: ChatService._tool_display_name(name)
                 for name in (
+                    "load_skill",
                     "CurrentServerTime",
                     "rag_search",
                     "database_query",
@@ -81,8 +82,9 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 )
             },
             {
+                "load_skill": "技能加载",
                 "CurrentServerTime": "当前服务器时间",
-                "rag_search": "知识库检索",
+                "rag_search": "东溟知识库检索",
                 "database_query": "数据库查询",
                 "observation_service": "观测分析",
                 "map_action": "地图操作",
@@ -415,9 +417,10 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(events[2]["data"]["chunks"][0]["preview"], "检索片段")
         self.assertEqual(events[3]["data"]["status"], "success")
-        self.assertEqual(events[1]["data"]["title"], "算法工具箱：知识库检索")
-        self.assertEqual(events[1]["data"]["summary"], "知识库检索正在执行")
-        self.assertEqual(events[3]["data"]["summary"], "知识库检索执行完成")
+        self.assertEqual(events[1]["data"]["title"], "算法工具箱：东溟知识库检索")
+        self.assertEqual(events[1]["data"]["summary"], "东溟知识库检索正在执行")
+        self.assertEqual(events[2]["data"]["tool_name"], "东溟知识库检索")
+        self.assertEqual(events[3]["data"]["summary"], "东溟知识库检索执行完成")
         self.assertEqual(events[1]["data"]["step_id"], "call-1")
         self.assertEqual(events[3]["data"]["step_id"], "call-1")
         self.assertEqual(events[3]["data"]["details"]["result_count"], 1)

@@ -71,21 +71,36 @@ TOOL_PARAMETERS: dict[str, Any] = {
         "query_type": {
             "type": "string",
             "enum": ["bbox", "circle", "polygon"],
-            "description": "search_stations 必填",
+            "description": (
+                "search_stations 使用的空间查询类型：bbox 为外接矩形，circle 为圆形，"
+                "polygon 为多边形。"
+            ),
         },
         "bbox": {
             "type": "array",
-            "items": {"type": "number"},
+            "items": {
+                "type": "number",
+                "description": "按数组位置排列的一项经度或纬度数值，单位为度。",
+            },
             "minItems": 4,
             "maxItems": 4,
-            "description": "bbox 查询范围 [minLon,minLat,maxLon,maxLat]",
+            "description": (
+                "query_type=bbox 时必填的查询范围，格式为 "
+                "[最小经度,最小纬度,最大经度,最大纬度]，坐标系为 EPSG:4490。"
+            ),
         },
         "center": {
             "type": "array",
-            "items": {"type": "number"},
+            "items": {
+                "type": "number",
+                "description": "按数组位置排列的经度或纬度数值，单位为度。",
+            },
             "minItems": 2,
             "maxItems": 2,
-            "description": "circle 圆心 [lon,lat]",
+            "description": (
+                "query_type=circle 时必填的圆心，格式为 [经度,纬度]，"
+                "坐标系为 EPSG:4490。"
+            ),
         },
         "radius": {
             "type": "number",
@@ -96,15 +111,26 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "type": "array",
             "items": {
                 "type": "array",
-                "items": {"type": "number"},
+                "items": {
+                    "type": "number",
+                    "description": "按点坐标位置排列的经度或纬度数值，单位为度。",
+                },
                 "minItems": 2,
                 "maxItems": 2,
+                "description": "多边形的一个顶点，格式为 [经度,纬度]。",
             },
             "minItems": 3,
+            "description": (
+                "query_type=polygon 时必填的多边形顶点数组，至少包含三个顶点，"
+                "坐标系为 EPSG:4490。"
+            ),
         },
         "station_types": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+                "type": "string",
+                "description": "一个站点类型编码，例如 buoy 或 radar。",
+            },
             "description": (
                 "站点类型编码；浮标、浮标站使用 buoy，雷达、雷达站使用 radar"
             ),
@@ -120,17 +146,35 @@ TOOL_PARAMETERS: dict[str, Any] = {
         },
         "tznos": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+                "type": "string",
+                "description": "一个观测站的唯一站号。",
+            },
             "minItems": 1,
             "maxItems": 50,
-            "description": "station_status 必填",
+            "description": (
+                "station_status 必填的观测站号列表，一次可查询 1 到 50 个站点。"
+            ),
         },
         "tzno": {
             "type": "string",
-            "description": "详情、最新观测、趋势和区间查询必填",
+            "description": (
+                "目标观测站的唯一站号，station_detail、observation_summary、"
+                "observation_trend 和 observation_range 必填。"
+            ),
         },
-        "element": {"type": "string", "description": "趋势查询的要素 key"},
-        "hours": {"type": "integer", "minimum": 1, "default": 24},
+        "element": {
+            "type": "string",
+            "description": "observation_trend 必填的观测要素 key。",
+        },
+        "hours": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 24,
+            "description": (
+                "observation_trend 向前查询的小时数，必须大于 0；省略时默认 24。"
+            ),
+        },
         "data_type": {
             "type": "string",
             "enum": [
@@ -142,7 +186,10 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "seacurrent",
                 "bfdata",
             ],
-            "description": "区间查询的数据类型",
+            "description": (
+                "observation_range 必填的数据类型：wave 波浪、watertemp 水温、"
+                "wind 风、tidal 潮位、salinity 盐度、seacurrent 海流、bfdata 浮标数据。"
+            ),
         },
         "start_time": {
             "type": "string",
@@ -152,12 +199,24 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "type": "string",
             "description": "区间结束时间 yyyy-MM-dd HH:mm:ss",
         },
-        "order_by": {"type": "string", "enum": ["asc", "desc"], "default": "asc"},
+        "order_by": {
+            "type": "string",
+            "enum": ["asc", "desc"],
+            "default": "asc",
+            "description": (
+                "observation_range 的时间排序方向：asc 从早到晚，desc 从晚到早；"
+                "省略时默认 asc。"
+            ),
+        },
         "max_records": {
             "type": "integer",
             "minimum": 1,
             "maximum": 5000,
             "default": 2000,
+            "description": (
+                "observation_range 最多返回的观测记录数，范围 1 到 5000；"
+                "省略时默认 2000。"
+            ),
         },
     },
     "required": ["operation"],

@@ -1,0 +1,318 @@
+标准词,别称1,别称2,别称3,别称4
+溶解氧,DO,溶氧,D.O.,Dissolved Oxygen
+化学需氧量,COD,化学耗氧量,化学氧需求,Chemical Oxygen Demand
+生化需氧量,BOD,生化耗氧量,生化氧需求,Biochemical Oxygen Demand
+pH值,pH,酸碱度,氢离子浓度,pH Value
+盐度,Sal,含盐度,盐分,Salinity
+水温,WT,海水温度,SST,Water Temperature
+浊度,Turb,浑浊度,透明度倒数,Turbidity
+透明度,Trans,清澈度,Secchi深度,Transparency
+悬浮物,SS,悬浮固体,TSS,Suspended Solids
+石油类,Oil,石油,含油量,Petroleum
+硫化物,S2-,硫化氢,Sulfide,H2S
+汞,Hg,总汞,水银,Mercury
+铅,Pb,总铅,Lead
+镉,Cd,总镉,Cadmium
+砷,As,总砷,Arsenic
+铜,Cu,总铜,Copper
+锌,Zn,总锌,Zinc
+铬,Cr,总铬,Chromium
+镍,Ni,总镍,Nickel
+叶绿素a,Chl-a,叶绿素,Chlorophyll a
+活性磷酸盐,PO4-P,磷酸盐,DIP,Phosphate
+无机氮,DIN,溶解无机氮,Dissolved Inorganic Nitrogen
+硝酸盐氮,NO3-N,硝酸盐,硝氮,Nitrate
+亚硝酸盐氮,NO2-N,亚硝酸盐,亚硝氮,Nitrite
+氨氮,NH3-N,氨,铵态氮,Ammonia
+总氮,TN,全氮,Total Nitrogen
+总磷,TP,全磷,Total Phosphorus
+粪大肠菌群,FC,粪大肠杆菌,Fecal Coliform
+细菌总数,TBC,总菌数,Total Bacteria
+有机碳,OC,总有机碳,TOC,Organic Carbon
+水深,WD,水深值,测深,Water Depth
+流速,V,海流速度,Current Speed
+流向,Dir,海流方向,Current Direction
+波高,Hs,浪高,波高值,Wave Height
+潮位,TL,潮汐水位,Tidal Level
+水温(水文),SST,海表温度,Sea Surface Temperature
+盐度(水文),SSS,海表盐度,Sea Surface Salinity
+气压,P,大气压,Atmospheric Pressure
+风速,WS,风速值,Wind Speed
+风向,WD,风方向,Wind Direction
+东海,ECS,东海区,东中国海,East China Sea
+黄海,YS,黄海区,Yellow Sea
+南海,SCS,南海区,South China Sea
+渤海,BS,渤海域,Bohai Sea
+长江口,Yangtze Estuary,长江入海口,扬子江口
+杭州湾,HZ Bay,钱塘江口,Hangzhou Bay
+舟山海域,Zhoushan,舟山渔场,舟山群岛
+象山港,XS Harbor,象山湾,Xiangshan
+三门湾,SM Bay,三门,Sanmen Bay
+台州湾,TZ Bay,台州,Taizhou Bay
+乐清湾,YQ Bay,乐清,Yueqing Bay
+温州湾,WZ Bay,温州,Wenzhou Bay
+闽东海域,MD Sea,宁德海域,Mindong
+闽中海域,MZ Sea,福州海域,Minzhong
+闽南海域,MN Sea,漳州-厦门海域,Minnan
+珠江口,Pearl Estuary,珠江入海口,PRD Estuary
+北部湾,BBG,Beibu Gulf,北部湾海域
+海南岛,Hainan,海南,海南本岛
+台湾海峡,Taiwan St.,台海,Taiwan Strait
+胶州湾,JZ Bay,胶州湾湾内,Jiaozhou Bay
+大黄鱼,Larimichthys crocea,大黄花,大鲜
+小黄鱼,Larimichthys polyactis,小黄花,黄花鱼
+带鱼,Hairtail,刀鱼,白带鱼,Trichiurus
+鲐鱼,Scomber japonicus,鲐巴鱼,青花鱼,Mackerel
+蓝点马鲛,Spanish Mackerel,马鲛鱼,鲅鱼
+银鲳,Silver Pomfret,鲳鱼,白鲳
+海鳗,Conger Eel,鳗鱼,海鳗鱼
+鳀鱼,Anchovy,鳀,黑背鳀,Engraulis
+三疣梭子蟹,Swimming Crab,梭子蟹,螃蟹,Portunus
+中国对虾,Chinese Shrimp,对虾,东方对虾
+中华绒螯蟹,Chinese Mitten Crab,大闸蟹,河蟹,毛蟹
+海带,Laminaria,昆布,江白菜
+紫贻贝,Blue Mussel,淡菜,海虹,Mytilus
+牡蛎,Oyster,蚝,海蛎,Ostrea
+缢蛏,Razor Clam,蛏子,竹蛏
+文蛤,Hard Clam,蛤蜊,花蛤
+毛蚶,Ark Clam,蚶子,血蚶
+扇贝,Scallop,海扇,栉孔扇贝
+海蜇,Jellyfish,水母,Rhopilema
+中肋骨条藻,Skeletonema costatum,骨条藻,硅藻
+米氏凯伦藻,Karenia mikimotoi,米氏凯伦,裸甲藻
+夜光藻,Noctiluca scintillans,夜光虫,甲藻
+赤潮,Red Tide,红潮,有害藻华,HAB
+绿潮,Green Tide,绿藻爆发,浒苔爆发
+台风,Typhoon,热带气旋,飓风
+风暴潮,Storm Surge,风暴增水,增水
+海啸,Tsunami,地震海啸,津波
+咸潮,Salt Tide,咸潮入侵,盐水入侵
+海平面上升,SLR,海平面,海面上升
+赤潮异弯藻,Heterosigma akashiwo,赤潮异弯,Heterosigma
+GB 3097-1997,海水水质标准,GB3097,GB 3097
+GB 17378-2007,海洋监测规范,GB17378,监测规范
+GB 12763-2007,海洋调查规范,GB12763,调查规范
+GB 18421-2001,海洋生物质量,GB18421,生物质量标准
+GB 18668-2002,海洋沉积物质量,GB18668,沉积物质量
+HY/T 147-2013,海洋监测技术规程,HY147,监测技术规程
+海洋环境保护法,Marine Environment Law,海洋环保法,海环法
+海域使用管理法,Sea Area Use Law,海域法,海用法
+海岛保护法,Island Protection Law,海岛法,岛保法
+渔业法,Fisheries Law,中华人民共和国渔业法
+海洋环境质量公报,Marine Environment Bulletin,海洋公报,环境公报
+中国海洋环境状况公报,China Marine Environment Bulletin,海洋状况公报,中国海洋公报
+中国海平面公报,China Sea Level Bulletin,海平面公报
+中国海洋灾害公报,China Marine Disaster Bulletin,海洋灾害公报,灾害公报
+中国海洋经济统计公报,China Marine Economy Bulletin,海洋经济公报,经济公报
+中国海洋行政执法公报,China Marine Law Enforcement Bulletin,海洋执法公报
+海洋监测报告,Marine Monitoring Report,监测报告
+海洋调查数据,Marine Survey Data,调查数据
+断面调查报告,Transect Survey Report,断面报告
+赤潮监控报告,Red Tide Monitoring Report,赤潮报告
+水质监测,Water Quality Monitoring,水质,水环境监测
+沉积物监测,Sediment Monitoring,底质监测,沉积监测
+生物监测,Biological Monitoring,生态监测,生物体监测
+大气监测,Atmospheric Monitoring,空气监测
+放射性监测,Radioactivity Monitoring,辐射监测
+海洋水文气象监测,Marine Hydrometeorological Monitoring,水文气象监测
+海洋生物多样性监测,Marine Biodiversity Monitoring,生物多样性监测,Biodiversity Monitoring
+海洋牧场监测,Marine Ranching Monitoring,牧场监测
+海洋生态监测,Marine Ecological Monitoring,生态监测
+海洋化学监测,Marine Chemical Monitoring,化学监测
+海洋生产总值,Marine GDP,GOP,海洋GDP
+海洋产业,Marine Industry,海洋经济产业
+海洋渔业,Marine Fishery,海洋捕捞养殖
+海洋运输业,Marine Transportation,海运业
+海洋旅游业,Marine Tourism,滨海旅游
+海洋化工业,Marine Chemical Industry,海洋化工
+海洋工程业,Marine Engineering,海洋工程
+海洋药业,Marine Pharmaceutical,海洋药物
+海洋盐业,Marine Salt,海盐
+海洋矿业,Marine Mining,海底采矿
+μg/L,微克每升,微克/升,ug/L
+mg/L,毫克每升,毫克/升
+g/L,克每升,克/升
+%,百分比,百分之,百分率
+psu,实用盐度单位,实用盐度
+NTU,浊度单位,散射浊度单位
+CFU/mL,菌落形成单位,菌落数
+个/L,个每升,每升个数
+m,米,公尺
+km,千米,公里
+cm/s,厘米每秒,cm/秒
+节,Kn,Knot
+级,Beaufort,蒲福级,风力等级
+°C,摄氏度,度
+hPa,百帕,百帕斯卡
+μmol/L,微摩尔每升,微摩尔/升
+km²,平方千米,平方公里
+km³,立方千米,立方公里
+月,月份,月份
+季度,季,Q
+东海分局,East China Sea Branch,东海区局,东海局
+南海分局,South China Sea Branch,南海区局,南海局
+北海分局,North China Sea Branch,北海区局,北海局
+自然资源部,MNR,Ministry of Natural Resources,国土部
+生态环境部,MEE,Ministry of Ecology and Environment,环保部
+农业农村部,MARA,Ministry of Agriculture and Rural Affairs,农业部
+中国海洋石油集团,CNOOC,中海油
+中国石油化工集团,Sinopec,中石化
+中国石油天然气集团,CNPC,中石油
+国家海洋环境监测中心,NMEMC,海洋环境监测中心
+海洋油气资源,Marine Oil and Gas,海上油气,海洋石油
+海洋可再生能源,Marine Renewable Energy,海洋新能源
+海洋生物资源,Marine Biological Resources,海洋生物
+海洋渔业资源,Marine Fishery Resources,渔业资源
+海洋旅游资源,Marine Tourism Resources,滨海旅游资源
+海洋矿产资源,Marine Mineral Resources,海底矿产
+海洋盐业资源,Marine Salt Resources,盐田资源
+海洋空间资源,Marine Space Resources,海域空间
+海洋基因资源,Marine Genetic Resources,海洋基因
+海洋药物资源,Marine Pharmaceutical Resources,海洋药物
+海浪预报,Wave Forecast,海浪预测
+潮汐预报,Tide Forecast,潮汐表
+潮流预报,Tidal Current Forecast,潮流预测
+海温预报,SST Forecast,海温预测
+风暴潮预报,Storm Surge Forecast,风暴潮预警
+海冰预报,Sea Ice Forecast,海冰预测
+海雾预报,Sea Fog Forecast,海雾预测
+赤潮预报,Red Tide Forecast,赤潮预警
+溢油预报,Oil Spill Forecast,溢油漂移预测
+台风预报,Typhoon Forecast,台风路径预报
+海洋站观测数据,Station Observation,台站数据,海洋站数据
+浮标观测数据,Buoy Data,浮标数据
+卫星遥感数据,Satellite Data,卫星数据,遥感数据
+船舶报数据,Ship Report,船舶报
+断面调查数据,Transect Data,断面数据
+志愿船数据,Voluntary Observing Ship,VOS
+Argo浮标,Argo,Argo浮标数据
+海床基数据,Seabed Data,海床基
+潜标数据,Subsurface Buoy Data,潜标
+岸基站数据,Coastal Station Data,岸基
+东海局,East China Sea Bureau,东海分局
+东海局监测中心,Donghai Monitoring Center,东海监测中心
+东海预报中心,Donghai Forecast Center,东海预报台
+东海信息中心,Donghai Information Center,东海信息
+东海维权执法队,Donghai Rights Enforcement,东海维权
+舟山石化,Zhoushan Petrochem,舟山石化公司,中石化舟山
+浙江石化,Zhejiang Petrochem,浙石化,浙江石油化工
+上海石化,Sinopec Shanghai,上海石化公司
+高桥石化,Gaoqiao Petrochem,中石化高桥
+镇海炼化,Zhenhai Refining,中石化镇海
+海洋捕捞,Marine Fishing,海洋捕捞业,海上捕捞
+海水养殖,Mariculture,海水养殖业,海上养殖
+淡水养殖,Freshwater Aquaculture,淡水养殖业
+水产养殖,Aquaculture,水产养殖业
+海洋牧场,Marine Ranching,海洋牧场建设
+增殖放流,Stock Enhancement,增殖放流
+伏季休渔,Summer Fishing Ban,伏休
+禁渔期,Fishing Ban Period,禁渔
+禁渔区,Fishing Ban Zone,禁渔区
+捕捞许可证,Fishing License,捕捞许可
+陆源污染,Land-based Pollution,陆源污染物
+海上污染,Marine Pollution,海上污染源
+大气沉降污染,Atmospheric Deposition,大气沉降
+船舶污染,Vessel Pollution,船舶排放
+平台污染,Platform Pollution,海上平台污染
+海水养殖污染,Mariculture Pollution,养殖污染
+海洋垃圾,Marine Debris,海洋垃圾污染
+微塑料污染,Microplastic Pollution,微塑料
+海洋重金属污染,Marine Heavy Metal Pollution,重金属污染
+海洋有机污染,Marine Organic Pollution,有机污染
+断面,Transect,断面线,调查断面
+站位,Station,监测站位,调查站位
+采样层,Sampling Layer,取样层
+表层,Surface,海表
+底层,Bottom,海底
+温跃层,Thermocline,斜温层
+混合层,Mixed Layer,混合层深度
+真光层,Euphotic Zone,透光层
+白贝罗定律,Buys-Ballot Law,白贝罗法则
+埃克曼输送,Ekman Transport,埃克曼
+化学要素,化学指标,水质指标
+水文要素,水文指标,物理指标
+断面数据,断面信息,断面情况
+东海局,海洋局,海洋,自然资源部东海局
+东海区,东海,东中国海,ECS
+断面报告,通报
+E1,E1断面
+E2,E2断面
+E3,E3断面
+生物要素,生物指标,生态要素
+沉积物要素,沉积物指标,底质要素
+营养盐要素,营养盐,三氮一磷
+重金属要素,重金属,金属指标
+有机污染要素,有机污染物
+气象要素,气象指标
+海流要素,海流指标
+生态要素,生态指标
+放射性要素,放射性指标,核素
+微塑料要素,微塑料指标
+本月数据,这个月,当月
+本季度数据,本季,当季,Q
+本年度数据,今年,本年
+去年数据,上年,去年
+近5年数据,最近5年,5年
+近期数据,最近,最近一段时间
+历史数据,历史,过去
+实时数据,现在,当前
+同期数据,去年同期,同比
+环比数据,与上月比,比上月
+全海区数据,全部,所有海区
+东海,东海区,东中国海,ECS
+黄海,黄海区
+南海,南海区,南中国海,SCS
+渤海,渤海区
+近海,近岸,沿岸
+外海,远海
+长江口,长江入海口,吴淞口
+杭州湾,杭州湾口
+舟山海域,舟山渔场,舟山群岛
+洋山港,洋山深水港
+宁波-舟山港,宁波舟山港,北仑港
+上海市海域,上海海域,上海近海
+江苏省海域,江苏海域
+长江口断面,长江口-杭州湾断面
+长江口-杭州湾断面,长杭断面
+舟山断面,舟山海域断面
+E1001,E1-001
+E2001,E2-001
+E3001,E3-001
+所有报告,全部报告,所有文档
+年度报告,年报
+季度报告,季报
+月度报告,月报
+专题报告,专项报告
+所有标准,全部标准,国标行标
+所有通知,通知公告
+所有办法,管理办法,规定
+东海局下属机构,东海局部门
+东海监测中心,东海局监测中心,监测中心
+东海预报中心,东海预报台,预报中心
+东海执法总队,东海海监,执法队
+上级单位,上级,主管部门
+自然资源部,MNR,国土部
+生态环境部,MEE,环保部
+农业农村部,MARA,农业部
+国家海洋预报台,国家预报台,预报台
+中国海警局,海警
+小时数据,逐时数据,小时级
+日数据,逐日数据,日级
+旬数据,逐旬数据,旬度
+月数据,逐月数据,月度
+年数据,逐年数据,年度
+年度断面调查,年度调查,年断面调查,全年断面调查,断面年度调查
+春季断面调查,春季调查,春季数据,春季监测,春季断面
+夏季断面调查,夏季调查,夏季数据,夏季监测,夏季断面
+秋季断面调查,秋季调查,秋季数据,秋季监测,秋季断面
+冬季断面调查,冬季调查,冬季数据,冬季监测,冬季断面
+枯水期断面调查,枯水期调查,枯水期数据,枯水期,枯水期监测
+汛期断面调查,汛期调查,汛期数据,汛期,汛期监测
+丰水期断面调查,丰水期调查,丰水期数据,丰水期,丰水期监测
+平水期断面调查,平水期调查,平水期数据,平水期,平水期监测
+代表月断面调查,代表月,代表月数据,代表月监测,季度代表月
+冬季代表月,冬季月份,冬季月
+春季代表月,春季月份,春季月
+夏季代表月,夏季月份,夏季月
+秋季代表月,秋季月份,秋季月
+四季调查,四季数据,四季,四季监测,4季调查

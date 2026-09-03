@@ -117,6 +117,14 @@ class ConversationSettings(BaseModel):
     max_history_messages: int = Field(default=20, ge=1, le=100)
 
 
+class SkillSettings(BaseModel):
+    directory: str = "skills"
+
+    def resolved_directory(self) -> Path:
+        path = Path(self.directory)
+        return path if path.is_absolute() else PROJECT_DIR / path
+
+
 class StreamSettings(BaseModel):
     include_process: bool = True
     include_tool_result: bool = False
@@ -189,12 +197,12 @@ class SqlLlmSettings(BaseModel):
 
 class DatabaseToolSettings(BaseModel):
     information_dir: str = "database_information"
-    query_guide_file: str = "断面数据_AI_SQL查询指南.md"
+    query_guide_file: str = "数据库_AI_SQL查询指南.md"
     host: str = "127.0.0.1"
     port: int = Field(default=3306, ge=1, le=65535)
     user: str = "readonly_user"
     password: SecretStr = SecretStr("")
-    name: str = "document"
+    name: str = "donghai_dwd"
     connect_timeout: float = Field(default=5, gt=0)
     query_timeout: float = Field(default=10, gt=0)
     max_rows: int = Field(default=1000, ge=1)
@@ -229,6 +237,7 @@ class Settings(BaseSettings):
     llm: LLMSettings
     react: ReactSettings = Field(default_factory=ReactSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
+    skills: SkillSettings = Field(default_factory=SkillSettings)
     stream: StreamSettings = Field(default_factory=StreamSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     tools: ToolSettings = Field(default_factory=ToolSettings)

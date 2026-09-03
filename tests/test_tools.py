@@ -9,15 +9,17 @@ from agents.tools.database_query import (
     DatabaseQueryTool,
 )
 from agents.tools.executor import ToolExecutor, ToolOutput
-from agents.tools.rag_search import RagSearchTool
+from agents.tools.rag_search import RagSearchTool, expand_query_synonyms
 from agents.tools.registry import build_tool_executor
 from tool_backends.rag_backend import RagSearchBackend
 
 
 class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
-    def test_database_description_excludes_operational_observation_stations(self):
-        self.assertIn("断面历史调查数据", DATABASE_TOOL_DESCRIPTION)
+    def test_database_description_is_generic_and_excludes_observation_stations(self):
+        self.assertIn("授权业务表", DATABASE_TOOL_DESCRIPTION)
+        self.assertIn("Apache Doris", DATABASE_TOOL_DESCRIPTION)
         self.assertIn("必须调用 observation_service", DATABASE_TOOL_DESCRIPTION)
+        self.assertNotIn("断面", DATABASE_TOOL_DESCRIPTION)
 
     async def test_registered_tool_can_be_described_and_executed(self):
         executor = ToolExecutor()
@@ -49,6 +51,30 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                 }
             ],
         )
+
+    def test_registered_tool_parameter_nodes_have_descriptions(self):
+        missing = []
+
+        def inspect_schema(schema, path):
+            for name, node in schema.get("properties", {}).items():
+                node_path = f"{path}.{name}" if path else name
+                if not str(node.get("description") or "").strip():
+                    missing.append(node_path)
+                inspect_schema(node, node_path)
+
+                items = node.get("items")
+                if isinstance(items, dict):
+                    item_path = f"{node_path}[]"
+                    if not str(items.get("description") or "").strip():
+                        missing.append(item_path)
+                    inspect_schema(items, item_path)
+
+        executor = build_tool_executor()
+        for definition in executor.definitions():
+            function = definition["function"]
+            inspect_schema(function["parameters"], function["name"])
+
+        self.assertEqual(missing, [])
 
     async def test_no_argument_tool_accepts_native_empty_arguments(self):
         executor = build_tool_executor()
@@ -155,6 +181,22 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(database_result["question"], "E2 平均盐度")
         self.assertEqual(database_result["limit"], 1000)
 
+    async def test_rag_expands_synonyms_before_search(self):
+        class FakeRagBackend:
+            async def search(self, query, top_k, filters):
+                self.query = query
+                return []
+
+        rag_tool = RagSearchTool(FakeRagBackend())
+        result = await rag_tool.execute("请分析7月DO的达标率")
+
+        self.assertEqual(rag_tool.backend.query, "请分析7月DO（溶解氧）的达标率")
+        self.assertEqual(result["query"], "请分析7月DO（溶解氧）的达标率")
+        self.assertEqual(
+            expand_query_synonyms("DO（溶解氧）和pH值"),
+            "DO（溶解氧）和pH值",
+        )
+
     def test_rag_parser_preserves_page_index_and_line(self):
         chunks = RagSearchBackend._parse_recall(
             {
@@ -206,6 +248,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             set(executor.tools),
             {
+                "load_skill",
                 "CurrentServerTime",
                 "rag_search",
                 "database_query",

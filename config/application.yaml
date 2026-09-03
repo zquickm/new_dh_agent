@@ -21,6 +21,9 @@ react:
 conversation:
   max_history_messages: 20
 
+skills:
+  directory: skills
+
 stream:
   include_process: true
   include_tool_result: false
@@ -50,8 +53,8 @@ tools:
       - "KLB_6729221e7b9047d290726f527b02ebed"
     dept_ids:
       - "c3d03091-026c-413a-974e-081a4bbfe8c0"
-    score: 0.5
-    top_n: 20
+    score: 0.6
+    top_n: 12
     faq_score: 0.8
     search_method: 3
     search_scope: "knowledge"
@@ -62,7 +65,7 @@ tools:
     max_retries: 2
     retry_backoff: 0.5
     rerank:
-      enabled: true
+      enabled: false
       base_url: "http://71.10.60.34:18000"
       path: "/maas-712f5806/v1/rerank"
       url: ""
@@ -75,12 +78,12 @@ tools:
       verify_ssl: true
   database:
     information_dir: database_information
-    query_guide_file: "断面数据_AI_SQL查询指南.md"
-    host: "71.10.60.132"
-    port: 3310
+    query_guide_file: "数据库_AI_SQL查询指南.md"
+    host: "71.10.60.155"
+    port: 9030
     user: "dh_agent_reader"
     password: "${BUSINESS_DB_PASSWORD:}"
-    name: "document"
+    name: "donghai_dwd"
     connect_timeout: 5
     query_timeout: 10
     max_rows: 50

@@ -93,6 +93,7 @@ class SettingsTest(unittest.TestCase):
             )
             self.assertEqual(settings.tools.rag.timeout, 30)
             self.assertTrue(settings.tools.database.host)
+            self.assertEqual(settings.tools.database.name, "donghai_dwd")
 
     def test_tool_backend_variables_are_not_app_settings(self):
         with tempfile.TemporaryDirectory() as directory:
