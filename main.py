@@ -14,6 +14,9 @@ from controller.health_controller import router as health_router
 from controller.recommend_controller import router as recommend_router
 from middleware.internal_request_auth import InternalRequestAuthMiddleware
 from services.chat_service import chat_service
+from controller.sensitive_word_controller import router as sensitive_word_router
+from services.sensitive_word_runtime import get_sensitive_word_runtime
+from common.sensitive_errors import SensitiveWordError
 
 
 settings = get_settings()
@@ -23,12 +26,17 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    logger.info("application_started profile=%s", settings.app_profile)
+    sensitive_runtime = get_sensitive_word_runtime()
     try:
+        await sensitive_runtime.start()
+        logger.info("application_started profile=%s", settings.app_profile)
         yield
     finally:
-        await chat_service.close()
-        logger.info("application_stopped")
+        try:
+            await chat_service.close()
+        finally:
+            await sensitive_runtime.close()
+            logger.info("application_stopped")
 
 
 app = FastAPI(title="New DH ReAct Agent", lifespan=lifespan)
@@ -41,6 +49,15 @@ app.include_router(health_router)
 app.include_router(conversation_router)
 app.include_router(recommend_router)
 app.include_router(agent_router)
+app.include_router(sensitive_word_router)
+
+
+@app.exception_handler(SensitiveWordError)
+async def sensitive_error(_request: Request, exc: SensitiveWordError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=JsonResult(code=exc.status_code, message=exc.message, data=exc.data).model_dump(),
+    )
 
 
 @app.exception_handler(HTTPException)

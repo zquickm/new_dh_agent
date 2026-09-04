@@ -6,3 +6,4 @@ wheelhouse
 logs/
 *.py[cod]
 打包部署.command
+var/sensitive-word-exports/

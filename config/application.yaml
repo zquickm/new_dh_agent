@@ -23,7 +23,23 @@ conversation:
 
 sensitive_words:
   enabled: true
+  backend: csv
   file: config/sensitive_words.csv
+  admin_token: "${NEW_DH_SENSITIVE_WORDS__ADMIN_TOKEN:}"
+  risk_rules_enabled: true
+  mysql:
+    host: "${NEW_DH_SENSITIVE_WORDS__MYSQL__HOST:127.0.0.1}"
+    port: 3306
+    user: "${NEW_DH_SENSITIVE_WORDS__MYSQL__USER:sensitive_word_user}"
+    password: "${NEW_DH_SENSITIVE_WORDS__MYSQL__PASSWORD:}"
+    database: "${NEW_DH_SENSITIVE_WORDS__MYSQL__DATABASE:new_dh_agent}"
+    connect_timeout: 5
+    query_timeout: 10
+    pool_max_size: 5
+  redis:
+    url: "${NEW_DH_SENSITIVE_WORDS__REDIS__URL:redis://127.0.0.1:6379/0}"
+    socket_timeout: 3
+    key_prefix: new_dh_agent:sensitive
 
 skills:
   directory: skills

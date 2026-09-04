@@ -52,6 +52,11 @@ Agent 已注册四个业务工具（括号内为协议调用标识）：
 
 ## 用户输入敏感词拦截
 
+支持 CSV 本地词库（默认）和独立 MySQL + Redis 词库。MySQL 模式提供内部管理 API，
+并支持从 hk-ai-tutor 的智能体管理 API 一次性复制分类和词条，随后独立维护。
+部署、鉴权、导出导入和回滚步骤见 [敏感词管理说明](docs/sensitive-word-management.md)。
+两种模式均增加通用风险规则：自伤关怀优先，词库命中其次，随后检测明确的辱骂或人身攻击请求。
+
 服务在用户问题进入 AgentLoop 之前，使用
 `config/sensitive_words.csv` 中的词条执行本地子串匹配。CSV 只要求
 `word` 表头，每个词条单独占一行：

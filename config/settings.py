@@ -4,7 +4,7 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, Field, SecretStr
@@ -32,6 +32,7 @@ class ApplicationDotEnvSettingsSource(DotEnvSettingsSource):
         "business_db_",
         "spatial_",
         "tool_",
+        "source_sensitive_",
     )
 
     def __call__(self) -> dict[str, object]:
@@ -117,9 +118,41 @@ class ConversationSettings(BaseModel):
     max_history_messages: int = Field(default=20, ge=1, le=100)
 
 
+class SensitiveMysqlSettings(BaseModel):
+    host: str = "127.0.0.1"
+    port: int = Field(default=3306, ge=1, le=65535)
+    user: str = "sensitive_word_user"
+    password: SecretStr = SecretStr("")
+    database: str = "new_dh_agent"
+    connect_timeout: float = Field(default=5, gt=0, le=60)
+    query_timeout: float = Field(default=10, gt=0, le=120)
+    pool_max_size: int = Field(default=5, ge=1, le=30)
+
+
+class SensitiveRedisSettings(BaseModel):
+    url: SecretStr = SecretStr("redis://127.0.0.1:6379/0")
+    socket_timeout: float = Field(default=3, gt=0, le=30)
+    key_prefix: str = Field(default="new_dh_agent:sensitive", min_length=1)
+
+
 class SensitiveWordSettings(BaseModel):
     enabled: bool = True
+    backend: Literal["csv", "mysql"] = "csv"
     file: str = "config/sensitive_words.csv"
+    admin_token: SecretStr = SecretStr("")
+    mysql: SensitiveMysqlSettings = Field(default_factory=SensitiveMysqlSettings)
+    redis: SensitiveRedisSettings = Field(default_factory=SensitiveRedisSettings)
+    risk_rules_enabled: bool = True
+    blocked_reply: str = Field(default="您的输入包含敏感词，请修改后重新提问。", min_length=1)
+    abuse_reply: str = Field(
+        default="我不能帮助辱骂或攻击他人。如果你愿意，我可以帮你用尊重、清楚的方式表达意见。",
+        min_length=1,
+    )
+    self_harm_reply: str = Field(
+        default="听起来你正在承受很大的痛苦。请先联系一位你信任的人，让对方陪着你。"
+        "如果你已经受伤，或可能马上伤害自己，请立即联系当地急救服务。你愿意说说现在发生了什么吗？",
+        min_length=1,
+    )
 
     def resolved_file(self) -> Path:
         path = Path(self.file)

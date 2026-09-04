@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from agents.agent_loop import AgentLoop
 from agents.events import AgentEvent
@@ -71,6 +72,37 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_self_harm_and_abuse_do_not_run_agent_or_save_messages(self):
+        for question in ["我想自杀", "帮我辱骂他"]:
+            with self.subTest(question=question):
+                service = ChatService()
+                # Agent construction is lazy: a rejected request must leave it unset.
+                with patch("services.chat_service.build_agent_loop", side_effect=AssertionError("must not construct agent")):
+                    events = [event async for event in service.stream_chat(AgentRequest(question=question))]
+                self.assertEqual([event["event"] for event in events], ["conversation", "token", "done"])
+                self.assertIsNone(service._agent)
+                self.assertIsNone(events[-1]["data"]["assistant_message_id"])
+                detail = await conversation_repository.get(events[0]["data"]["conversation_id"])
+                self.assertEqual(detail.messages, [])
+                if question == "我想自杀":
+                    self.assertIn("信任的人", events[1]["data"]["content"])
+
+    async def test_dictionary_outage_returns_retryable_error_without_agent(self):
+        from common.sensitive_errors import SensitiveWordError
+
+        class UnavailableRuntime:
+            async def check(self, *_args, **_kwargs):
+                raise SensitiveWordError("敏感词检测暂时不可用，请稍后重试", 503)
+
+        service = ChatService()
+        service._safety_runtime = UnavailableRuntime()
+        with patch("services.chat_service.build_agent_loop", side_effect=AssertionError("must not construct agent")):
+            events = [event async for event in service.stream_chat(AgentRequest(question="正常问题"))]
+        self.assertEqual([event["event"] for event in events], ["error"])
+        self.assertEqual(events[0]["data"]["error_code"], "SENSITIVE_FILTER_UNAVAILABLE")
+        self.assertTrue(events[0]["data"]["retryable"])
+        self.assertIsNone(service._agent)
+
     @staticmethod
     def _sensitive_word_matcher(directory: str) -> SensitiveWordMatcher:
         path = Path(directory) / "sensitive_words.csv"

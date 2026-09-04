@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import csv
 import logging
-import unicodedata
 from pathlib import Path
 from typing import Optional
+
+from common.text_normalization import normalize_text
 
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ class SensitiveWordConfigurationError(RuntimeError):
 
 
 def _normalize(value: str) -> str:
-    return unicodedata.normalize("NFKC", value).casefold().strip()
+    return normalize_text(value)
 
 
 class SensitiveWordMatcher:
@@ -27,9 +28,12 @@ class SensitiveWordMatcher:
         self._load_initial()
 
     def matches(self, text: str) -> bool:
+        return bool(self.find(text))
+
+    def find(self, text: str) -> list[str]:
         self._reload_if_changed()
         normalized = _normalize(text)
-        return bool(normalized) and any(word in normalized for word in self._words)
+        return sorted(word for word in self._words if normalized and word in normalized)
 
     def _load_initial(self) -> None:
         signature = self._stat_signature()
