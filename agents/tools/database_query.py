@@ -20,31 +20,32 @@ TOOL_DESCRIPTION = (
     "最新观测、趋势或时间区间数据；这些问题必须调用 observation_service。"
     "SQL 会经过授权表白名单和只读校验。"
 )
-TOOL_PARAMETERS: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "question": {
-            "type": "string",
-            "minLength": 1,
-            "description": (
-                "需要从授权业务表回答的完整自然语言问题，应保留用户指定的过滤条件、"
-                "指标、排序、分组和统计要求，不得为空。"
-            ),
+def build_tool_parameters(max_rows: int) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "minLength": 1,
+                "description": (
+                    "需要从授权业务表回答的完整自然语言问题，应保留用户指定的过滤条件、"
+                    "指标、排序、分组和统计要求，不得为空。"
+                ),
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": max_rows,
+                "default": max_rows,
+                "description": (
+                    f"本次查询请求返回的最大记录数，范围 1 到 {max_rows}，"
+                    f"省略时默认 {max_rows}。"
+                ),
+            },
         },
-        "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 1000,
-            "default": 100,
-            "description": (
-                "本次查询请求返回的最大记录数，范围 1 到 1000，省略时默认 100；"
-                "实际返回数量还受服务端安全上限限制。"
-            ),
-        },
-    },
-    "required": ["question"],
-    "additionalProperties": False,
-}
+        "required": ["question"],
+        "additionalProperties": False,
+    }
 
 
 class DatabaseQueryTool:
@@ -106,11 +107,16 @@ class DatabaseQueryTool:
             )
         return self._backend
 
-    async def execute(self, question: str, limit: int = 100) -> dict[str, Any]:
+    async def execute(
+        self,
+        question: str,
+        limit: Optional[int] = None,
+    ) -> dict[str, Any]:
         question = question.strip()
         if not question:
             raise ValueError("question 不能为空")
-        limit = min(max(int(limit), 1), 1000)
+        max_rows = get_settings().tools.database.max_rows
+        limit = max_rows if limit is None else min(max(int(limit), 1), max_rows)
         return await self.backend.query(question, limit)
 
     async def close(self) -> None:

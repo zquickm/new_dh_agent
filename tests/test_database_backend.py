@@ -94,18 +94,21 @@ class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
         schemas = catalog.read_all_schemas()
+        guide = catalog.read_guide()
         self.assertIn("ENGINE=OLAP", schemas)
         self.assertNotIn("section_stations", schemas)
+        self.assertIn("station_name", guide)
+        self.assertIn("JSON_OBJECT", guide)
+        self.assertIn("组成业务唯一键", guide)
+        self.assertIn("一条水文记录对应多条化学记录", guide)
 
-    def test_sql_prompt_uses_current_doris_query_rules(self):
+    def test_sql_prompt_delegates_domain_rules_to_query_guide(self):
         prompt = DatabaseQueryBackend._SYSTEM_PROMPT
 
         self.assertIn("Apache Doris", prompt)
-        self.assertIn("未要求各站或逐站就禁止按站位分组", prompt)
-        self.assertIn("未指定口径时只计算 AVG 和 COUNT", prompt)
-        self.assertIn("字符串列默认作为文本处理", prompt)
-        self.assertIn("metrics 使用 JSON_OBJECT", prompt)
+        self.assertIn("查询指南是业务语义和查询组织规则的唯一依据", prompt)
         self.assertIn("禁止 FULL OUTER JOIN", prompt)
+        self.assertNotIn("JSON_OBJECT", prompt)
 
     def test_validator_accepts_new_tables_and_rejects_old_tables(self):
         validator = ReadonlySqlValidator()
