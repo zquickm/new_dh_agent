@@ -69,6 +69,8 @@ class ApiTest(unittest.TestCase):
         chat_service._agent = self.fake_agent
         self.client = TestClient(app)
         self.client.headers[INTERNAL_HEADER] = INTERNAL_TOKEN
+        self.client.headers["X-User-Id"] = "101"
+        self.client.headers["X-Auth-Source"] = "dh-gateway"
 
     def tearDown(self):
         chat_service._agent = self.previous_agent

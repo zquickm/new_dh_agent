@@ -14,6 +14,9 @@ from services.chat_service import ChatService
 from services.sensitive_word_service import SensitiveWordMatcher
 
 
+TEST_USER_ID = "101"
+
+
 class FakeAgent:
     model_name = "fake-model"
 
@@ -207,7 +210,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                     round_number=1,
                 )
 
-        conversation = await conversation_repository.create("地图选区测试")
+        conversation = await conversation_repository.create("地图选区测试", user_id=TEST_USER_ID)
         agent = CapturingAgent()
         service = ChatService()
         service._agent = agent
@@ -234,11 +237,11 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        events = [event async for event in service.stream_chat(request)]
+        events = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
 
         self.assertIn('"query_type":"polygon"', agent.question)
         self.assertEqual(events[-1]["event"], "done")
-        detail = await conversation_repository.get(conversation.id)
+        detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
         self.assertEqual(detail.messages[0].content, "这个区域有哪些站点")
         self.assertNotIn("selected_area", detail.messages[0].content)
         await service.close()
@@ -270,7 +273,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 }
             }
 
-        conversation = await conversation_repository.create("选区继承测试")
+        conversation = await conversation_repository.create("选区继承测试", user_id=TEST_USER_ID)
         agent = CapturingAgent()
         service = ChatService()
         service._agent = agent
@@ -300,12 +303,12 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             ),
         ]
         for request in requests:
-            _ = [event async for event in service.stream_chat(request)]
+            _ = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
 
         self.assertIn('"bbox":[121.1,29.8,122.5,30.7]', agent.questions[1])
         self.assertIn('"bbox":[123.1,30.8,124.5,31.7]', agent.questions[3])
         self.assertNotIn('"bbox":[121.1,29.8,122.5,30.7]', agent.questions[3])
-        detail = await conversation_repository.get(conversation.id)
+        detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
         self.assertTrue(
             all("selected_area" not in message.content for message in detail.messages)
         )
@@ -322,7 +325,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 self.questions.append(question)
                 yield AgentEvent(type="answer_delta", content="回答")
 
-        conversation = await conversation_repository.create("圆形选区测试")
+        conversation = await conversation_repository.create("圆形选区测试", user_id=TEST_USER_ID)
         agent = CapturingAgent()
         service = ChatService()
         service._agent = agent
@@ -366,7 +369,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             ),
         ]
         for request in requests:
-            _ = [event async for event in service.stream_chat(request)]
+            _ = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
 
         self.assertIn('"query_type":"polygon"', agent.questions[0])
         self.assertIn('"query_type":"circle"', agent.questions[1])
@@ -392,7 +395,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                     content=answers[len(self.calls) - 1],
                 )
 
-        conversation = await conversation_repository.create("单站指代测试")
+        conversation = await conversation_repository.create("单站指代测试", user_id=TEST_USER_ID)
         agent = CapturingAgent()
         service = ChatService()
         service._agent = agent
@@ -428,7 +431,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             ),
         ]
         for request in requests:
-            _ = [event async for event in service.stream_chat(request)]
+            _ = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
 
         question, history = agent.calls[2]
         self.assertNotIn("selected_area", question)
@@ -455,8 +458,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 self.questions.append(question)
                 yield AgentEvent(type="answer_delta", content="回答")
 
-        first = await conversation_repository.create("选区会话")
-        second = await conversation_repository.create("普通会话")
+        first = await conversation_repository.create("选区会话", user_id=TEST_USER_ID)
+        second = await conversation_repository.create("普通会话", user_id=TEST_USER_ID)
         agent = CapturingAgent()
         service = ChatService()
         service._agent = agent
@@ -481,11 +484,12 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 "map_context": context,
             }
         )
-        _ = [event async for event in service.stream_chat(first_request)]
+        _ = [event async for event in service.stream_chat(first_request, user_id=TEST_USER_ID)]
         _ = [
             event
             async for event in service.stream_chat(
-                AgentRequest(question="该区域呢", conversation_id=second.id)
+                AgentRequest(question="该区域呢", conversation_id=second.id),
+                user_id=TEST_USER_ID,
             )
         ]
 
@@ -493,14 +497,15 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("selected_area", agent.questions[1])
 
     async def test_stream_maps_agent_events_and_persists_exchange(self):
-        conversation = await conversation_repository.create("测试")
+        conversation = await conversation_repository.create("测试", user_id=TEST_USER_ID)
         service = ChatService()
         service._agent = FakeAgent()
         with self.assertLogs("services.chat_service", level="INFO") as captured:
             events = [
                 event
                 async for event in service.stream_chat(
-                    AgentRequest(question="完整用户问题", conversation_id=conversation.id)
+                    AgentRequest(question="完整用户问题", conversation_id=conversation.id),
+                    user_id=TEST_USER_ID,
                 )
             ]
         self.assertEqual(
@@ -527,7 +532,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[1]["data"]["agent_id"], "agent-loop")
         self.assertEqual(events[-1]["data"]["answer"], "你好[[cite:1]]世界")
         self.assertEqual(events[-1]["data"]["sources"][0]["citation_id"], 1)
-        detail = await conversation_repository.get(conversation.id)
+        detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
         self.assertEqual([message.role for message in detail.messages], ["user", "assistant"])
         self.assertEqual(detail.messages[-1].sources[0]["preview"], "检索片段")
         self.assertIn("完整用户问题", "\n".join(captured.output))
@@ -554,7 +559,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 )
                 yield AgentEvent(type="answer_delta", content="请重新选择区域")
 
-        conversation = await conversation_repository.create("失败原因测试")
+        conversation = await conversation_repository.create("失败原因测试", user_id=TEST_USER_ID)
         service = ChatService()
         service._agent = FailingAgent()
 
@@ -564,7 +569,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 AgentRequest(
                     question="查询区域站点",
                     conversation_id=conversation.id,
-                )
+                ),
+                user_id=TEST_USER_ID,
             )
         ]
 
@@ -623,7 +629,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         service = ChatService()
         service._agent = AgentLoop(llm, tools)
         stream = encode_chat_stream(
-            service.stream_chat(AgentRequest(question="测试流式引用"))
+            service.stream_chat(AgentRequest(question="测试流式引用"), user_id=TEST_USER_ID)
         )
 
         initial_blocks = [
@@ -679,7 +685,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         events = [
             event
             async for event in service.stream_chat(
-                AgentRequest(question="显示站点")
+                AgentRequest(question="显示站点"), user_id=TEST_USER_ID
             )
         ]
 

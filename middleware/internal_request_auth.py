@@ -1,9 +1,29 @@
 from __future__ import annotations
 
+import re
 from hmac import compare_digest
 
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+
+def get_current_user_id(request: Request) -> str:
+    """Resolve gateway identity after internal-token middleware validation.
+
+    These headers do not replace gateway JWT validation or network isolation.
+    """
+    user_ids = request.headers.getlist("x-user-id")
+    sources = request.headers.getlist("x-auth-source")
+    if (
+        len(user_ids) != 1
+        or sources != ["dh-gateway"]
+        or re.fullmatch(r"[1-9][0-9]{0,18}", user_ids[0]) is None
+        or int(user_ids[0]) > 9223372036854775807
+    ):
+        raise HTTPException(status_code=401, detail="缺少或无效的网关用户身份")
+    # Stable primary key, not the editable username or per-login token id.
+    return user_ids[0]
 
 
 class InternalRequestAuthMiddleware:
