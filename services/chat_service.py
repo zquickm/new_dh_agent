@@ -12,9 +12,12 @@ from repositories.memory_conversation_repository import conversation_repository
 from schemas.chat import AgentRequest, ChatMessage
 from services.citation_service import CitationService
 from services.request_context_adapter import enrich_question_with_frontend_context
+from services.sensitive_word_service import SensitiveWordMatcher
 
 
 logger = logging.getLogger(__name__)
+
+SENSITIVE_INPUT_MESSAGE = "您的输入包含敏感词，请修改后重新提问。"
 
 _TOOL_DISPLAY_NAMES = {
     "load_skill": "技能加载",
@@ -29,6 +32,12 @@ _TOOL_DISPLAY_NAMES = {
 class ChatService:
     def __init__(self) -> None:
         self._agent: Optional[AgentLoop] = None
+        sensitive_settings = get_settings().sensitive_words
+        self._sensitive_word_matcher: Optional[SensitiveWordMatcher] = (
+            SensitiveWordMatcher(sensitive_settings.resolved_file())
+            if sensitive_settings.enabled
+            else None
+        )
 
     @property
     def agent(self) -> AgentLoop:
@@ -46,6 +55,10 @@ class ChatService:
     async def stream_chat(self, request: AgentRequest) -> AsyncIterator[dict]:
         started_at = perf_counter()
         run_id = str(uuid4())
+        contains_sensitive_input = (
+            self._sensitive_word_matcher is not None
+            and self._sensitive_word_matcher.matches(request.question)
+        )
         conversation_id = request.conversation_id
         if not conversation_id:
             conversation = await conversation_repository.create("新会话")
@@ -53,13 +66,21 @@ class ChatService:
         else:
             conversation = await conversation_repository.get(conversation_id)
             if conversation is None:
-                logger.warning(
-                    "chat_rejected run_id=%s conversation_id=%s question=%r "
-                    "reason=conversation_not_found",
-                    run_id,
-                    conversation_id,
-                    request.question,
-                )
+                if contains_sensitive_input:
+                    logger.warning(
+                        "chat_rejected run_id=%s conversation_id=%s "
+                        "reason=conversation_not_found sensitive_input=true",
+                        run_id,
+                        conversation_id,
+                    )
+                else:
+                    logger.warning(
+                        "chat_rejected run_id=%s conversation_id=%s question=%r "
+                        "reason=conversation_not_found",
+                        run_id,
+                        conversation_id,
+                        request.question,
+                    )
                 yield {
                     "event": "error",
                     "data": {
@@ -73,6 +94,29 @@ class ChatService:
             "event": "conversation",
             "data": {"conversation_id": conversation_id, "run_id": run_id},
         }
+        if contains_sensitive_input:
+            logger.warning(
+                "chat_rejected run_id=%s conversation_id=%s reason=sensitive_input",
+                run_id,
+                conversation_id,
+            )
+            yield {
+                "event": "token",
+                "data": {"content": SENSITIVE_INPUT_MESSAGE},
+            }
+            yield {
+                "event": "done",
+                "data": {
+                    "conversation_id": conversation_id,
+                    "run_id": run_id,
+                    "answer": SENSITIVE_INPUT_MESSAGE,
+                    "model": "sensitive-word-filter",
+                    "sources": [],
+                    "images": [],
+                    "assistant_message_id": None,
+                },
+            }
+            return
         answer_parts: list[str] = []
         registered_sources: list[dict] = []
         retrieval_counts: dict[str, int] = {}
