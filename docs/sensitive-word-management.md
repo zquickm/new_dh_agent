@@ -12,6 +12,8 @@
 `risk_rules_enabled=false` 仅关闭通用规则；`enabled=false` 关闭所有输入检测。
 聊天的 `conversation → token → done` 契约保持不变，命中不保存问答和地图上下文。
 词库完全不可用时返回可重试的 `SENSITIVE_FILTER_UNAVAILABLE` SSE error，不进入 Agent。
+聊天接口先校验网关用户身份及已有会话的归属；网关需写入 `X-User-Id` 和
+`X-Auth-Source: dh-gateway`。会话历史只读取当前用户的服务端记录，不采信客户端 `chat_history`。
 
 ## 配置独立存储
 

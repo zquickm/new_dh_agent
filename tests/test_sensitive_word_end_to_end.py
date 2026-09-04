@@ -66,7 +66,8 @@ class SensitiveWordEndToEndTest(unittest.IsolatedAsyncioTestCase):
         app.dependency_overrides[get_admin_service] = lambda: SensitiveWordAdminService(self.runtime)
         chat_service._safety_runtime, chat_service._agent = self.runtime, None
         headers = {app_settings.internal_request.header_name: app_settings.internal_request.token.get_secret_value(),
-                   "X-DH-Admin-Token": self.settings.admin_token.get_secret_value()}
+                   "X-DH-Admin-Token": self.settings.admin_token.get_secret_value(),
+                   "X-User-Id": "101", "X-Auth-Source": "dh-gateway"}
         second = SensitiveWordRuntime(self.settings)
         try:
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
@@ -93,8 +94,9 @@ class SensitiveWordEndToEndTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([frame.splitlines()[0] for frame in frames], ["event: conversation", "event: token", "event: done"])
                 payload = json.loads(frames[-1].splitlines()[1][6:])["data"]
                 self.assertIsNone(payload["assistant_message_id"])
-                detail = await conversation_repository.get(payload["conversation_id"])
+                detail = await conversation_repository.get(payload["conversation_id"], user_id="101")
                 self.assertEqual(detail.messages, [])
+                self.assertIsNone(await conversation_repository.get(payload["conversation_id"], user_id="202"))
                 self.assertIsNone(chat_service._agent)
 
                 async def publication_outage(*_args, **_kwargs):
