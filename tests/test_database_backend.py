@@ -101,6 +101,9 @@ class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("JSON_OBJECT", guide)
         self.assertIn("组成业务唯一键", guide)
         self.assertIn("一条水文记录对应多条化学记录", guide)
+        self.assertIn("REPLACE(UPPER(TRIM(station_name)), '-', '')", guide)
+        self.assertIn("数据画像快照", guide)
+        self.assertIn("COUNT(field)", guide)
 
     def test_sql_prompt_delegates_domain_rules_to_query_guide(self):
         prompt = DatabaseQueryBackend._SYSTEM_PROMPT
