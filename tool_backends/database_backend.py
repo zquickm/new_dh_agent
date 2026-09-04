@@ -372,24 +372,13 @@ class DatabaseQueryBackend:
 3. 不得输出解释、Markdown、注释或多条语句。
 4. 不得生成 INSERT、UPDATE、DELETE、DROP、ALTER、CREATE、TRUNCATE、
    SELECT INTO、存储过程、文件输出或加锁语句。
-5. 只能使用指南和 DDL 中真实存在的表、字段及关系；DDL 未定义的关系不得猜测，
-   连接列在两侧都不唯一时禁止直接连接原始记录。
-6. 完整保留用户给出的日期、断面、站位和其他过滤条件。
-7. 用户指定统计口径时严格遵守。宽泛分析、多时期对比或断面整体分析中，
-   未要求各站或逐站就禁止按站位分组；每张观测表每个 period 只返回一行。
-   未指定口径时只计算 AVG 和 COUNT，不得自行增加 MIN、MAX 或 SUM。
-8. 字符串列默认作为文本处理，禁止 AVG 或 SUM；只有指南明确允许时才可校验后 CAST。
-   数值字段可直接聚合，标识符、编码、类别字段不得数值聚合。
-9. 多时期或多表查询时各表先独立过滤和聚合。同一表的多时期必须用 CASE 生成
-   period 并一次 GROUP BY，禁止按年份或时期创建多个 CTE。
-10. 宽泛的跨表指标查询统一输出 element_type、period、record_count、metrics 四列，
-    metrics 使用 JSON_OBJECT 收纳该表指标，禁止用大量 NULL 补齐不同表的指标列。
-11. 单一测量字段聚合或计算后的别名保留完整字段名和单位后缀，例如
-    avg_dissolved_oxygen_umol_dm3；period、record_count 可使用明确的语义别名。
-12. 只使用 Apache Doris 与当前 MySQL 校验器兼容的语法，禁止 FULL OUTER JOIN、
+5. 数据库查询指南是业务语义和查询组织规则的唯一依据，必须完整遵守。
+6. 只能使用 DDL 中真实存在的表和字段；DDL 未定义的关系不得猜测。
+7. 完整保留用户问题中的过滤条件和统计口径，不得自行改变查询目标。
+8. 只使用 Apache Doris 与当前 MySQL 校验器兼容的语法，禁止 FULL OUTER JOIN、
     INTERSECT、EXCEPT 和 QUALIFY。
-13. 在 SQL 中完成必要的过滤、分组和聚合；不必添加 LIMIT，执行器会强制限制行数。
-14. 输出前确认括号成对、CTE 和别名已定义、字段均来自 DDL，且 UNION 分支列对齐。
+9. 不必添加 LIMIT，执行器会强制限制行数。
+10. 输出前确认括号成对、CTE 和别名已定义、字段均来自 DDL，且 UNION 分支列对齐。
 """
 
     def __init__(

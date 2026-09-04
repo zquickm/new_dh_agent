@@ -90,6 +90,27 @@ Agent 已注册四个业务工具（括号内为协议调用标识）：
 
 框架还注册了技能加载（`load_skill`）和当前服务器时间（`CurrentServerTime`）两个工具。
 
+## 用户输入敏感词拦截
+
+服务在用户问题进入 AgentLoop 之前，使用
+`config/sensitive_words.csv` 中的词条执行本地子串匹配。CSV 只要求
+`word` 表头，每个词条单独占一行：
+
+```csv
+word
+测试敏感词一
+测试敏感词二
+```
+
+仓库中的词条仅用于联调验证，生产上线前必须整体替换为业务方审核后的
+正式词库。文本会先做 Unicode NFKC 和英文大小写归一化，CSV 修改后
+自动热加载，无需重启服务。
+
+命中后不会调用大模型或业务工具，也不会将原始问题写入会话历史；
+接口仍按 `conversation → token → done` 顺序返回 SSE，固定提示为
+“您的输入包含敏感词，请修改后重新提问。”。开关和 CSV 路径由
+`sensitive_words.enabled` 与 `sensitive_words.file` 配置。
+
 ## Skill 按需加载
 
 Skill 放在 `skills/<skill-name>/SKILL.md`。文件使用 YAML frontmatter 提供索引信息，

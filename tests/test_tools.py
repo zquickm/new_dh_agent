@@ -11,6 +11,7 @@ from agents.tools.database_query import (
 from agents.tools.executor import ToolExecutor, ToolOutput
 from agents.tools.rag_search import RagSearchTool, expand_query_synonyms
 from agents.tools.registry import build_tool_executor
+from config.settings import get_settings
 from tool_backends.rag_backend import RagSearchBackend
 
 
@@ -20,6 +21,15 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Apache Doris", DATABASE_TOOL_DESCRIPTION)
         self.assertIn("必须调用 observation_service", DATABASE_TOOL_DESCRIPTION)
         self.assertNotIn("断面", DATABASE_TOOL_DESCRIPTION)
+
+    async def test_database_schema_limit_matches_server_max_rows(self):
+        executor = build_tool_executor()
+        schema = executor.get("database_query").parameters["properties"]["limit"]
+        max_rows = get_settings().tools.database.max_rows
+
+        self.assertEqual(schema["maximum"], max_rows)
+        self.assertEqual(schema["default"], max_rows)
+        await executor.close()
 
     async def test_registered_tool_can_be_described_and_executed(self):
         executor = ToolExecutor()
@@ -179,7 +189,10 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rag_result["chunks"][0]["page"], 2)
         self.assertEqual(rag_tool.backend.arguments, ("赤潮", 20, {}))
         self.assertEqual(database_result["question"], "E2 平均盐度")
-        self.assertEqual(database_result["limit"], 1000)
+        self.assertEqual(
+            database_result["limit"],
+            get_settings().tools.database.max_rows,
+        )
 
     async def test_rag_expands_synonyms_before_search(self):
         class FakeRagBackend:

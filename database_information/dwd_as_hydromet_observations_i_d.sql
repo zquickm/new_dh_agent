@@ -31,5 +31,6 @@ CREATE TABLE `dwd_as_hydromet_observations_i_d` (
   `longitude` decimal(10,6) NULL COMMENT '经度',
   `latitude` decimal(10,6) NULL COMMENT '纬度'
 ) ENGINE=OLAP
+-- 业务数据粒度为每个 station_id、observed_at 一条记录；depth_m 是水深属性。
 UNIQUE KEY(`station_id`, `observed_at`, `depth_m`)
 COMMENT '断面水文数据';

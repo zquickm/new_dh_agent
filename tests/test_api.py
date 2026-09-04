@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from fastapi.testclient import TestClient
@@ -107,6 +108,53 @@ class ApiTest(unittest.TestCase):
             ["user", "assistant"],
         )
         self.assertEqual(detail["messages"][-1]["sources"][0]["citation_id"], 1)
+
+    def test_sensitive_input_uses_normal_sse_contract_without_calling_agent(self):
+        with self.client.stream(
+            "POST",
+            "/agent/chat/stream",
+            json={"question": "这里包含测试敏感词一"},
+        ) as response:
+            body = "".join(response.iter_text())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers["content-type"].startswith("text/event-stream"))
+        frames = []
+        for block in body.strip().split("\n\n"):
+            lines = block.splitlines()
+            frames.append(
+                {
+                    "event": lines[0].removeprefix("event: "),
+                    "payload": json.loads(lines[1].removeprefix("data: ")),
+                }
+            )
+        self.assertEqual(
+            [frame["event"] for frame in frames],
+            ["conversation", "token", "done"],
+        )
+        conversation = frames[0]["payload"]["data"]
+        self.assertEqual(
+            frames[1]["payload"]["data"],
+            {"content": "您的输入包含敏感词，请修改后重新提问。"},
+        )
+        self.assertEqual(
+            frames[2]["payload"]["data"],
+            {
+                "conversation_id": conversation["conversation_id"],
+                "run_id": conversation["run_id"],
+                "answer": "您的输入包含敏感词，请修改后重新提问。",
+                "model": "sensitive-word-filter",
+                "sources": [],
+                "images": [],
+                "assistant_message_id": None,
+            },
+        )
+        self.assertIsNone(self.fake_agent.last_question)
+        detail = self.client.get(
+            f"/conversations/{conversation['conversation_id']}"
+        ).json()["data"]
+        self.assertEqual(detail["message_count"], 0)
+        self.assertEqual(detail["messages"], [])
 
     def test_rejects_request_without_gateway_internal_header(self):
         with TestClient(app) as direct_client:

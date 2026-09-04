@@ -13,8 +13,8 @@ from agents.tools.current_server_time import (
 from agents.tools.database_query import (
     TOOL_DESCRIPTION as DATABASE_TOOL_DESCRIPTION,
     TOOL_NAME as DATABASE_TOOL_NAME,
-    TOOL_PARAMETERS as DATABASE_TOOL_PARAMETERS,
     DatabaseQueryTool,
+    build_tool_parameters as build_database_tool_parameters,
 )
 from agents.tools.executor import ToolExecutor
 from agents.tools.map_action import (
@@ -79,7 +79,7 @@ def build_tool_executor(
         DATABASE_TOOL_NAME,
         DATABASE_TOOL_DESCRIPTION,
         database_tool.execute,
-        DATABASE_TOOL_PARAMETERS,
+        build_database_tool_parameters(settings.tools.database.max_rows),
     )
     executor.register(
         OBSERVATION_TOOL_NAME,

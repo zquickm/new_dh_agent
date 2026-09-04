@@ -21,6 +21,10 @@ react:
 conversation:
   max_history_messages: 20
 
+sensitive_words:
+  enabled: true
+  file: config/sensitive_words.csv
+
 skills:
   directory: skills
 
@@ -86,7 +90,7 @@ tools:
     name: "donghai_dwd"
     connect_timeout: 5
     query_timeout: 10
-    max_rows: 50
+    max_rows: 100
     pool_max_size: 3
     ssl_enabled: false
     ssl_ca: null
@@ -95,5 +99,5 @@ tools:
       base_url: "http://71.10.60.31:8900/v1"
       model: "dsv4"
       api_key: "${DEEPSEEK_API_KEY:}"
-      temperature: 0.6
+      temperature: 0
       timeout: 120

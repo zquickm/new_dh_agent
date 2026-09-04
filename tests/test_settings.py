@@ -38,6 +38,15 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(settings.llm.model, "dsv4")
             self.assertEqual(settings.internal_request.header_name, "X-DH-Internal-Token")
             self.assertTrue(settings.internal_request.token.get_secret_value())
+            self.assertTrue(hasattr(settings, "sensitive_words"))
+            sensitive_words = settings.sensitive_words
+            self.assertTrue(sensitive_words.enabled)
+            self.assertEqual(
+                sensitive_words.resolved_file(),
+                Path(__file__).resolve().parent.parent
+                / "config"
+                / "sensitive_words.csv",
+            )
 
     def test_system_environment_profile_has_priority(self):
         with patch.dict(os.environ, {"APP_PROFILE": "prod"}, clear=False):

@@ -1,6 +1,8 @@
 import asyncio
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from agents.agent_loop import AgentLoop
 from agents.events import AgentEvent
@@ -9,6 +11,7 @@ from controller.streaming.sse_encoder import encode_chat_stream
 from repositories.memory_conversation_repository import conversation_repository
 from schemas.chat import AgentRequest
 from services.chat_service import ChatService
+from services.sensitive_word_service import SensitiveWordMatcher
 
 
 TEST_USER_ID = "101"
@@ -71,6 +74,103 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _sensitive_word_matcher(directory: str) -> SensitiveWordMatcher:
+        path = Path(directory) / "sensitive_words.csv"
+        path.write_text("word\n测试敏感词一\n", encoding="utf-8")
+        return SensitiveWordMatcher(path)
+
+    async def test_sensitive_input_streams_fixed_answer_without_calling_agent(self):
+        class CountingAgent:
+            model_name = "fake-model"
+
+            def __init__(self):
+                self.calls = 0
+
+            async def run_stream(self, question, history, run_id="-"):
+                del question, history, run_id
+                self.calls += 1
+                yield AgentEvent(type="answer_delta", content="不应返回")
+
+        with tempfile.TemporaryDirectory() as directory:
+            agent = CountingAgent()
+            service = ChatService()
+            service._agent = agent
+            service._sensitive_word_matcher = self._sensitive_word_matcher(directory)
+
+            events = [
+                event
+                async for event in service.stream_chat(
+                    AgentRequest(question="这里包含测试敏感词一")
+                )
+            ]
+
+            self.assertEqual(
+                [event["event"] for event in events],
+                ["conversation", "token", "done"],
+            )
+            self.assertEqual(
+                events[1]["data"]["content"],
+                "您的输入包含敏感词，请修改后重新提问。",
+            )
+            self.assertEqual(
+                events[2]["data"],
+                {
+                    "conversation_id": events[0]["data"]["conversation_id"],
+                    "run_id": events[0]["data"]["run_id"],
+                    "answer": "您的输入包含敏感词，请修改后重新提问。",
+                    "model": "sensitive-word-filter",
+                    "sources": [],
+                    "images": [],
+                    "assistant_message_id": None,
+                },
+            )
+            self.assertEqual(agent.calls, 0)
+            detail = await conversation_repository.get(
+                events[0]["data"]["conversation_id"]
+            )
+            self.assertEqual(detail.message_count, 0)
+            self.assertEqual(detail.messages, [])
+            await service.close()
+
+    async def test_sensitive_input_does_not_persist_map_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            conversation = await conversation_repository.create("敏感词测试")
+            service = ChatService()
+            service._agent = FakeAgent()
+            service._sensitive_word_matcher = self._sensitive_word_matcher(directory)
+            request = AgentRequest.model_validate(
+                {
+                    "question": "测试敏感词一",
+                    "conversation_id": conversation.id,
+                    "map_context": {
+                        "drawn_geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[
+                                [121.1, 29.8],
+                                [122.5, 29.8],
+                                [122.5, 30.7],
+                                [121.1, 29.8],
+                            ]],
+                            "bbox": [121.1, 29.8, 122.5, 30.7],
+                        }
+                    },
+                }
+            )
+
+            events = [event async for event in service.stream_chat(request)]
+
+            self.assertEqual([event["event"] for event in events], [
+                "conversation",
+                "token",
+                "done",
+            ])
+            self.assertIsNone(
+                await conversation_repository.get_map_context(conversation.id)
+            )
+            detail = await conversation_repository.get(conversation.id)
+            self.assertEqual(detail.messages, [])
+
     def test_all_registered_tool_names_have_chinese_display_names(self):
         self.assertEqual(
             {
