@@ -4,5 +4,6 @@ __pycache__/
 .idea
 wheelhouse
 logs/
+data/dictionaries/
 *.py[cod]
 打包部署.command

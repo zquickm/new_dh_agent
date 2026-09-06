@@ -92,24 +92,21 @@ Agent 已注册四个业务工具（括号内为协议调用标识）：
 
 ## 用户输入敏感词拦截
 
-服务在用户问题进入 AgentLoop 之前，使用
-`config/sensitive_words.csv` 中的词条执行本地子串匹配。CSV 只要求
-`word` 表头，每个词条单独占一行：
+服务启动时从 `dh-knowledge` 拉取已发布的同义词和敏感词 manifest。远端版本
+高于本地版本时，按版本下载不可变快照，并原子覆盖持久化在
+`data/dictionaries/`。远端暂时不可用时使用最近一次成功缓存；首次启动既无法
+访问远端又没有本地缓存时拒绝启动，避免在没有词库保护的情况下提供服务。
 
-```csv
-word
-测试敏感词一
-测试敏感词二
-```
-
-仓库中的词条仅用于联调验证，生产上线前必须整体替换为业务方审核后的
-正式词库。文本会先做 Unicode NFKC 和英文大小写归一化，CSV 修改后
-自动热加载，无需重启服务。
+同义词快照用于 RAG 检索问题扩展。敏感词快照中的词条用于用户输入检查，文本
+仍会执行 Unicode NFKC 和英文大小写归一化。目前保持原有处理逻辑，不区分
+`applyScope`、`action` 和 `matchType`。
 
 命中后不会调用大模型或业务工具，也不会将原始问题写入会话历史；
 接口仍按 `conversation → token → done` 顺序返回 SSE，固定提示为
-“您的输入包含敏感词，请修改后重新提问。”。开关和 CSV 路径由
-`sensitive_words.enabled` 与 `sensitive_words.file` 配置。
+“您的输入包含敏感词，请修改后重新提问。”。敏感词拦截开关由
+`sensitive_words.enabled` 配置；服务地址和缓存目录分别由 `application.yaml`
+中的 `dictionaries.base_url`、`dictionaries.cache_directory` 配置。内部调用
+复用 `internal_request` 中的请求头名称和令牌。
 
 ## Skill 按需加载
 

@@ -2,6 +2,7 @@ import json
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from agents.tools.current_server_time import TOOL_NAME, matches_current_server_time
 from agents.tools.database_query import (
@@ -9,13 +10,36 @@ from agents.tools.database_query import (
     DatabaseQueryTool,
 )
 from agents.tools.executor import ToolExecutor, ToolOutput
-from agents.tools.rag_search import RagSearchTool, expand_query_synonyms
+from agents.tools.rag_search import (
+    RagSearchTool,
+    clear_synonym_matcher_cache,
+    expand_query_synonyms,
+)
 from agents.tools.registry import build_tool_executor
 from config.settings import get_settings
+from services.dictionary_service import dictionary_store
 from tool_backends.rag_backend import RagSearchBackend
 
 
 class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.synonym_patcher = patch.object(
+            dictionary_store,
+            "synonym_groups",
+            return_value=[
+                {
+                    "standardTerm": "溶解氧",
+                    "terms": [{"term": "DO"}, {"term": "溶氧"}],
+                }
+            ],
+        )
+        self.synonym_patcher.start()
+        clear_synonym_matcher_cache()
+
+    def tearDown(self):
+        clear_synonym_matcher_cache()
+        self.synonym_patcher.stop()
+
     def test_database_description_is_generic_and_excludes_observation_stations(self):
         self.assertIn("授权业务表", DATABASE_TOOL_DESCRIPTION)
         self.assertIn("Apache Doris", DATABASE_TOOL_DESCRIPTION)

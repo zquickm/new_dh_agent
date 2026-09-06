@@ -42,10 +42,10 @@ class SettingsTest(unittest.TestCase):
             sensitive_words = settings.sensitive_words
             self.assertTrue(sensitive_words.enabled)
             self.assertEqual(
-                sensitive_words.resolved_file(),
+                settings.dictionaries.resolved_cache_directory(),
                 Path(__file__).resolve().parent.parent
-                / "config"
-                / "sensitive_words.csv",
+                / "data"
+                / "dictionaries",
             )
 
     def test_system_environment_profile_has_priority(self):

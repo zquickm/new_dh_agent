@@ -1,11 +1,13 @@
 import json
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
 from agents.events import AgentEvent
 from main import app
 from services.chat_service import chat_service
+from services.sensitive_word_service import SensitiveWordMatcher
 
 
 INTERNAL_HEADER = "X-DH-Internal-Token"
@@ -65,8 +67,12 @@ class FakeAgent:
 class ApiTest(unittest.TestCase):
     def setUp(self):
         self.previous_agent = chat_service._agent
+        self.previous_matcher = chat_service._sensitive_word_matcher
         self.fake_agent = FakeAgent()
         chat_service._agent = self.fake_agent
+        chat_service._sensitive_word_matcher = SensitiveWordMatcher(
+            [{"word": "测试敏感词一", "applyScope": "CHAT_INPUT"}]
+        )
         self.client = TestClient(app)
         self.client.headers[INTERNAL_HEADER] = INTERNAL_TOKEN
         self.client.headers["X-User-Id"] = "101"
@@ -74,6 +80,7 @@ class ApiTest(unittest.TestCase):
 
     def tearDown(self):
         chat_service._agent = self.previous_agent
+        chat_service._sensitive_word_matcher = self.previous_matcher
 
     def test_frontend_conversation_and_sse_contract(self):
         created = self.client.post("/conversations", json={"title": "测试"})
@@ -157,8 +164,11 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(detail["messages"], [])
 
     def test_rejects_request_without_gateway_internal_header(self):
-        with TestClient(app) as direct_client:
-            response = direct_client.get("/health")
+        with patch("main.dictionary_store.synchronize", new=AsyncMock()), patch(
+            "main.chat_service.configure_dictionaries"
+        ):
+            with TestClient(app) as direct_client:
+                response = direct_client.get("/health")
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["code"], 403)

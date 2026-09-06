@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import csv
 import re
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Optional
 
 from config.settings import get_settings
+from services.dictionary_service import dictionary_store
 from tool_backends.rag_backend import RagSearchBackend
-
-
-SYNONYM_FILE = Path(__file__).resolve().parents[2] / "config" / "rag_synonyms.csv"
 
 
 @lru_cache
@@ -18,18 +14,29 @@ def _synonym_matcher() -> tuple[re.Pattern[str], dict[str, str], set[str]]:
     aliases: dict[str, str] = {}
     standards: set[str] = set()
     tokens: set[str] = set()
-    with SYNONYM_FILE.open(encoding="utf-8") as synonym_file:
-        rows = csv.reader(synonym_file)
-        next(rows)
-        for standard, *synonyms in rows:
-            standards.add(standard.casefold())
-            tokens.add(standard)
-            for synonym in synonyms:
-                aliases.setdefault(synonym.casefold(), standard)
-                tokens.add(synonym)
+    for group in dictionary_store.synonym_groups():
+        standard = str(group.get("standardTerm") or "").strip()
+        if not standard:
+            continue
+        standards.add(standard.casefold())
+        tokens.add(standard)
+        for term in group.get("terms") or []:
+            if not isinstance(term, dict):
+                continue
+            synonym = str(term.get("term") or "").strip()
+            if not synonym:
+                continue
+            aliases.setdefault(synonym.casefold(), standard)
+            tokens.add(synonym)
+    if not tokens:
+        raise RuntimeError("Published synonym snapshot contains no terms")
     ordered_tokens = sorted(tokens, key=len, reverse=True)
     pattern = re.compile("|".join(map(re.escape, ordered_tokens)), re.I)
     return pattern, aliases, standards
+
+
+def clear_synonym_matcher_cache() -> None:
+    _synonym_matcher.cache_clear()
 
 
 def expand_query_synonyms(query: str) -> str:

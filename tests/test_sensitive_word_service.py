@@ -1,6 +1,4 @@
-import tempfile
 import unittest
-from pathlib import Path
 
 from services.sensitive_word_service import (
     SensitiveWordConfigurationError,
@@ -9,58 +7,38 @@ from services.sensitive_word_service import (
 
 
 class SensitiveWordMatcherTest(unittest.TestCase):
-    def _write_csv(self, path: Path, content: str) -> None:
-        path.write_text(content, encoding="utf-8-sig")
+    def test_matches_normalized_input_rules_and_ignores_duplicates(self):
+        matcher = SensitiveWordMatcher(
+            [
+                {"word": "测试敏感词一", "applyScope": "CHAT_INPUT"},
+                {"word": " TESTBLOCK ", "applyScope": "BOTH"},
+                {"word": "testblock", "applyScope": "CHAT_INPUT"},
+            ]
+        )
 
-    def test_matches_normalized_substrings_and_ignores_duplicates(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "sensitive_words.csv"
-            self._write_csv(
-                path,
-                "word\n测试敏感词一\n TESTBLOCK \ntestblock\n\n",
-            )
-            matcher = SensitiveWordMatcher(path)
+        self.assertTrue(matcher.matches("这里包含测试敏感词一，请拦截"))
+        self.assertTrue(matcher.matches("这里包含ＴＥＳＴＢＬＯＣＫ"))
+        self.assertFalse(matcher.matches("这是一条普通问题"))
 
-            self.assertTrue(matcher.matches("这里包含测试敏感词一，请拦截"))
-            self.assertTrue(matcher.matches("这里包含ＴＥＳＴＢＬＯＣＫ"))
-            self.assertFalse(matcher.matches("这是一条普通问题"))
+    def test_current_matcher_does_not_distinguish_rule_scope(self):
+        matcher = SensitiveWordMatcher(
+            [
+                {"word": "仅输出检测", "applyScope": "CHAT_OUTPUT"},
+                {"word": "输入检测", "applyScope": "CHAT_INPUT"},
+            ]
+        )
 
-    def test_reloads_valid_csv_changes_without_restart(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "sensitive_words.csv"
-            self._write_csv(path, "word\n旧词\n")
-            matcher = SensitiveWordMatcher(path)
+        self.assertTrue(matcher.matches("仅输出检测"))
+        self.assertTrue(matcher.matches("输入检测"))
 
-            self.assertTrue(matcher.matches("包含旧词"))
-            self._write_csv(path, "word\n全新敏感词\n")
-
-            self.assertFalse(matcher.matches("包含旧词"))
-            self.assertTrue(matcher.matches("包含全新敏感词"))
-
-    def test_keeps_last_valid_words_when_hot_reload_is_invalid(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "sensitive_words.csv"
-            self._write_csv(path, "word\n旧敏感词\n")
-            matcher = SensitiveWordMatcher(path)
-
-            self._write_csv(path, "unexpected\n新词\n")
-
-            self.assertTrue(matcher.matches("仍然包含旧敏感词"))
-            self.assertFalse(matcher.matches("只包含新词"))
-
-    def test_rejects_invalid_initial_csv(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            missing = root / "missing.csv"
-            wrong_header = root / "wrong-header.csv"
-            empty = root / "empty.csv"
-            self._write_csv(wrong_header, "unexpected\n词条\n")
-            self._write_csv(empty, "word\n\n")
-
-            for path in (missing, wrong_header, empty):
-                with self.subTest(path=path.name):
-                    with self.assertRaises(SensitiveWordConfigurationError):
-                        SensitiveWordMatcher(path)
+    def test_rejects_snapshot_without_input_rules(self):
+        for rules in (
+            [],
+            [{"word": ""}],
+        ):
+            with self.subTest(rules=rules):
+                with self.assertRaises(SensitiveWordConfigurationError):
+                    SensitiveWordMatcher(rules)
 
 
 if __name__ == "__main__":

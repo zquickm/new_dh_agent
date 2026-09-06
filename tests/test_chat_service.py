@@ -75,10 +75,10 @@ class FakeAgent:
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
     @staticmethod
-    def _sensitive_word_matcher(directory: str) -> SensitiveWordMatcher:
-        path = Path(directory) / "sensitive_words.csv"
-        path.write_text("word\n测试敏感词一\n", encoding="utf-8")
-        return SensitiveWordMatcher(path)
+    def _sensitive_word_matcher(_directory: str) -> SensitiveWordMatcher:
+        return SensitiveWordMatcher(
+            [{"word": "测试敏感词一", "applyScope": "CHAT_INPUT"}]
+        )
 
     async def test_sensitive_input_streams_fixed_answer_without_calling_agent(self):
         class CountingAgent:
@@ -101,7 +101,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             events = [
                 event
                 async for event in service.stream_chat(
-                    AgentRequest(question="这里包含测试敏感词一")
+                    AgentRequest(question="这里包含测试敏感词一"),
+                    user_id=TEST_USER_ID,
                 )
             ]
 
@@ -127,7 +128,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(agent.calls, 0)
             detail = await conversation_repository.get(
-                events[0]["data"]["conversation_id"]
+                events[0]["data"]["conversation_id"],
+                user_id=TEST_USER_ID,
             )
             self.assertEqual(detail.message_count, 0)
             self.assertEqual(detail.messages, [])
@@ -135,7 +137,9 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_sensitive_input_does_not_persist_map_context(self):
         with tempfile.TemporaryDirectory() as directory:
-            conversation = await conversation_repository.create("敏感词测试")
+            conversation = await conversation_repository.create(
+                "敏感词测试", user_id=TEST_USER_ID
+            )
             service = ChatService()
             service._agent = FakeAgent()
             service._sensitive_word_matcher = self._sensitive_word_matcher(directory)
@@ -158,7 +162,12 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
-            events = [event async for event in service.stream_chat(request)]
+            events = [
+                event
+                async for event in service.stream_chat(
+                    request, user_id=TEST_USER_ID
+                )
+            ]
 
             self.assertEqual([event["event"] for event in events], [
                 "conversation",
@@ -166,9 +175,13 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 "done",
             ])
             self.assertIsNone(
-                await conversation_repository.get_map_context(conversation.id)
+                await conversation_repository.get_map_context(
+                    conversation.id, user_id=TEST_USER_ID
+                )
             )
-            detail = await conversation_repository.get(conversation.id)
+            detail = await conversation_repository.get(
+                conversation.id, user_id=TEST_USER_ID
+            )
             self.assertEqual(detail.messages, [])
 
     def test_all_registered_tool_names_have_chinese_display_names(self):

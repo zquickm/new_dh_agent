@@ -22,7 +22,13 @@ conversation:
 
 sensitive_words:
   enabled: true
-  file: config/sensitive_words.csv
+
+dictionaries:
+  base_url: "http://127.0.0.1:9082"
+  cache_directory: "data/dictionaries"
+  timeout: 10
+  connect_timeout: 3
+  verify_ssl: true
 
 skills:
   directory: skills
