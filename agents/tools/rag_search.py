@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from functools import lru_cache
 from typing import Any, Optional
 
 from config.settings import get_settings
@@ -9,12 +8,15 @@ from services.dictionary_service import dictionary_store
 from tool_backends.rag_backend import RagSearchBackend
 
 
-@lru_cache
-def _synonym_matcher() -> tuple[re.Pattern[str], dict[str, str], set[str]]:
+SynonymMatcher = tuple[re.Pattern[str], dict[str, str], set[str]]
+_active_synonym_matcher: Optional[SynonymMatcher] = None
+
+
+def build_synonym_matcher(groups: list[dict[str, Any]]) -> SynonymMatcher:
     aliases: dict[str, str] = {}
     standards: set[str] = set()
     tokens: set[str] = set()
-    for group in dictionary_store.synonym_groups():
+    for group in groups:
         standard = str(group.get("standardTerm") or "").strip()
         if not standard:
             continue
@@ -35,8 +37,24 @@ def _synonym_matcher() -> tuple[re.Pattern[str], dict[str, str], set[str]]:
     return pattern, aliases, standards
 
 
+def replace_synonym_matcher(groups: list[dict[str, Any]]) -> None:
+    global _active_synonym_matcher
+    matcher = build_synonym_matcher(groups)
+    _active_synonym_matcher = matcher
+
+
+def _synonym_matcher() -> SynonymMatcher:
+    global _active_synonym_matcher
+    matcher = _active_synonym_matcher
+    if matcher is None:
+        matcher = build_synonym_matcher(dictionary_store.synonym_groups())
+        _active_synonym_matcher = matcher
+    return matcher
+
+
 def clear_synonym_matcher_cache() -> None:
-    _synonym_matcher.cache_clear()
+    global _active_synonym_matcher
+    _active_synonym_matcher = None
 
 
 def expand_query_synonyms(query: str) -> str:

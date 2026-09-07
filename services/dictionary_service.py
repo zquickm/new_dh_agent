@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -24,6 +25,13 @@ class DictionaryConfigurationError(RuntimeError):
     """A published dictionary snapshot cannot be loaded safely."""
 
 
+@dataclass(frozen=True)
+class DictionarySyncResult:
+    changed_types: frozenset[str]
+    versions: dict[str, int]
+    used_local_cache: bool = False
+
+
 class DictionaryStore:
     """Synchronize immutable dh-knowledge snapshots into a persistent local cache."""
 
@@ -39,13 +47,13 @@ class DictionaryStore:
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
 
-    async def synchronize(self) -> None:
+    async def synchronize(self) -> DictionarySyncResult:
         """Load local snapshots, then replace them when dh-knowledge has newer ones."""
         async with self._lock:
             self._cache_directory.mkdir(parents=True, exist_ok=True)
             self._load_local_snapshots()
             try:
-                await self._synchronize_remote()
+                changed_types = await self._synchronize_remote()
             except Exception as exc:
                 missing = [item for item in DICTIONARY_TYPES if item not in self._snapshots]
                 if missing:
@@ -57,6 +65,10 @@ class DictionaryStore:
                     type(exc).__name__,
                     self.versions(),
                 )
+                return DictionarySyncResult(
+                    frozenset(), self.versions(), used_local_cache=True
+                )
+            return DictionarySyncResult(changed_types, self.versions())
 
     def synonym_groups(self) -> list[dict[str, Any]]:
         return self._data_list(SYNONYM, "groups")
@@ -70,7 +82,7 @@ class DictionaryStore:
             for item, snapshot in self._snapshots.items()
         }
 
-    async def _synchronize_remote(self) -> None:
+    async def _synchronize_remote(self) -> frozenset[str]:
         timeout = aiohttp.ClientTimeout(
             total=self._settings.timeout,
             connect=self._settings.connect_timeout,
@@ -88,6 +100,7 @@ class DictionaryStore:
                 for item in manifest
                 if isinstance(item, dict)
             }
+            updates: dict[str, dict[str, Any]] = {}
             for dictionary_type in DICTIONARY_TYPES:
                 item = remote.get(dictionary_type)
                 if item is None:
@@ -122,6 +135,9 @@ class DictionaryStore:
                     raise DictionaryConfigurationError(
                         f"{dictionary_type} manifest与快照校验值不一致"
                     )
+                updates[dictionary_type] = validated
+
+            for dictionary_type, validated in updates.items():
                 self._persist(validated)
                 self._snapshots[dictionary_type] = validated
                 logger.info(
@@ -130,6 +146,7 @@ class DictionaryStore:
                     validated["version"],
                     validated["itemCount"],
                 )
+            return frozenset(updates)
 
     async def _get_data(
         self, session: aiohttp.ClientSession, path: str

@@ -29,6 +29,10 @@ dictionaries:
   timeout: 10
   connect_timeout: 3
   verify_ssl: true
+  refresh:
+    enabled: true
+    interval_seconds: 300
+    jitter_seconds: 30
 
 skills:
   directory: skills

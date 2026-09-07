@@ -47,6 +47,9 @@ class SettingsTest(unittest.TestCase):
                 / "data"
                 / "dictionaries",
             )
+            self.assertTrue(settings.dictionaries.refresh.enabled)
+            self.assertEqual(settings.dictionaries.refresh.interval_seconds, 300)
+            self.assertEqual(settings.dictionaries.refresh.jitter_seconds, 30)
 
     def test_system_environment_profile_has_priority(self):
         with patch.dict(os.environ, {"APP_PROFILE": "prod"}, clear=False):

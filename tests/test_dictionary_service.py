@@ -70,8 +70,10 @@ class DictionaryStoreTest(unittest.IsolatedAsyncioTestCase):
             responses = AsyncMock(side_effect=[manifest, synonym, sensitive])
 
             with patch.object(store, "_get_data", responses):
-                await store.synchronize()
+                result = await store.synchronize()
 
+            self.assertEqual(result.changed_types, {SYNONYM, SENSITIVE_WORD})
+            self.assertFalse(result.used_local_cache)
             self.assertEqual(store.versions(), {SYNONYM: 2, SENSITIVE_WORD: 3})
             self.assertEqual(store.synonym_groups()[0]["standardTerm"], "溶解氧")
             self.assertEqual(store.sensitive_rules()[0]["word"], "测试敏感词")
@@ -98,9 +100,10 @@ class DictionaryStoreTest(unittest.IsolatedAsyncioTestCase):
             responses = AsyncMock(return_value=manifest)
 
             with patch.object(store, "_get_data", responses):
-                await store.synchronize()
+                result = await store.synchronize()
 
             self.assertEqual(responses.await_count, 1)
+            self.assertEqual(result.changed_types, set())
 
     async def test_uses_last_valid_cache_when_remote_is_unavailable(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -113,9 +116,10 @@ class DictionaryStoreTest(unittest.IsolatedAsyncioTestCase):
                 "_synchronize_remote",
                 AsyncMock(side_effect=OSError("offline")),
             ):
-                await store.synchronize()
+                result = await store.synchronize()
 
             self.assertEqual(store.versions(), {SYNONYM: 4, SENSITIVE_WORD: 5})
+            self.assertTrue(result.used_local_cache)
 
     async def test_fails_without_remote_or_local_snapshots(self):
         with tempfile.TemporaryDirectory() as directory:

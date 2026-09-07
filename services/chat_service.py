@@ -11,7 +11,6 @@ from config.settings import get_settings
 from repositories.memory_conversation_repository import conversation_repository
 from schemas.chat import AgentRequest, ChatMessage
 from services.citation_service import CitationService
-from services.dictionary_service import dictionary_store
 from services.request_context_adapter import enrich_question_with_frontend_context
 from services.sensitive_word_service import SensitiveWordMatcher
 
@@ -35,12 +34,9 @@ class ChatService:
         self._agent: Optional[AgentLoop] = None
         self._sensitive_word_matcher: Optional[SensitiveWordMatcher] = None
 
-    def configure_dictionaries(self) -> None:
-        self._sensitive_word_matcher = (
-            SensitiveWordMatcher(dictionary_store.sensitive_rules())
-            if get_settings().sensitive_words.enabled
-            else None
-        )
+    def replace_sensitive_word_matcher(self, rules: list[dict]) -> None:
+        matcher = SensitiveWordMatcher(rules)
+        self._sensitive_word_matcher = matcher
 
     @property
     def agent(self) -> AgentLoop:
