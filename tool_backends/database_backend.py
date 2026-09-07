@@ -384,8 +384,6 @@ class MysqlReadonlyGateway:
             return str(args[1])
         return str(exc)
 
-    _REPAIRABLE_SQL_ERROR_CODES = {1052, 1054, 1064, 1111, 1146, 1241, 1242}
-
     @staticmethod
     def _mysql_error_code(exc: Exception) -> Optional[int]:
         args = getattr(exc, "args", ())
@@ -533,12 +531,6 @@ class DatabaseQueryBackend:
                 previous_error = (
                     f"数据库错误 {exc.code}：{exc}" if exc.code is not None else str(exc)
                 )
-                if (
-                    isinstance(exc, SqlExecutionError)
-                    and exc.code is not None
-                    and exc.code not in MysqlReadonlyGateway._REPAIRABLE_SQL_ERROR_CODES
-                ):
-                    raise
                 if attempt == 1:
                     raise
 

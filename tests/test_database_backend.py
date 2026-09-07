@@ -49,13 +49,13 @@ class FakeLlm:
 
 class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
     async def test_real_execution_error_survives_repair_and_tool_serialization(self):
-        for code, attempts in ((1054, 2), (1105, 1)):
+        for code in (1054, 1105, 1142, 9999):
             with self.subTest(code=code):
                 gateway = self.gateway()
                 detail = "Unknown column\n" + "detail " * 100
                 cursor = AsyncMock()
                 cursor.execute.side_effect = [
-                    value for _ in range(attempts)
+                    value for _ in range(2)
                     for value in (None, Exception(code, detail))
                 ]
                 connection = MagicMock()
@@ -77,12 +77,12 @@ class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
                     "type": "sql_execution", "code": code, "message": detail,
                 })
                 self.assertIn("LIMIT 11", result["sql"])
-                self.assertEqual(llm.calls, attempts)
-                if attempts == 2:
-                    repair_prompt = llm.ainvoke.await_args.args[0][1]["content"]
-                    self.assertIn(detail, repair_prompt)
-                    self.assertIn("1054", repair_prompt)
-                    self.assertIn(result["sql"], repair_prompt)
+                self.assertEqual(llm.calls, 2)
+                self.assertEqual(cursor.execute.await_count, 4)
+                repair_prompt = llm.ainvoke.await_args.args[0][1]["content"]
+                self.assertIn(detail, repair_prompt)
+                self.assertIn(str(code), repair_prompt)
+                self.assertIn(result["sql"], repair_prompt)
 
     async def test_tool_success_and_local_failure_contract(self):
         backend = SimpleNamespace(query=AsyncMock(return_value={
