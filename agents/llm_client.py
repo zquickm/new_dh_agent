@@ -65,7 +65,8 @@ class HelloAgentsLLM:
         try:
             client = self.client.bind_tools(tools) if tools else self.client
             tool_response = None
-            async for chunk in client.astream(messages, temperature=temperature):
+            options = {} if tools else {"tool_choice": "none"}
+            async for chunk in client.astream(messages, temperature=temperature, **options):
                 has_tool_delta = bool(
                     getattr(chunk, "tool_call_chunks", None)
                     or getattr(chunk, "tool_calls", None)

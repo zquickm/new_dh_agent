@@ -767,6 +767,10 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final_instruction["role"], "system")
         self.assertIn("当前是第 2/2 轮", final_instruction["content"])
         self.assertIn("第 2 轮只允许最终回答", final_instruction["content"])
+        self.assertIn("依据已有结果给出最终回答", final_instruction["content"])
+        self.assertIn("缺失数据如实说明", final_instruction["content"])
+        self.assertIn("不得再承诺查询或调用工具", final_instruction["content"])
+        self.assertNotIn("本轮工具已禁用", llm.calls[0][0][0]["content"])
 
     async def test_forced_final_answer_streams_citations_before_completion(self):
         class DelayedCitationLlm:
