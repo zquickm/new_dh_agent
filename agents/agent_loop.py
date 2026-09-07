@@ -133,6 +133,12 @@ class AgentLoop:
                 f"当前是第 {round_number}/{self.max_rounds} 轮；"
                 f"第 {self.max_rounds} 轮只允许最终回答。"
             )
+            if is_forced_final_round:
+                round_status += (
+                    "\n本轮工具已禁用，必须依据已有结果给出最终回答；"
+                    "缺失数据如实说明，不得编造，不得再承诺查询或调用工具，"
+                    "不得输出工具调用格式。此前要求查询或补充数据的规则在本轮不再执行。"
+                )
             round_messages = [
                 {
                     **messages[0],

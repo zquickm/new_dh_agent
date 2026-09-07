@@ -168,7 +168,7 @@ class LlmClientToolCallTest(unittest.IsolatedAsyncioTestCase):
                 raise AssertionError("tool-free answer chunks must not be accumulated")
 
         async def chunks(*args, **kwargs):
-            del args, kwargs
+            self.assertEqual(kwargs, {"temperature": 0, "tool_choice": "none"})
             yield StreamingChunk("第一段")
             yield StreamingChunk("第二段")
 
@@ -200,7 +200,7 @@ class LlmClientToolCallTest(unittest.IsolatedAsyncioTestCase):
                 raise AssertionError("answer content chunks must not be accumulated")
 
         async def chunks(*args, **kwargs):
-            del args, kwargs
+            self.assertEqual(kwargs, {"temperature": 0})
             yield StreamingChunk("第一段")
             yield StreamingChunk("第二段")
 
