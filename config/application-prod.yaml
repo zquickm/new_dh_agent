@@ -1,10 +1,29 @@
 server:
-  host: 0.0.0.0
-  port: 8000
+  host: "${DH_AGENT_BIND_HOST:0.0.0.0}"
+  port: "${DH_AGENT_PORT:8000}"
   reload: false
 
 dictionaries:
-  base_url: "http://127.0.0.1:8082"
+  base_url: "http://${DH_KNOWLEDGE_HOST:127.0.0.1}:${DH_KNOWLEDGE_PORT:8082}"
+
+internal_request:
+  token: "${DH_INTERNAL_TOKEN}"
 
 llm:
+  base_url: "http://${DH_LLM_HOST:71.10.60.31}:${DH_LLM_PORT:8900}/v1"
   timeout: 90
+
+tools:
+  spatial:
+    base_url: "http://${DH_SPATIAL_HOST:71.10.60.143}:${DH_SPATIAL_PORT:6022}"
+  rag:
+    base_url: "http://${DH_RAG_HOST:71.10.60.34}:${DH_RAG_PORT:18000}"
+    rerank:
+      base_url: "http://${DH_RAG_RERANK_HOST:71.10.60.34}:${DH_RAG_RERANK_PORT:18000}"
+  database:
+    host: "${DH_BUSINESS_DB_HOST:71.10.60.155}"
+    port: "${DH_BUSINESS_DB_PORT:9030}"
+    user: "${DH_BUSINESS_DB_USERNAME}"
+    password: "${BUSINESS_DB_PASSWORD}"
+    sql_llm:
+      base_url: "http://${DH_SQL_LLM_HOST:71.10.60.31}:${DH_SQL_LLM_PORT:8900}/v1"

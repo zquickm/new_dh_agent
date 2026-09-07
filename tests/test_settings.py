@@ -56,7 +56,16 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(get_active_profile(), "prod")
 
     def test_prod_profile_uses_same_host_service_ports(self):
-        with patch.dict(os.environ, {"APP_PROFILE": "prod"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "APP_PROFILE": "prod",
+                "DH_INTERNAL_TOKEN": "test-internal-token",
+                "DH_BUSINESS_DB_USERNAME": "test-reader",
+                "BUSINESS_DB_PASSWORD": "test-password",
+            },
+            clear=False,
+        ):
             clear_settings_cache()
             settings = get_settings()
 
@@ -65,6 +74,40 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(
                 settings.dictionaries.base_url,
                 "http://127.0.0.1:8082",
+            )
+
+    def test_prod_profile_addresses_and_accounts_can_be_overridden(self):
+        with patch.dict(
+            os.environ,
+            {
+                "APP_PROFILE": "prod",
+                "DH_INTERNAL_TOKEN": "changed-internal-token",
+                "DH_AGENT_BIND_HOST": "10.0.0.10",
+                "DH_AGENT_PORT": "8100",
+                "DH_KNOWLEDGE_HOST": "10.0.0.11",
+                "DH_KNOWLEDGE_PORT": "8182",
+                "DH_LLM_HOST": "10.0.0.12",
+                "DH_LLM_PORT": "8190",
+                "DH_BUSINESS_DB_HOST": "10.0.0.13",
+                "DH_BUSINESS_DB_PORT": "9130",
+                "DH_BUSINESS_DB_USERNAME": "changed-reader",
+                "BUSINESS_DB_PASSWORD": "changed-password",
+            },
+            clear=False,
+        ):
+            clear_settings_cache()
+            settings = get_settings()
+
+            self.assertEqual(settings.server.host, "10.0.0.10")
+            self.assertEqual(settings.server.port, 8100)
+            self.assertEqual(settings.dictionaries.base_url, "http://10.0.0.11:8182")
+            self.assertEqual(settings.llm.base_url, "http://10.0.0.12:8190/v1")
+            self.assertEqual(settings.tools.database.host, "10.0.0.13")
+            self.assertEqual(settings.tools.database.port, 9130)
+            self.assertEqual(settings.tools.database.user, "changed-reader")
+            self.assertEqual(
+                settings.tools.database.password.get_secret_value(),
+                "changed-password",
             )
 
     def test_llm_api_key_is_optional(self):
