@@ -1,9 +1,13 @@
 import asyncio
+import json
 import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
+
+from agents.tools.database_query import DatabaseQueryTool
+from agents.tools.executor import ToolExecutor
 
 from tool_backends.database_backend import (
     DatabaseConnectionError,
@@ -44,6 +48,61 @@ class FakeLlm:
 
 
 class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_real_execution_error_survives_repair_and_tool_serialization(self):
+        for code, attempts in ((1054, 2), (1105, 1)):
+            with self.subTest(code=code):
+                gateway = self.gateway()
+                detail = "Unknown column\n" + "detail " * 100
+                cursor = AsyncMock()
+                cursor.execute.side_effect = [
+                    value for _ in range(attempts)
+                    for value in (None, Exception(code, detail))
+                ]
+                connection = MagicMock()
+                connection.cursor.return_value.__aenter__ = AsyncMock(return_value=cursor)
+                pool = MagicMock()
+                pool.acquire.return_value.__aenter__ = AsyncMock(return_value=connection)
+                gateway._get_pool = AsyncMock(return_value=pool)
+                llm = FakeLlm()
+                llm.ainvoke = AsyncMock(wraps=llm.ainvoke)
+                backend = DatabaseQueryBackend(
+                    catalog=FakeCatalog(), gateway=gateway, llm=llm,
+                    generation_timeout=1,
+                )
+                executor = ToolExecutor()
+                executor.register("database_query", "query", DatabaseQueryTool(backend).execute)
+                result = json.loads(await executor.execute("database_query", {"question": "站位数量", "limit": 10}))
+                self.assertFalse(result["success"])
+                self.assertEqual(result["error"], {
+                    "type": "sql_execution", "code": code, "message": detail,
+                })
+                self.assertIn("LIMIT 11", result["sql"])
+                self.assertEqual(llm.calls, attempts)
+                if attempts == 2:
+                    repair_prompt = llm.ainvoke.await_args.args[0][1]["content"]
+                    self.assertIn(detail, repair_prompt)
+                    self.assertIn("1054", repair_prompt)
+                    self.assertIn(result["sql"], repair_prompt)
+
+    async def test_tool_success_and_local_failure_contract(self):
+        backend = SimpleNamespace(query=AsyncMock(return_value={
+            "sql": "SELECT 1", "columns": ["value"], "rows": [], "truncated": False,
+        }))
+        tool = DatabaseQueryTool(backend)
+        result = await tool.execute("查询")
+        self.assertTrue(result["success"])
+        self.assertEqual(result["rows"], [])
+        for error in (SqlValidationError("只允许 SELECT"), DatabaseConnectionError("连接失败")):
+            backend.query.side_effect = error
+            result = await tool.execute("查询")
+            self.assertEqual(result, {
+                "success": False, "sql": None,
+                "error": {"type": error.error_type, "code": None, "message": str(error)},
+            })
+        backend.query.side_effect = TypeError("programming bug")
+        with self.assertRaises(TypeError):
+            await tool.execute("查询")
+
     @staticmethod
     def gateway(connect_timeout=0.01):
         return MysqlReadonlyGateway(

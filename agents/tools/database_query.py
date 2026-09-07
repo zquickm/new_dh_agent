@@ -117,7 +117,19 @@ class DatabaseQueryTool:
             raise ValueError("question 不能为空")
         max_rows = get_settings().tools.database.max_rows
         limit = max_rows if limit is None else min(max(int(limit), 1), max_rows)
-        return await self.backend.query(question, limit)
+        try:
+            result = await self.backend.query(question, limit)
+        except DatabaseToolError as exc:
+            return {
+                "success": False,
+                "sql": exc.sql,
+                "error": {
+                    "type": exc.error_type,
+                    "code": exc.code,
+                    "message": str(exc),
+                },
+            }
+        return {**result, "success": True}
 
     async def close(self) -> None:
         if self._backend is not None:

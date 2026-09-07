@@ -18,21 +18,39 @@ from sqlglot.errors import ParseError
 class DatabaseToolError(RuntimeError):
     """A safe error raised by the database tool backend."""
 
+    error_type = "database"
+
+    def __init__(
+        self, message: str, *, code: Optional[int] = None,
+        sql: Optional[str] = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.sql = sql
+
 
 class DatabaseConnectionError(DatabaseToolError):
     """The database server could not be reached or authenticated."""
+
+    error_type = "connection"
 
 
 class SqlGenerationError(DatabaseToolError):
     """The SQL generation service failed before returning usable SQL."""
 
+    error_type = "sql_generation"
+
 
 class SqlValidationError(DatabaseToolError):
     """Generated SQL failed the local read-only policy."""
 
+    error_type = "sql_validation"
+
 
 class SqlExecutionError(DatabaseToolError):
     """The database rejected SQL that the model may be able to repair."""
+
+    error_type = "sql_execution"
 
 
 class DatabaseInformationCatalog:
@@ -226,12 +244,13 @@ class MysqlReadonlyGateway:
         except DatabaseToolError:
             raise
         except asyncio.TimeoutError as exc:
-            raise DatabaseToolError("数据库查询超时，请缩小查询范围") from exc
+            raise DatabaseToolError("数据库查询超时，请缩小查询范围", sql=bounded_sql) from exc
         except Exception as exc:
-            message = self._safe_error(exc)
-            if self._mysql_error_code(exc) in self._REPAIRABLE_SQL_ERROR_CODES:
-                raise SqlExecutionError(message) from exc
-            raise DatabaseToolError(message) from exc
+            code = self._mysql_error_code(exc)
+            if code is None:
+                raise
+            # Session setup/pool errors are not failures of the generated SQL.
+            raise DatabaseToolError(self._safe_error(exc), code=code) from exc
 
     async def close(self) -> None:
         async with self._get_pool_lock():
@@ -247,8 +266,16 @@ class MysqlReadonlyGateway:
             async with connection.cursor() as cursor:
                 timeout_seconds = max(1, math.ceil(self.query_timeout))
                 await cursor.execute(f"SET query_timeout = {timeout_seconds}")
-                await cursor.execute(sql)
-                raw_rows = list(await cursor.fetchall())
+                try:
+                    await cursor.execute(sql)
+                    raw_rows = list(await cursor.fetchall())
+                except Exception as exc:
+                    code = self._mysql_error_code(exc)
+                    if code is None:
+                        raise
+                    raise SqlExecutionError(
+                        self._safe_error(exc), code=code, sql=sql,
+                    ) from exc
                 columns = self._column_names(cursor.description)
 
         rows = [
@@ -299,9 +326,14 @@ class MysqlReadonlyGateway:
                     ) from exc
                 except DatabaseToolError:
                     raise
+                except OSError as exc:
+                    raise DatabaseConnectionError(str(exc)) from exc
                 except Exception as exc:
+                    code = self._mysql_error_code(exc)
+                    if code is None:
+                        raise
                     raise DatabaseConnectionError(
-                        "数据库连接失败，请检查账号、密码和连接配置"
+                        self._safe_error(exc), code=code,
                     ) from exc
         return self._pool
 
@@ -348,10 +380,9 @@ class MysqlReadonlyGateway:
     def _safe_error(exc: Exception) -> str:
         args = getattr(exc, "args", ())
         code = MysqlReadonlyGateway._mysql_error_code(exc)
-        if code in MysqlReadonlyGateway._REPAIRABLE_SQL_ERROR_CODES and len(args) > 1:
-            detail = re.sub(r"[\x00-\x1f]+", " ", str(args[1])).strip()[:300]
-            return f"数据库拒绝该 SQL（错误 {code}）：{detail}"
-        return "数据库暂时不可用"
+        if code is not None and len(args) > 1:
+            return str(args[1])
+        return str(exc)
 
     _REPAIRABLE_SQL_ERROR_CODES = {1052, 1054, 1064, 1111, 1146, 1241, 1242}
 
@@ -498,8 +529,16 @@ class DatabaseQueryBackend:
                 )
                 return await self.gateway.query(sql, limit)
             except (SqlValidationError, SqlExecutionError) as exc:
-                previous_sql = sql
-                previous_error = str(exc)
+                previous_sql = exc.sql or sql
+                previous_error = (
+                    f"数据库错误 {exc.code}：{exc}" if exc.code is not None else str(exc)
+                )
+                if (
+                    isinstance(exc, SqlExecutionError)
+                    and exc.code is not None
+                    and exc.code not in MysqlReadonlyGateway._REPAIRABLE_SQL_ERROR_CODES
+                ):
+                    raise
                 if attempt == 1:
                     raise
 
