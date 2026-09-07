@@ -164,9 +164,9 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(detail["messages"], [])
 
     def test_rejects_request_without_gateway_internal_header(self):
-        with patch("main.dictionary_store.synchronize", new=AsyncMock()), patch(
-            "main.chat_service.configure_dictionaries"
-        ):
+        with patch(
+            "main.dictionary_refresh_service.start", new=AsyncMock()
+        ), patch("main.dictionary_refresh_service.stop", new=AsyncMock()):
             with TestClient(app) as direct_client:
                 response = direct_client.get("/health")
 

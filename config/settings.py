@@ -121,12 +121,21 @@ class SensitiveWordSettings(BaseModel):
     enabled: bool = True
 
 
+class DictionaryRefreshSettings(BaseModel):
+    enabled: bool = True
+    interval_seconds: int = Field(default=300, ge=10)
+    jitter_seconds: int = Field(default=30, ge=0, le=300)
+
+
 class DictionarySettings(BaseModel):
     base_url: str = "http://127.0.0.1:9082"
     cache_directory: str = "data/dictionaries"
     timeout: float = Field(default=10, gt=0)
     connect_timeout: float = Field(default=3, gt=0)
     verify_ssl: bool = True
+    refresh: DictionaryRefreshSettings = Field(
+        default_factory=DictionaryRefreshSettings
+    )
 
     def resolved_cache_directory(self) -> Path:
         path = Path(self.cache_directory)

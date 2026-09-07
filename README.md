@@ -97,6 +97,13 @@ Agent 已注册四个业务工具（括号内为协议调用标识）：
 `data/dictionaries/`。远端暂时不可用时使用最近一次成功缓存；首次启动既无法
 访问远端又没有本地缓存时拒绝启动，避免在没有词库保护的情况下提供服务。
 
+启动完成后，后台任务会按 `dictionaries.refresh.interval_seconds` 周期继续检查
+版本，并增加最多 `dictionaries.refresh.jitter_seconds` 的随机延迟。发现新版本
+后先完成下载和本地持久化，再构建新的不可变匹配器并原子替换；正在处理的请求
+继续使用旧匹配器，新请求立即使用新版本，无需重启服务。定时拉取或匹配器构建
+失败时保留当前有效版本并在下一个周期重试。可通过
+`dictionaries.refresh.enabled` 关闭运行期间的定时检查，但启动同步仍会执行。
+
 同义词快照用于 RAG 检索问题扩展。敏感词快照中的词条用于用户输入检查，文本
 仍会执行 Unicode NFKC 和英文大小写归一化。目前保持原有处理逻辑，不区分
 `applyScope`、`action` 和 `matchType`。

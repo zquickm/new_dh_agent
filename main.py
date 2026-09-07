@@ -5,7 +5,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from agents.tools.rag_search import clear_synonym_matcher_cache
 from common.logging_config import configure_logging
 from common.json_result import JsonResult
 from config.settings import get_settings
@@ -15,7 +14,7 @@ from controller.health_controller import router as health_router
 from controller.recommend_controller import router as recommend_router
 from middleware.internal_request_auth import InternalRequestAuthMiddleware
 from services.chat_service import chat_service
-from services.dictionary_service import dictionary_store
+from services.dictionary_refresh_service import dictionary_refresh_service
 
 
 settings = get_settings()
@@ -25,13 +24,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    await dictionary_store.synchronize()
-    clear_synonym_matcher_cache()
-    chat_service.configure_dictionaries()
+    await dictionary_refresh_service.start()
     logger.info("application_started profile=%s", settings.app_profile)
     try:
         yield
     finally:
+        await dictionary_refresh_service.stop()
         await chat_service.close()
         logger.info("application_stopped")
 
