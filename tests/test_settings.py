@@ -55,6 +55,18 @@ class SettingsTest(unittest.TestCase):
         with patch.dict(os.environ, {"APP_PROFILE": "prod"}, clear=False):
             self.assertEqual(get_active_profile(), "prod")
 
+    def test_prod_profile_uses_same_host_service_ports(self):
+        with patch.dict(os.environ, {"APP_PROFILE": "prod"}, clear=False):
+            clear_settings_cache()
+            settings = get_settings()
+
+            self.assertEqual(settings.server.host, "0.0.0.0")
+            self.assertEqual(settings.server.port, 8000)
+            self.assertEqual(
+                settings.dictionaries.base_url,
+                "http://127.0.0.1:8082",
+            )
+
     def test_llm_api_key_is_optional(self):
         with patch.dict(
             os.environ,

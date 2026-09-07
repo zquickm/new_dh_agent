@@ -3,5 +3,8 @@ server:
   port: 8000
   reload: false
 
+dictionaries:
+  base_url: "http://127.0.0.1:8082"
+
 llm:
   timeout: 90

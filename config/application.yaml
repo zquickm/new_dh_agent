@@ -24,7 +24,6 @@ sensitive_words:
   enabled: true
 
 dictionaries:
-  base_url: "http://127.0.0.1:9082"
   cache_directory: "data/dictionaries"
   timeout: 10
   connect_timeout: 3

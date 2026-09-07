@@ -128,7 +128,7 @@ class DictionaryRefreshSettings(BaseModel):
 
 
 class DictionarySettings(BaseModel):
-    base_url: str = "http://127.0.0.1:9082"
+    base_url: str = "http://127.0.0.1:8082"
     cache_directory: str = "data/dictionaries"
     timeout: float = Field(default=10, gt=0)
     connect_timeout: float = Field(default=3, gt=0)
