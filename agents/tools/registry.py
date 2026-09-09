@@ -17,6 +17,7 @@ from agents.tools.database_query import (
     build_tool_parameters as build_database_tool_parameters,
 )
 from agents.tools.executor import ToolExecutor
+from agents.tools.duanmian_service import DuanmianServiceTool, TOOL_DEFINITIONS as DUANMIAN_TOOLS
 from agents.tools.map_action import (
     TOOL_DESCRIPTION as MAP_ACTION_TOOL_DESCRIPTION,
     TOOL_NAME as MAP_ACTION_TOOL_NAME,
@@ -40,6 +41,12 @@ from agents.tools.rag_search import (
     TOOL_NAME as RAG_TOOL_NAME,
     TOOL_PARAMETERS as RAG_TOOL_PARAMETERS,
     RagSearchTool,
+)
+from agents.tools.spatial_query import (
+    TOOL_DESCRIPTION as SPATIAL_TOOL_DESCRIPTION,
+    TOOL_NAME as SPATIAL_TOOL_NAME,
+    TOOL_PARAMETERS as SPATIAL_TOOL_PARAMETERS,
+    SpatialQueryTool,
 )
 from config.settings import get_settings
 
@@ -69,6 +76,8 @@ def build_tool_executor(
     rag_tool = RagSearchTool()
     database_tool = DatabaseQueryTool()
     observation_tool = ObservationServiceTool()
+    spatial_tool = SpatialQueryTool()
+    duanmian_tool = DuanmianServiceTool()
     executor.register(
         RAG_TOOL_NAME,
         RAG_TOOL_DESCRIPTION,
@@ -88,12 +97,22 @@ def build_tool_executor(
         OBSERVATION_TOOL_PARAMETERS,
     )
     executor.register(
+        SPATIAL_TOOL_NAME,
+        SPATIAL_TOOL_DESCRIPTION,
+        spatial_tool.execute,
+        SPATIAL_TOOL_PARAMETERS,
+    )
+    executor.register(
         MAP_ACTION_TOOL_NAME,
         MAP_ACTION_TOOL_DESCRIPTION,
         execute_map_action,
         MAP_ACTION_TOOL_PARAMETERS,
     )
+    for name, (description, parameters, method) in DUANMIAN_TOOLS.items():
+        executor.register(name, description, getattr(duanmian_tool, method), parameters)
     executor.register_closer(rag_tool.close)
     executor.register_closer(database_tool.close)
     executor.register_closer(observation_tool.close)
+    executor.register_closer(spatial_tool.close)
+    executor.register_closer(duanmian_tool.close)
     return executor

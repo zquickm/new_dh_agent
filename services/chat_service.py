@@ -25,6 +25,12 @@ _TOOL_DISPLAY_NAMES = {
     "rag_search": "东溟知识库检索",
     "database_query": "数据库查询",
     "observation_service": "观测分析",
+    "spatial_query": "空间要素查询",
+    "dm_duanmian_overview": "断面概况",
+    "dm_duanmian_latest": "断面最新观测",
+    "dm_duanmian_observations": "断面观测明细",
+    "dm_duanmian_voyages": "断面航次查询",
+    "dm_duanmian_analysis": "断面专题分析",
     "map_action": "地图操作",
 }
 

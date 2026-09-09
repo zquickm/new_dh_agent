@@ -63,7 +63,9 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("observation_service", skill.instructions)
         self.assertIn("rag_search", skill.instructions)
         self.assertIn("E1、E2、E3", skill.instructions)
-        self.assertIn("有且仅有三条", skill.instructions)
+        self.assertIn("E1、E2、E3 三条断面包含26个站位", skill.instructions)
+        self.assertIn("断面观测与分析", skill.instructions)
+        self.assertIn("dm_duanmian_*", skill.instructions)
         self.assertIn("E1001", skill.instructions)
         self.assertIn("E1-001", skill.instructions)
         self.assertIn("91 个纯数字历史编码", skill.instructions)
@@ -77,6 +79,20 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("当前数据只有观测日期", skill.instructions)
         self.assertNotIn("station_name", skill.instructions)
         self.assertNotIn("dwd_as_", skill.instructions)
+
+    def test_project_transect_analysis_skill_matches_registered_tools_and_scope(self):
+        project_root = Path(__file__).resolve().parents[1]
+        skill = SkillCatalog(project_root / "skills").load("断面观测与分析")
+        executor = build_tool_executor()
+        for name in (
+            "dm_duanmian_overview", "dm_duanmian_latest", "dm_duanmian_observations",
+            "dm_duanmian_voyages", "dm_duanmian_analysis",
+        ):
+            self.assertIn(name, skill.instructions)
+            self.assertIsNotNone(executor.get(name))
+        self.assertIn("不传 voyage 不自动查询", skill.instructions)
+        self.assertIn("不能静默扩大", skill.instructions)
+        self.assertIn("不是渲染回执", skill.instructions)
 
     def test_load_rejects_names_outside_the_catalog(self):
         with tempfile.TemporaryDirectory() as directory:

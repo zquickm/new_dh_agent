@@ -46,6 +46,7 @@ TIMELINE_PLAY：scene。
 HEATMAP_SHOW：data_type。
 TRACK_PLAY：track_type、track_id。
 COMPARE_STATIONS：station_ids、data_types。
+DUANMIAN_ANALYSIS：analysis。由 dm_duanmian_analysis 工具生成；自动查询另需下文列出的参数。
 
 所有地图坐标统一使用 CGCS2000（EPSG:4490），点坐标格式统一为 [经度, 纬度]。
 各 payload 的可选字段、枚举和具体数据结构以《地图操作工具定义》为准。
@@ -73,6 +74,17 @@ COMPARE_STATIONS：station_ids、data_types。
    }
 
 查询结果为空时只发送 CLEAR，确保地图不会保留上一次查询的站点。
+
+通用空间要素查询沿用以上 CLEAR → MARKER_ADD 动作形式和版本，不新增 SSE 事件：
+
+1. spatial_query 的 list/detail 不发送地图动作；query 默认自动联动，render_map=false 时不发送。
+2. 查询使用独立图层 spatial-{dataKey}，CLEAR 仅清理该图层，随后一次 MARKER_ADD 合并本页有效点，fit_bounds=true。
+3. marker.id 为 {dataKey}:{真实主键}，name 优先使用真实 name/code，否则显示主键。
+4. marker.type 必有值：优先使用返回属性中的非空 type，否则使用服务验证的 dataKey 作为通用要素类型标识。新增类型的专用图标不属于当前后端实现，消费方应提供通用点标记展示。
+5. 当前仅自动绘制有效 Point。线面、无坐标或无稳定主键记录不推算点位，重复主键不重复标点。
+6. 空结果或本页无可绘制点时只清理对应图层；查询失败不产生清图动作。
+7. 每次默认查询仅展示本页，不自动合并后续页。仅为补充文字读取后续页应设置 render_map=false。
+8. 不再追加 FLY_TO；MARKER_ADD 的 fit_bounds 负责适配查询结果视野。动作发送不表示前端渲染完成。
 
 六、消费规则
 
@@ -104,3 +116,42 @@ SSE 协议固定使用：
 
 新增可选字段属于向后兼容变更。
 删除字段、修改字段含义、修改动作名称或修改必填字段时必须升级 version，并由双方确认。
+
+十、断面专题分析（2026-09-09 追加）
+
+继续使用 event: map_action、version="1.0" 和既有动作元数据，只追加 action_type=DUANMIAN_ANALYSIS。
+消费方需在动作白名单/分发器中新增该分支，打开既有“断面专题分析”浮层。尚未支持此动作的客户端仍按未知动作规则忽略，不能反馈为已出图。
+本动作由专用 dm_duanmian_analysis 工具校验后产生；通用 map_action 工具的模型枚举不包含它，避免绕过航次和参数校验。
+
+完整 SSE 示例（实际 data 为单行 JSON，示例日期不代表当前真实可用航次）：
+
+event: map_action
+data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":"conversation-1","run_id":"run-1","batch_id":"call-analysis-1","action_id":"call-analysis-1-1","seq":1,"action_type":"DUANMIAN_ANALYSIS","payload":{"analysis":"temp-section","section":"E1","voyage":"2025-11-01","elementType":"chemistry","element":"temperature_c"}}}
+
+仅打开面板、不自动查询的 payload 示例：
+{"analysis":"temp-section","elementType":"chemistry"}
+
+payload 参数：
+- analysis：必填，depth-curve / temp-section / ts-scatter / nutrient / do-profile / surface。
+- section：E1/E2/E3。自动出图时除 ts-scatter 外必填；ts-scatter 固定合并 E1/E2/E3，不传 section。
+- voyage：yyyy-MM 或 yyyy-MM-dd。缺省时只打开面板，不自动查询，不能沿用上次面板航次自动出图。
+- elementType：chemistry / hydromet，后端明确补齐，默认 chemistry。temp-section、ts-scatter、nutrient、do-profile 使用 chemistry。
+- element：物理列名或中文标签。自动出图的 depth-curve、temp-section、surface 必填，后端通过上游字段清单解析为物理列名。do-profile 固定 dissolved_oxygen_umol_dm3；ts-scatter/nutrient 不传单个 element。
+
+前端消费约定：
+1. 复用既有 conversation_id/run_id 的会话归属检查和 action_id 去重；独立处理 DUANMIAN_ANALYSIS，不能按地图热力图或 TABLE_SHOW 解释。
+2. 打开分析浮层并应用本次 payload。无 voyage 时只打开/设置面板，不发取数请求；有 voyage 时使用本次参数取数出图，不依赖上次航次、指标等残留选择。
+3. 复用伙伴面板已有数据接口和绘图逻辑。后端不再调用虚拟 POST /api/duanmian_analysis，也不发送整张图的点阵或图片。
+4. 后端出图前复核可用航次和数据类型覆盖。一个月有多个观测日时要求明确日期，不静默截断或合并；ts-scatter 校验全部三条断面的共同观测日。
+5. 字段清单校验不等于该航次该指标非空。面板取数后必须检查实际有效值、采样层和图形所需覆盖，展示加载、无数据、错误状态，不能把缺测补零后显示成功图。
+6. 化学 depthM 为采样深度，水文 depthM 为水深属性，不得把水文记录解释为逐层水体实测剖面。插值图需标明插值含义，单位按字段定义显示。
+7. 用户连续发起出图时，较早的取数请求晚返回不能覆盖当前 run/action 对应的图。切换会话或账号后丢弃旧请求结果。
+8. 动作已发送和 event: done 都不是渲染完成回执。当前不包含回执接口，也不自动同步面板手动切换状态；不得向智能体声称它已读到页面图像。
+9. X-API-Key 只在后端；面板取数使用现有登录鉴权/代理，不从动作 payload 获取服务级密钥。
+
+建议联调顺序：
+- 仅传 analysis 打开面板，确认没有自动发起查询。
+- 传一组真实可用的 E1 航次和 temperature_c，确认自动绘图。
+- 六种 analysis 分别验证，ts-scatter 验证全部断面而非某一断面。
+- 同月多日、目标指标无值、请求失败时正确反馈，重复动作只执行一次。
+- 先标图再出分析面板，两类动作都按原 SSE 顺序执行；后一次图请求不会被旧响应覆盖。

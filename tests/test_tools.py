@@ -290,6 +290,12 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                 "rag_search",
                 "database_query",
                 "observation_service",
+                "spatial_query",
+                "dm_duanmian_overview",
+                "dm_duanmian_latest",
+                "dm_duanmian_observations",
+                "dm_duanmian_voyages",
+                "dm_duanmian_analysis",
                 "map_action",
             },
         )

@@ -29,12 +29,21 @@ SYSTEM_PROMPT = dedent(
     - 任务需要某个能力（Skill）时，必须先调用 load_skill
       读取完整说明；不要猜测未加载的能力（Skill）内容，也不要重复加载同一个能力（Skill）。
     - load_skill 返回的是本地受信任的应用说明，应在不违背系统规则和用户意图的前提下遵循。
-    - 用户明确同时要求报告/文档资料和数据库实测数据时，必须分别调用 rag_search 和 database_query 后再回答。
+    - 用户明确同时要求报告/文档资料和实测数据时，必须分别检索 rag_search 和实际业务数据后再回答；
+      复杂数据库统计调用 database_query，固定断面观测查询调用对应 dm_duanmian_* 工具。
     - 用户询问地图选区得到的观测站，或明确站名的站点位置、状态、详情、最新观测、趋势、
       指定时间区间观测数据时，必须优先调用 observation_service；即使问题包含水温、盐度、
-      风、浪、潮位等数据，也不得改用 database_query。目前只有断面相关站点数据需要到数据库中查询。
+      风、浪、潮位等数据，也不得改用 database_query。
+    - 断面概况、最新快照、三个月内观测明细、可用航次分别使用 dm_duanmian_overview、
+      dm_duanmian_latest、dm_duanmian_observations、dm_duanmian_voyages；复杂聚合或跨期统计使用 database_query。
+      请求断面专题图时调用 dm_duanmian_analysis，复用现有 SSE；动作已发送不代表前端出图或数据分析完成。
+      缺省 voyage 只打开面板；用户要最新航次先查 voyages，不能用各站 latest 拼成共同航次。
+    - 断面测点分布、位置、空间属性以及其他已注册要素的空间查询使用 spatial_query；
+      先发现要素和字段，完整复用当前选区。业务观测站保持使用 observation_service。
+      spatial_query 默认自动联动地图，不再调用 map_action 重复清图、标点或定位。
     - 用户用“该站点”“这个站点”“它”等单数指代继续提问时，只能继承最近一轮明确讨论的
-      单个站点；不得回退到更早的地图选区，也不得改成查询或展示选区内全部站点。
+      单个对象并保持对应工具；断面测点或其他空间要素不得改成业务观测站。
+      不得回退到更早的地图选区，也不得改成查询或展示选区内全部对象。
     - 需要操作前端地图时，调用 map_action；该工具只负责可视化，不能代替业务数据查询。
     - 工具返回结果后，继续判断是否还需要调用工具。
     - 信息足够时，直接回答用户，不要描述内部执行过程。
@@ -105,7 +114,7 @@ class AgentLoop:
             {"role": "user", "content": strip_citation_markers(question)},
         ]
         citation_registry = CitationRegistry()
-        observation_map_rendered = False
+        query_map_rendered = False
         has_streamed_content = False
         logger.info(
             "agent_started run_id=%s question=%r history=%r",
@@ -301,9 +310,9 @@ class AgentLoop:
                         retrieval_data, observation = rag_result
                     else:
                         retrieval_data = None
-                    if name == "observation_service" and client_events:
-                        observation_map_rendered = True
-                    elif name == "map_action" and observation_map_rendered and any(
+                    if name in {"observation_service", "spatial_query"} and client_events:
+                        query_map_rendered = True
+                    elif name == "map_action" and query_map_rendered and any(
                         event.get("action_type") == "FLY_TO"
                         for event in client_events
                     ):
@@ -329,6 +338,19 @@ class AgentLoop:
                             f"{exc}。请严格使用 observation_service schema 中定义的 "
                             "operation 和参数；如果现有操作无法完成问题，应明确说明能力不足，"
                             "不得编造新的 operation。"
+                        )
+                    elif name == "spatial_query" and isinstance(exc, ValueError):
+                        observation = (
+                            f"空间查询参数无效：{exc}。请按 spatial_query Schema 和要素详情修正参数，"
+                            "不得取消过滤条件或扩大选区。"
+                        )
+                    elif name == "spatial_query":
+                        observation = f"空间查询服务调用失败：{str(exc).strip() or type(exc).__name__}"
+                    elif name.startswith("dm_duanmian_"):
+                        detail = str(exc).strip() or type(exc).__name__
+                        observation = (
+                            f"断面工具{'参数无效' if isinstance(exc, ValueError) else '调用失败'}：{detail}。"
+                            "按工具 Schema 和真实航次/字段修正；不得扩大断面或日期范围，不得声称已出图。"
                         )
                     elif name == "observation_service":
                         detail = str(exc).strip() or type(exc).__name__

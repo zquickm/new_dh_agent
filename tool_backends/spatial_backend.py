@@ -39,6 +39,42 @@ class SpatialServiceClient:
     async def list_station_types(self) -> dict[str, Any]:
         return await self._request("GET", "/api/spatial/stations/types")
 
+    async def list_spatial_elements(self) -> list[dict[str, Any]]:
+        return await self._request(
+            "GET", "/api/spatial/v2/elements/list", data_type=list
+        )
+
+    async def get_spatial_element_detail(self, element: str) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/api/spatial/v2/elements/detail", params={"dataKey": element}
+        )
+
+    async def query_spatial_element(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._request(
+            "POST", "/api/spatial/v2/elements/query", json=payload
+        )
+
+    async def get_duanmian_overview(self) -> dict[str, Any]:
+        return await self._request("GET", "/api/spatial/v2/duanmian/overview")
+
+    async def get_duanmian_latest(self, code: str) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/api/spatial/v2/duanmian/latest", params={"code": code}
+        )
+
+    async def get_duanmian_observations(
+        self, *, code: str, start_date: str, end_date: str, page: int, size: int
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/api/spatial/v2/duanmian/observations",
+            params={"code": code, "from": start_date, "to": end_date, "page": page, "size": size},
+        )
+
+    async def get_duanmian_voyages(self, code: str) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/api/spatial/v2/duanmian/voyages", params={"code": code}
+        )
+
     async def query_stations(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._request(
             "POST",
@@ -114,7 +150,8 @@ class SpatialServiceClient:
         *,
         json: Optional[dict[str, Any]] = None,
         params: Optional[dict[str, Any]] = None,
-    ) -> dict[str, Any]:
+        data_type: type = dict,
+    ) -> Any:
         if not self.base_url:
             raise SpatialServiceError("空间服务地址未配置")
         if not self.api_key:
@@ -185,7 +222,7 @@ class SpatialServiceClient:
             message = str(body.get("message") or "空间服务业务处理失败")
             raise SpatialServiceError(message[:200])
         data = body.get("data")
-        if not isinstance(data, dict):
+        if not isinstance(data, data_type):
             raise SpatialServiceError("空间服务响应缺少 data")
         return data
 

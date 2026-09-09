@@ -52,10 +52,12 @@ def enrich_question_with_frontend_context(
     if _is_single_station_follow_up(question):
         return (
             f"{question}\n\n"
-            "[会话指代规则：本轮提到的单个站点，仅指最近一轮明确讨论的单个站点。"
-            "必须从会话历史继承该站点的名称或站号，不得使用之前的地图选区重新查询、"
-            "列出或展示区域内全部站点。若会话历史无法唯一确定该站点，应请用户明确站名，"
-            "不得回退为区域查询。]"
+            "[会话指代规则：本轮单数指代只继承最近明确讨论的对象。"
+            "若对象是业务观测站，仅指最近一轮明确讨论的单个站点，继承名称或站号；"
+            "若对象是断面测点或其他注册要素，继承其 element 和真实标识，空间属性继续使用 spatial_query，"
+            "断面观测数值使用对应 dm_duanmian_* 工具，"
+            "不得改成业务观测站。不得使用之前的地图选区重新查询、列出或展示区域内全部对象。"
+            "若会话历史无法唯一确定该对象，应请用户明确，不得回退为区域查询。]"
         )
 
     if geometry.type == "Circle":
@@ -92,4 +94,6 @@ def enrich_question_with_frontend_context(
         "不得根据旧选区解释本轮查询结果。"
         "执行空间查询时必须完整使用 selected_area 中的 query_type 及其对应几何参数，"
         "不得遗漏、估算、扩大或改写坐标。"
+        "断面测点及其他注册要素使用 spatial_query 时，将完整 selected_area 作为 area 传入；"
+        "该工具将圆形转换为 dwithin、多边形转换为 intersects，不需要模型改写几何。"
     )

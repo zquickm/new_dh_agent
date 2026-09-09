@@ -31,9 +31,29 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
                 {"code": 400, "message": "参数错误", "data": None}
             )
 
+        async def elements(request):
+            self.requests.append(request)
+            if request.path.endswith("/list"):
+                data = [{"dataKey": "dm_duanmian"}]
+            elif request.path.endswith("/detail"):
+                data = {"dataKey": request.query["dataKey"]}
+            else:
+                self.query_payload = await request.json()
+                data = {"type": "FeatureCollection", "features": [], "total": 0, "returned": 0}
+            return web.json_response({"code": 0, "data": data})
+
+        async def duanmian(request):
+            self.requests.append(request)
+            return web.json_response({"code": 0, "data": {"path": request.path, "params": dict(request.query)}})
+
         app = web.Application()
         app.router.add_get("/api/spatial/stations/types", station_types)
         app.router.add_get("/business-error", business_error)
+        app.router.add_get("/api/spatial/v2/elements/list", elements)
+        app.router.add_get("/api/spatial/v2/elements/detail", elements)
+        app.router.add_post("/api/spatial/v2/elements/query", elements)
+        for operation in ("overview", "latest", "observations", "voyages"):
+            app.router.add_get(f"/api/spatial/v2/duanmian/{operation}", duanmian)
         self.runner = web.AppRunner(app)
         await self.runner.setup()
         self.site = web.TCPSite(self.runner, "127.0.0.1", 0)
@@ -64,6 +84,31 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_non_success_business_code(self):
         with self.assertRaisesRegex(SpatialServiceError, "参数错误"):
             await self.client._request("GET", "/business-error")
+
+    async def test_element_endpoints_accept_catalog_array_and_use_existing_auth(self):
+        self.assertEqual(await self.client.list_spatial_elements(), [{"dataKey": "dm_duanmian"}])
+        self.assertEqual(await self.client.get_spatial_element_detail("dm_duanmian"), {"dataKey": "dm_duanmian"})
+        result = await self.client.query_spatial_element({"element": "dm_duanmian", "limit": 20})
+        self.assertEqual(result["features"], [])
+        self.assertEqual(self.query_payload, {"element": "dm_duanmian", "limit": 20})
+        self.assertTrue(all(request.headers["X-API-Key"] == "test-spatial-key" for request in self.requests))
+        with self.assertRaises(SpatialServiceError):
+            await self.client._request("GET", "/api/spatial/v2/elements/list")
+        with self.assertRaises(SpatialServiceError):
+            await self.client._request("GET", "/api/spatial/stations/types", data_type=list)
+
+    async def test_duanmian_get_paths_parameters_and_existing_auth(self):
+        overview = await self.client.get_duanmian_overview()
+        latest = await self.client.get_duanmian_latest("E1-001")
+        voyages = await self.client.get_duanmian_voyages("EK")
+        observations = await self.client.get_duanmian_observations(
+            code="E1", start_date="2025-11-01", end_date="2025-11-30", page=2, size=100,
+        )
+        self.assertEqual(overview, {"path": "/api/spatial/v2/duanmian/overview", "params": {}})
+        self.assertEqual(latest["params"], {"code": "E1-001"})
+        self.assertEqual(voyages["params"], {"code": "EK"})
+        self.assertEqual(observations["params"], {"code": "E1", "from": "2025-11-01", "to": "2025-11-30", "page": "2", "size": "100"})
+        self.assertTrue(all(r.method == "GET" and r.headers["X-API-Key"] == "test-spatial-key" for r in self.requests))
 
     async def test_retries_transient_http_error_once(self):
         attempts = 0

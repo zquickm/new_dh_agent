@@ -81,11 +81,14 @@ NEW_DH_LLM__API_KEY=your-key
 
 ## RAG、数据库、观测与地图工具
 
-Agent 已注册四个业务工具（括号内为协议调用标识）：
+Agent 已注册以下业务工具（括号内为协议调用标识）：
 
 - 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
 - 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
 - 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据。
+- 空间要素查询（`spatial_query`）：发现注册目录、读取字段定义、按属性和选区查询断面测点等要素，并自动标记有效 Point 结果。
+- 断面概况、最新观测、观测明细和航次（`dm_duanmian_overview`、`dm_duanmian_latest`、`dm_duanmian_observations`、`dm_duanmian_voyages`）：调用伙伴断面查询接口。
+- 断面专题分析（`dm_duanmian_analysis`）：校验参数后，通过现有地图 SSE 打开分析面板；支持六种专题图。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
 
 框架还注册了技能加载（`load_skill`）和当前服务器时间（`CurrentServerTime`）两个工具。
@@ -203,6 +206,47 @@ data: {
 
 ### 地图选区上下文
 
+通用空间查询复用同一个选区入口和 `event: map_action`，不解析模型正文中的
+`json.map_actions`，也不调用虚拟地图 HTTP 接口。已有业务观测站继续由
+`observation_service` 处理，固定断面查询由 `dm_duanmian_*` 处理，复杂统计继续由 `database_query` 处理。
+
+`spatial_query` 的 `operation` 支持 `list`、`detail`、`query`，对应空间服务
+`/api/spatial/v2/elements/list`、`/detail?dataKey=...` 和 `/query`。
+地址和鉴权复用 `tools.spatial` 与 `SPATIAL_API_KEY`，无需新增配置或依赖。
+`detail/query` 需要 `element`；属性条件和返回字段必须来自目录详情。
+圆形、多边形和矩形范围由工具转换为 `dwithin`、`intersects` 和 `bbox`。
+
+查询工具输入示例（模型工具参数，不是新的 HTTP 请求体）：
+
+```json
+{
+  "operation": "query",
+  "element": "dm_duanmian",
+  "area": {
+    "query_type": "circle",
+    "center": [122.5, 31.3],
+    "radius": 25000,
+    "crs": "EPSG:4490"
+  },
+  "limit": 20
+}
+```
+
+query 会读取并校验目录定义，默认使用注册的展示字段、主键排序，限制返回条数。
+绘图请求自动携带 `includeGeometry=true`，以 `spatial-{dataKey}` 为独立图层，
+先 CLEAR 再合并发送 MARKER_ADD，`fit_bounds=true`；空结果只清理该图层。
+标记 ID 使用 `{dataKey}:{真实主键}`；type 优先使用结果属性中的非空 type，
+否则使用服务返回并验证的 dataKey 作为通用要素类型标识。前端需要支持该类型的通用点标记；
+专用图标与类型映射需在联调环境确认。
+
+当前自动绘制仅支持具有真实 ID 和有效 EPSG:4490 坐标的 Point；线面和缺失几何仍保留
+查询记录，但不会生成假坐标。返回的 total、returned 和 map_count 分别代表匹配总数、
+本页记录数与实际标记数；partial 和 has_more 提示分页状态，unmapped_count 表示未绘制记录数。
+默认标图只包含本页，后续页不会自动累计到地图；`render_map=false` 可用于候选解析或
+补充分页读取，不改变页面。查询失败不会清除当前图层。
+
+通用空间查询保持现有 SSE 事件和动作；断面专题面板通过追加的 DUANMIAN_ANALYSIS 动作接入，见下方说明。
+
 `/agent/chat/stream` 接受前端通过 `map_context.drawn_geometry` 传入 GeoJSON
 `Polygon`，或传入由 `center` 和 `radius` 表示的圆形选区。
 圆心坐标格式为 `[经度, 纬度]`，半径单位为米。后端会在接口边界校验坐标并转换为
@@ -249,6 +293,46 @@ HTTP Map Action 的驼峰字段 `actionType` 同样会在接口边界转换。
 前端不要再把 `[系统上下文]` 或外接矩形说明拼入 `question`，否则会造成上下文
 重复，并污染保存的用户消息。`conversation_id` 应来自后端创建会话接口；若省略，
 流式接口会创建新会话，并在首个 `conversation` 事件中返回 ID。
+
+### 断面观测与专题分析
+
+四个查询工具沿用伙伴的 operationId，使用现有 `tools.spatial` 地址和服务端 API Key：
+
+| 工具 | 上游路径（GET） | 入参 |
+| --- | --- | --- |
+| dm_duanmian_overview | /api/spatial/v2/duanmian/overview | 无，统计范围 E1/E2/E3 |
+| dm_duanmian_latest | /api/spatial/v2/duanmian/latest | code |
+| dm_duanmian_observations | /api/spatial/v2/duanmian/observations | code、from、to、page、size |
+| dm_duanmian_voyages | /api/spatial/v2/duanmian/voyages | code |
+
+查询 code 归一化大小写但保留连字符，支持上游提供的断面/测点；响应的 observedAt、depthM、
+elements、chemistryFields/hydrometFields 保持原值，不将缺测填零。
+latest 是逐站最新快照，不是统一航次；observations 按三个自然月上限校验（月末截到目标月末），
+保留用户起止日，默认 size=100、最多 1000，通过 returned、partial、has_more 区分分页。
+上游更严格的范围限制或编码归一化问题仍需现场联调，后端不会自动缩短时间或切换数据源。
+复杂聚合、跨期分析继续使用 database_query，不把明细第一页交给模型做全量统计。
+
+模型工具参数示例：
+
+```json
+{"code":"E1","from":"2025-11-01","to":"2025-11-30","page":1,"size":100}
+```
+
+`dm_duanmian_analysis` 支持 depth-curve、temp-section、ts-scatter、nutrient、do-profile、surface。
+调用时不传 voyage 只请求打开面板；自动出图需有效航次和该图对应的必要参数。
+最新航次先通过 voyages 取得，分析工具发送前再次核对。月份有多个观测日时不自行合并；
+ts-scatter 固定 E1/E2/E3，并核对共同观测日。自动出图的单指标通过最新观测响应字段清单
+确认列名，此步骤不把最新快照数据当作绘图航次数据。
+
+```json
+{"analysis":"temp-section","section":"E1","voyage":"2025-11-01","element":"温度"}
+```
+
+工具产生现有 `map_action` SSE，追加 `DUANMIAN_ANALYSIS` 动作，payload 保留伙伴的
+`analysis/section/voyage/elementType/element` 字段；不调用虚拟分析 HTTP 接口。
+当前后端没有前端源码，面板由伙伴维护：需按《地图操作SSE事件契约》第十部分增加消费分支，
+复用既有面板的取数和绘图逻辑。后端完成推送不代表页面已完成渲染。
+“出图并解释”需要另外查询相同口径的实测数据；没有面板状态回传时不能得知用户手动改图后的参数。
 
 数据库 SQL 生成默认复用 `llm` 配置；仅当需要独立鉴权模型时填写
 `DEEPSEEK_API_KEY`，并在 `tools.database.sql_llm` 中配置独立模型地址和名称。
