@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
 from config.settings import (
     ApplicationDotEnvSettingsSource,
     Settings,
@@ -16,6 +18,41 @@ from config.settings import (
 class SettingsTest(unittest.TestCase):
     def tearDown(self):
         clear_settings_cache()
+
+    def test_prod_dotenv_placeholders_load_without_becoming_extra_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "APP_PROFILE=prod\n"
+                "DH_INTERNAL_TOKEN=test-internal-token\n"
+                "DH_AGENT_PORT=8100\n"
+                "DH_KNOWLEDGE_HOST=127.0.0.2\n"
+                "DH_BUSINESS_DB_HOST=127.0.0.3\n"
+                "DH_BUSINESS_DB_PORT=9130\n"
+                "DH_BUSINESS_DB_USERNAME=dotenv-reader\n"
+                "BUSINESS_DB_PASSWORD=test-password\n"
+                "NEW_DH_REACT__MAX_ROUNDS=7\n",
+                encoding="utf-8",
+            )
+            with patch("config.settings.PROJECT_DIR", Path(directory)), patch.dict(
+                os.environ, {}, clear=True
+            ):
+                settings = Settings()
+                self.assertEqual(settings.app_profile, "prod")
+                self.assertEqual(settings.server.port, 8100)
+                self.assertEqual(settings.dictionaries.base_url, "http://127.0.0.2:8082")
+                self.assertEqual(settings.tools.database.host, "127.0.0.3")
+                self.assertEqual(settings.tools.database.port, 9130)
+                self.assertEqual(settings.tools.database.user, "dotenv-reader")
+                self.assertEqual(settings.tools.database.password.get_secret_value(), "test-password")
+                self.assertEqual(settings.react.max_rounds, 7)
+                with patch.dict(os.environ, {"DH_BUSINESS_DB_USERNAME": "env-reader"}):
+                    self.assertEqual(Settings().tools.database.user, "env-reader")
+                # Keep rejecting misspelled application settings.
+                with env_file.open("a", encoding="utf-8") as stream:
+                    stream.write("NEW_DH_UNKNOWN_OPTION=1\n")
+                with self.assertRaises(ValidationError):
+                    Settings()
 
     def test_profile_yaml_and_nested_environment_override_are_merged(self):
         with patch.dict(

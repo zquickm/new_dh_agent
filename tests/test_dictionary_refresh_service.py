@@ -140,5 +140,26 @@ class DictionaryRefreshServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.calls, 1)
 
 
+class RefreshLifecycleTest(unittest.TestCase):
+    def test_service_created_on_another_loop_starts_and_stops(self):
+        async def create():
+            return DictionaryRefreshService(
+                FakeDictionaryStore(),
+                DictionaryRefreshSettings(interval_seconds=10, jitter_seconds=0),
+                lambda _groups: None,
+                lambda _rules: None,
+            )
+
+        service = asyncio.run(create())
+
+        async def serve():
+            await service.start()
+            # Let the background task enter Event.wait before shutting down.
+            await asyncio.sleep(0.01)
+            await service.stop()
+
+        asyncio.run(serve())
+
+
 if __name__ == "__main__":
     unittest.main()

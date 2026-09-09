@@ -51,7 +51,8 @@ class DictionaryRefreshService:
     async def start(self) -> None:
         if self._started:
             return
-        self._stop_event.clear()
+        # Bind the event to the serving loop, not the module-import loop (3.9).
+        self._stop_event = asyncio.Event()
         await self.refresh_once()
         self._started = True
         if self._settings.enabled:
