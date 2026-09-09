@@ -20,6 +20,20 @@ react:
 conversation:
   max_history_messages: 20
 
+persistence:
+  enabled: false
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: "1145141919810"
+  name: dh_agent
+  pool_size: 10
+  max_overflow: 20
+  pool_recycle_seconds: 1800
+  connect_timeout: 10
+  migration_on_startup: true
+  migration_lock_timeout: 60
+
 sensitive_words:
   enabled: true
 

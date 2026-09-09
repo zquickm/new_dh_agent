@@ -17,6 +17,22 @@
 APP_PROFILE=dev
 ```
 
+生产环境还必须配置独立的应用持久化库；它与 `tools.database` 指向的只读业务库
+不是同一个连接：
+
+```dotenv
+DH_AGENT_DB_HOST=mysql
+DH_AGENT_DB_PORT=3306
+DH_AGENT_DB_NAME=dh_agent
+DH_AGENT_DB_USERNAME=new_dh_agent
+DH_AGENT_DB_PASSWORD=change-me
+```
+
+应用启动时先执行 `CREATE DATABASE IF NOT EXISTS`，再自动执行
+`alembic upgrade head`。修改 ORM 实体后，应先执行
+`alembic revision --autogenerate -m "变更说明"`，审核并提交生成的增量迁移；
+不要修改已经发布的迁移文件。
+
 所有 HTTP 请求必须携带配置项 `internal_request.header_name` 指定的内部
 Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
 读取；生产环境必须设置随机值，并与 Nginx、Gateway、其他微服务保持一致。
@@ -59,9 +75,9 @@ Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
 防火墙等措施限制为仅允许网关访问。`X-Auth-Source` 本身不是密码，不能代替网络隔离
 或内部 Token。生产环境不可使用默认内部 Token。
 
-当前会话仍使用进程内存存储：重启后历史清空，不同 worker/实例之间不共享。
-此改动没有增加数据库持久化，暂应使用单 worker；若需要重启恢复或多实例部署，
-需后续增加带 `user_id` 归属字段的共享持久化存储。
+生产环境会话使用独立的 `dh_agent` MySQL 数据库持久化，启动时由 Alembic 自动执行
+尚未应用的版本化迁移；会话、消息、引用来源和地图上下文均可跨重启及多实例共享。
+开发配置默认继续使用内存仓库，便于运行不依赖 MySQL 的单元测试。
 
 当前大模型服务不需要鉴权时，`NEW_DH_LLM__API_KEY` 可以留空或省略；如果服务需要鉴权，再配置真实 Key：
 
@@ -77,7 +93,7 @@ NEW_DH_LLM__API_KEY=your-key
 .\.venv\Scripts\python.exe main.py
 ```
 
-流式接口为 `POST /agent/chat/stream`。会话只存放在当前进程内存中，服务重启后清空。
+流式接口为 `POST /agent/chat/stream`。生产环境的会话保存在 MySQL 中。
 
 ## RAG、数据库、观测与地图工具
 
@@ -336,7 +352,7 @@ data: {
 
 `citation_id` 只在本轮回答内有效。同一文档同一页的多个 chunk 共用一个编号，
 其文本以空行连接后写入 `source.preview`。会话历史消息会保存最终引用来源，因此
-当前服务进程内重新打开会话时仍可恢复引用卡片；内存仓库本身不会跨服务重启保留。
+重新打开会话时仍可恢复引用卡片；生产环境的 MySQL 仓库可跨服务重启保留。
 
 ## 内网部署
 

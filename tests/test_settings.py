@@ -63,6 +63,8 @@ class SettingsTest(unittest.TestCase):
                 "DH_INTERNAL_TOKEN": "test-internal-token",
                 "DH_BUSINESS_DB_USERNAME": "test-reader",
                 "BUSINESS_DB_PASSWORD": "test-password",
+                "DH_AGENT_DB_USERNAME": "test-agent",
+                "DH_AGENT_DB_PASSWORD": "test-agent-password",
             },
             clear=False,
         ):
@@ -75,6 +77,8 @@ class SettingsTest(unittest.TestCase):
                 settings.dictionaries.base_url,
                 "http://127.0.0.1:8082",
             )
+            self.assertTrue(settings.persistence.enabled)
+            self.assertEqual(settings.persistence.name, "dh_agent")
 
     def test_prod_profile_addresses_and_accounts_can_be_overridden(self):
         with patch.dict(
@@ -92,6 +96,11 @@ class SettingsTest(unittest.TestCase):
                 "DH_BUSINESS_DB_PORT": "9130",
                 "DH_BUSINESS_DB_USERNAME": "changed-reader",
                 "BUSINESS_DB_PASSWORD": "changed-password",
+                "DH_AGENT_DB_HOST": "10.0.0.14",
+                "DH_AGENT_DB_PORT": "3307",
+                "DH_AGENT_DB_NAME": "changed_agent",
+                "DH_AGENT_DB_USERNAME": "changed-agent-user",
+                "DH_AGENT_DB_PASSWORD": "changed-agent-password",
             },
             clear=False,
         ):
@@ -108,6 +117,14 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(
                 settings.tools.database.password.get_secret_value(),
                 "changed-password",
+            )
+            self.assertEqual(settings.persistence.host, "10.0.0.14")
+            self.assertEqual(settings.persistence.port, 3307)
+            self.assertEqual(settings.persistence.name, "changed_agent")
+            self.assertEqual(settings.persistence.user, "changed-agent-user")
+            self.assertEqual(
+                settings.persistence.password.get_secret_value(),
+                "changed-agent-password",
             )
 
     def test_llm_api_key_is_optional(self):
@@ -170,6 +187,8 @@ class SettingsTest(unittest.TestCase):
                 "NEW_DH_LLM__API_KEY=test-key\n"
                 "RAG_API_TOKEN=rag-token\n"
                 "BUSINESS_DB_PASSWORD=db-password\n"
+                "DH_AGENT_DB_HOST=mysql\n"
+                "DH_AGENT_DB_PASSWORD=agent-password\n"
                 "SPATIAL_API_KEY=spatial-token\n",
                 encoding="utf-8",
             )
@@ -185,4 +204,6 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(values["llm"]["api_key"], "test-key")
             self.assertNotIn("rag_api_token", values)
             self.assertNotIn("business_db_password", values)
+            self.assertNotIn("dh_agent_db_host", values)
+            self.assertNotIn("dh_agent_db_password", values)
             self.assertNotIn("spatial_api_key", values)

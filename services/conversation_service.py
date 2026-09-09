@@ -1,4 +1,4 @@
-from repositories.memory_conversation_repository import conversation_repository
+from repositories.repository import conversation_repository
 from schemas.conversation import CreateConversationRequest, ConversationPage
 
 

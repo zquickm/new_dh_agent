@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from agents.agent_loop import AgentLoop, build_agent_loop
 from config.settings import get_settings
-from repositories.memory_conversation_repository import conversation_repository
+from repositories.repository import conversation_repository
 from schemas.chat import AgentRequest, ChatMessage
 from services.citation_service import CitationService
 from services.request_context_adapter import enrich_question_with_frontend_context

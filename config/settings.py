@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import (
     BaseSettings,
     DotEnvSettingsSource,
@@ -30,6 +30,8 @@ class ApplicationDotEnvSettingsSource(DotEnvSettingsSource):
         "deepseek_",
         "database_",
         "business_db_",
+        "dh_business_db_",
+        "dh_agent_db_",
         "spatial_",
         "tool_",
     )
@@ -115,6 +117,28 @@ class ReactSettings(BaseModel):
 
 class ConversationSettings(BaseModel):
     max_history_messages: int = Field(default=20, ge=1, le=100)
+
+
+class PersistenceSettings(BaseModel):
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = Field(default=3306, ge=1, le=65535)
+    user: str = "new_dh_agent"
+    password: SecretStr = SecretStr("")
+    name: str = "dh_agent"
+    pool_size: int = Field(default=10, ge=1, le=100)
+    max_overflow: int = Field(default=20, ge=0, le=200)
+    pool_recycle_seconds: int = Field(default=1800, ge=60)
+    connect_timeout: float = Field(default=10, gt=0)
+    migration_on_startup: bool = True
+    migration_lock_timeout: int = Field(default=60, ge=1, le=600)
+
+    @field_validator("name")
+    @classmethod
+    def validate_database_name(cls, value: str) -> str:
+        if re.fullmatch(r"[A-Za-z0-9_]+", value) is None:
+            raise ValueError("database name may only contain letters, digits and underscores")
+        return value
 
 
 class SensitiveWordSettings(BaseModel):
@@ -262,6 +286,7 @@ class Settings(BaseSettings):
     llm: LLMSettings
     react: ReactSettings = Field(default_factory=ReactSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
+    persistence: PersistenceSettings = Field(default_factory=PersistenceSettings)
     sensitive_words: SensitiveWordSettings = Field(
         default_factory=SensitiveWordSettings
     )

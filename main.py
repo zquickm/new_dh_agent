@@ -12,6 +12,7 @@ from controller.agent_controller import router as agent_router
 from controller.conversation_controller import router as conversation_router
 from controller.health_controller import router as health_router
 from controller.recommend_controller import router as recommend_router
+from database.runtime import database_runtime
 from middleware.internal_request_auth import InternalRequestAuthMiddleware
 from services.chat_service import chat_service
 from services.dictionary_refresh_service import dictionary_refresh_service
@@ -24,13 +25,15 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    await dictionary_refresh_service.start()
-    logger.info("application_started profile=%s", settings.app_profile)
+    await database_runtime.start()
     try:
+        await dictionary_refresh_service.start()
+        logger.info("application_started profile=%s", settings.app_profile)
         yield
     finally:
         await dictionary_refresh_service.stop()
         await chat_service.close()
+        await database_runtime.close()
         logger.info("application_stopped")
 
 
