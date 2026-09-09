@@ -13,7 +13,7 @@
 ## 字段语义和数据质量
 
 - 化学表 `depth_m` 是采样层次，水文表 `depth_m` 是水深，不得用它们对齐两表记录。两列均为文本；水文数据含空字符串和 `＞1000` 这类非数字值，只有先验证格式才能转数值。
-- 文本字段用 `NULLIF(TRIM(field), '')` 统一 `NULL` 和空字符串；缺失值不得转成 0 参与统计。
+- 按 DDL 字段类型处理缺失值；缺失值不得转成 0 参与统计。
 - `sea_state`、`wave_type`、`wave_level`、`sea_glow_type`、`sea_glow_intensity`、`water_color`、`wind_wave` 和 `swell` 都保持原始类别或文本语义；获得业务字典前不转数值、不拆分、不翻译、不自行合并。
 - `wind_direction_deg` 是环形角度，不使用普通 `AVG`；主导风向应按方位区间计数。
 - `total_cloud` 和 `low_cloud` 的 DDL 单位与实际值域疑似不一致；保持原值，不乘以 10，不按百分比解释。
@@ -27,7 +27,7 @@
 - 用户未要求明细时，在数据库内完成过滤和聚合，不拉取原始行交给上层计算。
 - 数值指标默认返回 `AVG(field)` 和对应的 `COUNT(field)` 有效样本数，每表每时期另返回 `COUNT(*) AS record_count`；只有用户明确要求时才增加极值。
 - 类别字段默认返回紧凑的去重原始值；只有明确询问分布时才分组计数。
-- 多时期或多表的“各类要素”统一输出 `element_type`、`period`、`record_count`、`metrics`；两表独立聚合后用 `UNION ALL` 合并，`metrics` 用 `JSON_OBJECT` 收纳各自指标。同表多时期使用一个 `CASE` 和一次 `GROUP BY`。
+- 在完整满足本次问题和统计口径的前提下，优先生成简短 SQL，直接返回所需统计列，避免不必要的 CTE、跨表拼接和 `JSON_OBJECT` 包装。
 
 ## 数据画像快照
 
