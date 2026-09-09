@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from agents.tools.rag_search import replace_synonym_matcher
+from services.synonym_service import replace_synonym_matcher
 from config.settings import DictionaryRefreshSettings, get_settings
 from services.chat_service import chat_service
 from services.dictionary_service import (
@@ -51,7 +51,8 @@ class DictionaryRefreshService:
     async def start(self) -> None:
         if self._started:
             return
-        self._stop_event.clear()
+        # Bind the event to the serving loop, not the module-import loop (3.9).
+        self._stop_event = asyncio.Event()
         await self.refresh_once()
         self._started = True
         if self._settings.enabled:

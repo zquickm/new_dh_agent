@@ -2,6 +2,7 @@ import asyncio
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from agents.agent_loop import AgentLoop
@@ -12,6 +13,7 @@ from repositories.memory_conversation_repository import conversation_repository
 from schemas.chat import AgentRequest
 from services.chat_service import ChatService
 from services.sensitive_word_service import SensitiveWordMatcher
+from services.synonym_service import build_synonym_matcher, replace_synonym_matcher
 
 
 TEST_USER_ID = "101"
@@ -74,6 +76,57 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        matcher_patch = patch(
+            "services.synonym_service._active_synonym_matcher",
+            build_synonym_matcher([
+                {"standardTerm": "溶解氧", "terms": [{"term": "DO"}]},
+                {"standardTerm": "区域", "terms": [{"term": "selected_area"}]},
+            ]),
+        )
+        matcher_patch.start()
+        self.addCleanup(matcher_patch.stop)
+
+    async def test_synonyms_reach_agent_and_refresh_without_changing_history_or_context(self):
+        class CapturingAgent:
+            model_name = "fake-model"
+
+            def __init__(self):
+                self.calls = []
+
+            async def run_stream(self, question, history, run_id="-"):
+                self.calls.append((question, history))
+                yield AgentEvent(type="answer_delta", content="回答")
+
+        agent = CapturingAgent()
+        service = ChatService()
+        service._agent = agent
+        conversation = await conversation_repository.create("同义词测试", user_id=TEST_USER_ID)
+        request = AgentRequest.model_validate({
+            "question": "查询DO",
+            "conversation_id": conversation.id,
+            "map_context": {"drawn_geometry": {
+                "query_type": "circle", "center": [123.4, 31.2], "radius": 18000,
+            }},
+        })
+        events = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
+        self.assertEqual(events[-1]["event"], "done")
+        self.assertTrue(agent.calls[0][0].startswith("查询DO（溶解氧）"))
+        self.assertIn('"selected_area":', agent.calls[0][0])
+        self.assertNotIn("selected_area（区域）", agent.calls[0][0])
+        self.assertEqual(request.question, "查询DO")
+
+        replace_synonym_matcher([
+            {"standardTerm": "溶解氧浓度", "terms": [{"term": "DO"}]},
+        ])
+        events = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
+        self.assertEqual(events[-1]["event"], "done")
+        self.assertTrue(agent.calls[1][0].startswith("查询DO（溶解氧浓度）"))
+        self.assertEqual(agent.calls[1][1][0].content, "查询DO")
+        detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
+        self.assertEqual([m.content for m in detail.messages if m.role == "user"],
+                         ["查询DO", "查询DO"])
+
     @staticmethod
     def _sensitive_word_matcher(_directory: str) -> SensitiveWordMatcher:
         return SensitiveWordMatcher(
@@ -98,13 +151,15 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             service._agent = agent
             service._sensitive_word_matcher = self._sensitive_word_matcher(directory)
 
-            events = [
-                event
-                async for event in service.stream_chat(
-                    AgentRequest(question="这里包含测试敏感词一"),
-                    user_id=TEST_USER_ID,
-                )
-            ]
+            with patch("services.chat_service.expand_query_synonyms") as expand:
+                events = [
+                    event
+                    async for event in service.stream_chat(
+                        AgentRequest(question="这里包含测试敏感词一"),
+                        user_id=TEST_USER_ID,
+                    )
+                ]
+            expand.assert_not_called()
 
             self.assertEqual(
                 [event["event"] for event in events],

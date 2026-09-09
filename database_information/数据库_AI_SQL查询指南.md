@@ -27,7 +27,7 @@
 - 用户未要求明细时，在数据库内完成过滤和聚合，不拉取原始行交给上层计算。
 - 数值指标默认返回 `AVG(field)` 和对应的 `COUNT(field)` 有效样本数，每表每时期另返回 `COUNT(*) AS record_count`；只有用户明确要求时才增加极值。
 - 类别字段默认返回紧凑的去重原始值；只有明确询问分布时才分组计数。
-- 多时期或多表的“各类要素”统一输出 `element_type`、`period`、`record_count`、`metrics`；两表独立聚合后用 `UNION ALL` 合并，`metrics` 用 `JSON_OBJECT` 收纳各自指标。同表多时期使用一个 `CASE` 和一次 `GROUP BY`。
+- 在完整满足本次问题和统计口径的前提下，优先生成简短 SQL，直接返回所需统计列，避免不必要的 CTE、跨表拼接和 `JSON_OBJECT` 包装。
 
 ## 数据画像快照
 

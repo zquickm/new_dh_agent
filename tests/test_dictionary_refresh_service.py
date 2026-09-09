@@ -1,6 +1,8 @@
 import asyncio
 import unittest
+from unittest.mock import AsyncMock, patch
 
+from agents.tools.rag_search import RagSearchTool
 from config.settings import DictionaryRefreshSettings
 from services.dictionary_refresh_service import (
     DictionaryRefreshService,
@@ -11,6 +13,7 @@ from services.dictionary_service import (
     SYNONYM,
     DictionarySyncResult,
 )
+from services.synonym_service import expand_query_synonyms, replace_synonym_matcher
 
 
 class FakeDictionaryStore:
@@ -36,6 +39,27 @@ class FakeDictionaryStore:
 
 
 class DictionaryRefreshServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_refresh_updates_shared_input_and_rag_matcher(self):
+        store = FakeDictionaryStore()
+        service = self.service(store, replace_synonym_matcher, lambda _rules: None)
+        backend = AsyncMock()
+        backend.search.return_value = []
+        rag = RagSearchTool(backend)
+        with patch("services.synonym_service._active_synonym_matcher", None):
+            await service.refresh_once()
+            self.assertEqual(expand_query_synonyms("DO"), "DO（溶解氧）")
+            store.versions[SYNONYM] = 2
+            with patch.object(store, "synonym_groups", return_value=[
+                {"standardTerm": "溶解氧浓度", "terms": [{"term": "DO"}]},
+            ]):
+                await service.refresh_once()
+            expanded = expand_query_synonyms("DO")
+            self.assertEqual(expanded, "DO（溶解氧浓度）")
+            await rag.execute(expanded)
+            backend.search.assert_awaited_with(expanded, 20, {})
+            await rag.execute("DO")
+            backend.search.assert_awaited_with(expanded, 20, {})
+
     def service(self, store, synonyms, sensitive, *, enabled=False):
         return DictionaryRefreshService(
             store,
@@ -114,6 +138,27 @@ class DictionaryRefreshServiceTest(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(service.stop(), timeout=1)
 
         self.assertEqual(store.calls, 1)
+
+
+class RefreshLifecycleTest(unittest.TestCase):
+    def test_service_created_on_another_loop_starts_and_stops(self):
+        async def create():
+            return DictionaryRefreshService(
+                FakeDictionaryStore(),
+                DictionaryRefreshSettings(interval_seconds=10, jitter_seconds=0),
+                lambda _groups: None,
+                lambda _rules: None,
+            )
+
+        service = asyncio.run(create())
+
+        async def serve():
+            await service.start()
+            # Let the background task enter Event.wait before shutting down.
+            await asyncio.sleep(0.01)
+            await service.stop()
+
+        asyncio.run(serve())
 
 
 if __name__ == "__main__":
