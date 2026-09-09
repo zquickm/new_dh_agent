@@ -10,6 +10,7 @@ from main import app
 from tests.fakes.memory_conversation_repository import MemoryConversationRepository
 from schemas.chat import AgentRequest, FrontendContext
 from services.chat_service import ChatService, chat_service
+from services.synonym_service import build_synonym_matcher
 
 
 def identity(user_id="101"):
@@ -87,6 +88,14 @@ class RepositoryIsolationTest(unittest.IsolatedAsyncioTestCase):
 
 class ChatIsolationTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        synonym_patch = patch(
+            "services.synonym_service._active_synonym_matcher",
+            build_synonym_matcher([
+                {"standardTerm": "溶解氧", "terms": [{"term": "DO"}]},
+            ]),
+        )
+        synonym_patch.start()
+        self.addCleanup(synonym_patch.stop)
         self.repo = MemoryConversationRepository()
         self.repo_patch = patch("services.chat_service.conversation_repository", self.repo)
         self.repo_patch.start()
@@ -147,6 +156,19 @@ class ChatIsolationTest(unittest.IsolatedAsyncioTestCase):
 
 class ApiIsolationTest(unittest.TestCase):
     def setUp(self):
+        # Python 3.9 asyncio.Lock requires a current loop during construction.
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self.addCleanup(asyncio.set_event_loop, None)
+        self.addCleanup(loop.close)
+        synonym_patch = patch(
+            "services.synonym_service._active_synonym_matcher",
+            build_synonym_matcher([
+                {"standardTerm": "溶解氧", "terms": [{"term": "DO"}]},
+            ]),
+        )
+        synonym_patch.start()
+        self.addCleanup(synonym_patch.stop)
         repo = MemoryConversationRepository()
         for target in (
             "services.conversation_service.conversation_repository",

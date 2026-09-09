@@ -10,11 +10,8 @@ from agents.tools.database_query import (
     DatabaseQueryTool,
 )
 from agents.tools.executor import ToolExecutor, ToolOutput
-from agents.tools.rag_search import (
-    RagSearchTool,
-    clear_synonym_matcher_cache,
-    expand_query_synonyms,
-)
+from agents.tools.rag_search import RagSearchTool
+from services.synonym_service import clear_synonym_matcher_cache, expand_query_synonyms
 from agents.tools.registry import build_tool_executor
 from config.settings import get_settings
 from services.dictionary_service import dictionary_store

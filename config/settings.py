@@ -22,9 +22,10 @@ PROJECT_DIR = CONFIG_DIR.parent
 
 
 class ApplicationDotEnvSettingsSource(DotEnvSettingsSource):
-    """Ignore variables owned by tool backends while validating app settings."""
+    """Exclude YAML placeholders and backend variables from direct app settings."""
 
     TOOL_PREFIXES = (
+        "dh_",
         "rag_",
         "rerank_",
         "deepseek_",
