@@ -64,6 +64,7 @@ class ConversationMessageModel(Base):
             ondelete="CASCADE",
         ),
         Index("ix_agent_message_conversation_sequence", "conversation_id", "sequence_no"),
+        Index("ix_agent_message_run", "run_id"),
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
 
@@ -76,4 +77,10 @@ class ConversationMessageModel(Base):
     sources: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     images: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     recommend_questions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    run_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'completed'")
+    )
+    error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)

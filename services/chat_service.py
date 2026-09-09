@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from time import perf_counter
@@ -33,6 +34,7 @@ class ChatService:
     def __init__(self) -> None:
         self._agent: Optional[AgentLoop] = None
         self._sensitive_word_matcher: Optional[SensitiveWordMatcher] = None
+        self._background_tasks: set[asyncio.Task] = set()
 
     def replace_sensitive_word_matcher(self, rules: list[dict]) -> None:
         matcher = SensitiveWordMatcher(rules)
@@ -45,6 +47,11 @@ class ChatService:
         return self._agent
 
     async def close(self) -> None:
+        tasks = list(self._background_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         if self._agent is not None:
             close = getattr(self._agent, "close", None)
             if close is not None:
@@ -91,11 +98,11 @@ class ChatService:
                     },
                 }
                 return
-        yield {
-            "event": "conversation",
-            "data": {"conversation_id": conversation_id, "run_id": run_id},
-        }
         if contains_sensitive_input:
+            yield {
+                "event": "conversation",
+                "data": {"conversation_id": conversation_id, "run_id": run_id},
+            }
             logger.warning(
                 "chat_rejected run_id=%s conversation_id=%s reason=sensitive_input",
                 run_id,
@@ -118,10 +125,59 @@ class ChatService:
                 },
             }
             return
+
+        # Persist both sides before starting the model. The request/SSE connection is
+        # only a subscriber after this point; closing it must not cancel generation.
+        _, assistant_message = await conversation_repository.begin_exchange(
+            conversation_id,
+            request.question,
+            run_id=run_id,
+            user_id=user_id,
+        )
+        event_queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
+        task = asyncio.create_task(
+            self._run_chat(
+                request,
+                user_id=user_id,
+                conversation=conversation,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                assistant_message_id=assistant_message.id,
+                started_at=started_at,
+                event_queue=event_queue,
+            ),
+            name=f"agent-chat-{run_id}",
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        yield {
+            "event": "conversation",
+            "data": {"conversation_id": conversation_id, "run_id": run_id},
+        }
+        while True:
+            event = await event_queue.get()
+            if event is None:
+                return
+            yield event
+
+    async def _run_chat(
+        self,
+        request: AgentRequest,
+        *,
+        user_id: str,
+        conversation,
+        conversation_id: str,
+        run_id: str,
+        assistant_message_id: str,
+        started_at: float,
+        event_queue: asyncio.Queue,
+    ) -> None:
         answer_parts: list[str] = []
         registered_sources: list[dict] = []
         retrieval_counts: dict[str, int] = {}
         sequence = 0
+        last_persisted_length = 0
+        last_persisted_at = perf_counter()
         try:
             active_context = request.context
             if (
@@ -165,7 +221,7 @@ class ChatService:
                 if event.type == "tool_started":
                     if get_settings().stream.include_process:
                         tool_display_name = self._tool_display_name(event.tool_name)
-                        yield {
+                        await event_queue.put({
                             "event": "process",
                             "data": self._process_data(
                                 event.round_number,
@@ -177,7 +233,7 @@ class ChatService:
                                 sequence,
                                 step_id=event.tool_call_id,
                             ),
-                        }
+                        })
                 elif event.type == "retrieval":
                     data = {
                         **(event.data or {}),
@@ -190,11 +246,11 @@ class ChatService:
                         result_count, bool
                     ):
                         retrieval_counts[event.tool_call_id] = result_count
-                    yield {"event": "retrieval", "data": data}
+                    await event_queue.put({"event": "retrieval", "data": data})
                 elif event.type == "map_action":
                     data = event.data or {}
                     action_sequence = int(data.get("seq") or 1)
-                    yield {
+                    await event_queue.put({
                         "event": "map_action",
                         "data": {
                             "version": "1.0",
@@ -206,7 +262,7 @@ class ChatService:
                             "action_type": data.get("action_type"),
                             "payload": data.get("payload") or {},
                         },
-                    }
+                    })
                 elif event.type == "tool_finished":
                     if get_settings().stream.include_process:
                         tool_display_name = self._tool_display_name(event.tool_name)
@@ -216,7 +272,7 @@ class ChatService:
                             or get_settings().stream.include_tool_result
                             else f"{tool_display_name}执行{'完成' if event.success else '失败'}"
                         )
-                        yield {
+                        await event_queue.put({
                             "event": "process",
                             "data": self._process_data(
                                 event.round_number,
@@ -235,18 +291,38 @@ class ChatService:
                                     else {}
                                 ),
                             ),
-                        }
+                        })
                 elif event.type == "answer_delta":
                     answer_parts.append(event.content)
-                    yield {"event": "token", "data": {"content": event.content}}
+                    await event_queue.put(
+                        {"event": "token", "data": {"content": event.content}}
+                    )
+                    draft = "".join(answer_parts)
+                    now = perf_counter()
+                    if (
+                        len(draft) - last_persisted_length >= 80
+                        or now - last_persisted_at >= 0.75
+                    ):
+                        await conversation_repository.update_assistant_message(
+                            assistant_message_id,
+                            draft,
+                            [],
+                            status="streaming",
+                            user_id=user_id,
+                        )
+                        last_persisted_length = len(draft)
+                        last_persisted_at = now
             answer = "".join(answer_parts)
             if not answer.strip():
                 raise RuntimeError("AgentLoop 未生成有效回答")
             answer, cited_sources = CitationService.finalize(
                 answer, registered_sources
             )
-            message = await conversation_repository.save_exchange(
-                conversation_id, request.question, answer, cited_sources,
+            message = await conversation_repository.update_assistant_message(
+                assistant_message_id,
+                answer,
+                cited_sources,
+                status="completed",
                 user_id=user_id,
             )
             logger.info(
@@ -258,7 +334,7 @@ class ChatService:
                 answer,
                 cited_sources,
             )
-            yield {
+            await event_queue.put({
                 "event": "done",
                 "data": {
                     "conversation_id": conversation_id,
@@ -269,7 +345,17 @@ class ChatService:
                     "images": [],
                     "assistant_message_id": message.id,
                 },
-            }
+            })
+        except asyncio.CancelledError:
+            await conversation_repository.update_assistant_message(
+                assistant_message_id,
+                "".join(answer_parts) or "服务重启导致回答中断，请重新发送。",
+                [],
+                status="failed",
+                error_code="AGENT_INTERRUPTED",
+                user_id=user_id,
+            )
+            raise
         except Exception as exc:
             logger.exception(
                 "chat_failed run_id=%s conversation_id=%s duration_ms=%.1f "
@@ -280,14 +366,24 @@ class ChatService:
                 request.question,
                 type(exc).__name__,
             )
-            yield {
+            await conversation_repository.update_assistant_message(
+                assistant_message_id,
+                "".join(answer_parts) or "对话生成失败，请重新发送。",
+                [],
+                status="failed",
+                error_code="AGENT_STREAM_FAILED",
+                user_id=user_id,
+            )
+            await event_queue.put({
                 "event": "error",
                 "data": {
                     "message": "对话生成失败，请稍后重试",
                     "error_code": "AGENT_STREAM_FAILED",
                     "retryable": True,
                 },
-            }
+            })
+        finally:
+            await event_queue.put(None)
 
     @staticmethod
     def _tool_display_name(tool_name: str) -> str:

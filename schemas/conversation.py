@@ -12,6 +12,10 @@ class ConversationMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
     content: str
     created_at: str
+    updated_at: Optional[str] = None
+    run_id: Optional[str] = None
+    status: Literal["streaming", "completed", "failed"] = "completed"
+    error_code: Optional[str] = None
     sources: list[dict] = Field(default_factory=list)
     images: list[dict] = Field(default_factory=list)
     recommend_questions: list[dict] = Field(default_factory=list)

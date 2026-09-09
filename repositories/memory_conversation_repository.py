@@ -88,19 +88,42 @@ class MemoryConversationRepository:
         *,
         user_id: str,
     ) -> ConversationMessage:
+        _, assistant = await self.begin_exchange(
+            conversation_id, question, run_id=None, user_id=user_id
+        )
+        return await self.update_assistant_message(
+            assistant.id,
+            answer,
+            sources,
+            status="completed",
+            user_id=user_id,
+        )
+
+    async def begin_exchange(
+        self,
+        conversation_id: str,
+        question: str,
+        *,
+        run_id: Optional[str],
+        user_id: str,
+    ) -> tuple[ConversationMessage, ConversationMessage]:
         now = _now()
         user = ConversationMessage(
             id=uuid4().hex,
             role="user",
             content=question,
             created_at=now,
+            updated_at=now,
+            run_id=run_id,
         )
         assistant = ConversationMessage(
             id=uuid4().hex,
             role="assistant",
-            content=answer,
+            content="",
             created_at=now,
-            sources=sources,
+            updated_at=now,
+            run_id=run_id,
+            status="streaming",
         )
         async with self._lock:
             item = self._items.get((user_id, conversation_id))
@@ -111,7 +134,39 @@ class MemoryConversationRepository:
             item.updated_at = now
             if item.title == "新会话":
                 item.title = question[:30]
-        return assistant.model_copy(deep=True)
+        return user.model_copy(deep=True), assistant.model_copy(deep=True)
+
+    async def update_assistant_message(
+        self,
+        message_id: str,
+        content: str,
+        sources: list[dict],
+        *,
+        status: str,
+        user_id: str,
+        error_code: Optional[str] = None,
+    ) -> ConversationMessage:
+        now = _now()
+        async with self._lock:
+            for (owner, _), item in self._items.items():
+                if owner != user_id:
+                    continue
+                for index, message in enumerate(item.messages):
+                    if message.id == message_id and message.role == "assistant":
+                        updated = message.model_copy(
+                            update={
+                                "content": content,
+                                "sources": sources,
+                                "status": status,
+                                "error_code": error_code,
+                                "updated_at": now,
+                            },
+                            deep=True,
+                        )
+                        item.messages[index] = updated
+                        item.updated_at = now
+                        return updated.model_copy(deep=True)
+        raise KeyError(message_id)
 
 
 conversation_repository = MemoryConversationRepository()

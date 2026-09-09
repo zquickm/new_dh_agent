@@ -135,6 +135,52 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(detail.messages, [])
             await service.close()
 
+    async def test_generation_continues_after_stream_subscriber_disconnects(self):
+        class PausedAgent:
+            model_name = "fake-model"
+
+            def __init__(self):
+                self.release = asyncio.Event()
+
+            async def run_stream(self, question, history, run_id="-"):
+                del question, history, run_id
+                await self.release.wait()
+                yield AgentEvent(type="answer_delta", content="断线后完成")
+
+        conversation = await conversation_repository.create(
+            "断线恢复测试", user_id=TEST_USER_ID
+        )
+        agent = PausedAgent()
+        service = ChatService()
+        service._agent = agent
+        stream = service.stream_chat(
+            AgentRequest(question="请继续生成", conversation_id=conversation.id),
+            user_id=TEST_USER_ID,
+        )
+
+        first_event = await stream.__anext__()
+        self.assertEqual(first_event["event"], "conversation")
+        await stream.aclose()
+
+        persisted = await conversation_repository.get(
+            conversation.id, user_id=TEST_USER_ID
+        )
+        self.assertEqual(persisted.message_count, 2)
+        self.assertEqual(persisted.messages[-1].status, "streaming")
+
+        agent.release.set()
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            persisted = await conversation_repository.get(
+                conversation.id, user_id=TEST_USER_ID
+            )
+            if persisted.messages[-1].status == "completed":
+                break
+
+        self.assertEqual(persisted.messages[-1].content, "断线后完成")
+        self.assertEqual(persisted.messages[-1].status, "completed")
+        await service.close()
+
     async def test_sensitive_input_does_not_persist_map_context(self):
         with tempfile.TemporaryDirectory() as directory:
             conversation = await conversation_repository.create(

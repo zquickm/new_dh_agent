@@ -22,6 +22,10 @@ class PersistenceSchemaTest(unittest.TestCase):
         self.assertIn("user_id", conversation.c)
         self.assertIn("map_context", conversation.c)
         self.assertIn("message_count", conversation.c)
+        self.assertIn("run_id", message.c)
+        self.assertIn("status", message.c)
+        self.assertIn("error_code", message.c)
+        self.assertIn("updated_at", message.c)
         self.assertIn("sequence_no", message.c)
         self.assertIn("user_id", message.c)
         self.assertTrue(

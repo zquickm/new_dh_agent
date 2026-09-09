@@ -35,6 +35,10 @@ def _message_schema(item: ConversationMessageModel) -> ConversationMessage:
         sources=list(item.sources or []),
         images=list(item.images or []),
         recommend_questions=list(item.recommend_questions or []),
+        run_id=item.run_id,
+        status=item.status,
+        error_code=item.error_code,
+        updated_at=_iso(item.updated_at),
     )
 
 
@@ -171,6 +175,25 @@ class MySQLConversationRepository:
         *,
         user_id: str,
     ) -> ConversationMessage:
+        _, assistant = await self.begin_exchange(
+            conversation_id, question, run_id=None, user_id=user_id
+        )
+        return await self.update_assistant_message(
+            assistant.id,
+            answer,
+            sources,
+            status="completed",
+            user_id=user_id,
+        )
+
+    async def begin_exchange(
+        self,
+        conversation_id: str,
+        question: str,
+        *,
+        run_id: Optional[str],
+        user_id: str,
+    ) -> tuple[ConversationMessage, ConversationMessage]:
         owner_id = int(user_id)
         now = _now()
         async with self._runtime.session_factory() as session:
@@ -197,7 +220,11 @@ class MySQLConversationRepository:
                     sources=[],
                     images=[],
                     recommend_questions=[],
+                    run_id=run_id,
+                    status="completed",
+                    error_code=None,
                     created_at=now,
+                    updated_at=now,
                 )
                 assistant_message = ConversationMessageModel(
                     id=uuid4().hex,
@@ -205,11 +232,15 @@ class MySQLConversationRepository:
                     user_id=owner_id,
                     sequence_no=conversation.message_count + 2,
                     role="assistant",
-                    content=answer,
-                    sources=sources,
+                    content="",
+                    sources=[],
                     images=[],
                     recommend_questions=[],
+                    run_id=run_id,
+                    status="streaming",
+                    error_code=None,
                     created_at=now,
+                    updated_at=now,
                 )
                 session.add_all((user_message, assistant_message))
                 conversation.message_count += 2
@@ -217,4 +248,49 @@ class MySQLConversationRepository:
                 conversation.version += 1
                 if conversation.title == "新会话":
                     conversation.title = question[:30]
-        return _message_schema(assistant_message)
+        return _message_schema(user_message), _message_schema(assistant_message)
+
+    async def update_assistant_message(
+        self,
+        message_id: str,
+        content: str,
+        sources: list[dict],
+        *,
+        status: str,
+        user_id: str,
+        error_code: Optional[str] = None,
+    ) -> ConversationMessage:
+        now = _now()
+        async with self._runtime.session_factory() as session:
+            async with session.begin():
+                message = (
+                    await session.execute(
+                        select(ConversationMessageModel)
+                        .where(
+                            ConversationMessageModel.id == message_id,
+                            ConversationMessageModel.user_id == int(user_id),
+                            ConversationMessageModel.role == "assistant",
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if message is None:
+                    raise KeyError(message_id)
+                message.content = content
+                message.sources = sources
+                message.status = status
+                message.error_code = error_code
+                message.updated_at = now
+                conversation = (
+                    await session.execute(
+                        select(ConversationModel)
+                        .where(
+                            ConversationModel.id == message.conversation_id,
+                            ConversationModel.user_id == int(user_id),
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one()
+                conversation.updated_at = now
+                conversation.version += 1
+        return _message_schema(message)
