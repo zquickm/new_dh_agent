@@ -8,6 +8,7 @@ from agents.events import AgentEvent
 from main import app
 from services.chat_service import chat_service
 from services.sensitive_word_service import SensitiveWordMatcher
+from services.synonym_service import build_synonym_matcher
 
 
 INTERNAL_HEADER = "X-DH-Internal-Token"
@@ -66,6 +67,15 @@ class FakeAgent:
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
+        matcher_patch = patch(
+            "services.synonym_service._active_synonym_matcher",
+            build_synonym_matcher([
+                {"standardTerm": "溶解氧", "terms": [{"term": "DO"}]},
+                {"standardTerm": "区域", "terms": [{"term": "selected_area"}]},
+            ]),
+        )
+        matcher_patch.start()
+        self.addCleanup(matcher_patch.stop)
         self.previous_agent = chat_service._agent
         self.previous_matcher = chat_service._sensitive_word_matcher
         self.fake_agent = FakeAgent()

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from agents.tools.rag_search import replace_synonym_matcher
+from services.synonym_service import replace_synonym_matcher
 from config.settings import DictionaryRefreshSettings, get_settings
 from services.chat_service import chat_service
 from services.dictionary_service import (
