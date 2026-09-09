@@ -3,12 +3,13 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from agents.agent_loop import AgentLoop
 from agents.events import AgentEvent
 from agents.tools.executor import ToolExecutor
 from controller.streaming.sse_encoder import encode_chat_stream
-from repositories.memory_conversation_repository import conversation_repository
+from tests.fakes.memory_conversation_repository import conversation_repository
 from schemas.chat import AgentRequest
 from services.chat_service import ChatService
 from services.sensitive_word_service import SensitiveWordMatcher
@@ -74,6 +75,13 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        repository_patch = patch(
+            "services.chat_service.conversation_repository", conversation_repository
+        )
+        repository_patch.start()
+        self.addCleanup(repository_patch.stop)
+
     @staticmethod
     def _sensitive_word_matcher(_directory: str) -> SensitiveWordMatcher:
         return SensitiveWordMatcher(

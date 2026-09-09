@@ -19,6 +19,6 @@ async def health():
             "profile": settings.app_profile,
             "model": settings.llm.model,
             "stream_endpoint": "/agent/chat/stream",
-            "persistence": "mysql" if settings.persistence.enabled else "memory",
+            "persistence": "mysql",
         }
     )

@@ -21,12 +21,11 @@ conversation:
   max_history_messages: 20
 
 persistence:
-  enabled: false
-  host: 127.0.0.1
-  port: 3306
-  user: root
-  password: "1145141919810"
-  name: dh_agent
+  host: "${DH_AGENT_DB_HOST:127.0.0.1}"
+  port: "${DH_AGENT_DB_PORT:3306}"
+  user: "${DH_AGENT_DB_USERNAME}"
+  password: "${DH_AGENT_DB_PASSWORD}"
+  name: "${DH_AGENT_DB_NAME:dh_agent}"
   pool_size: 10
   max_overflow: 20
   pool_recycle_seconds: 1800

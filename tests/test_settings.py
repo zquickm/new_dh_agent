@@ -55,6 +55,30 @@ class SettingsTest(unittest.TestCase):
         with patch.dict(os.environ, {"APP_PROFILE": "prod"}, clear=False):
             self.assertEqual(get_active_profile(), "prod")
 
+    def test_mysql_persistence_configuration_applies_in_dev_profile(self):
+        with patch.dict(
+            os.environ,
+            {
+                "APP_PROFILE": "dev",
+                "DH_AGENT_DB_HOST": "dev-mysql",
+                "DH_AGENT_DB_PORT": "3307",
+                "DH_AGENT_DB_NAME": "dev_agent",
+                "DH_AGENT_DB_USERNAME": "dev-user",
+                "DH_AGENT_DB_PASSWORD": "dev-password",
+            },
+            clear=False,
+        ):
+            clear_settings_cache()
+            settings = get_settings()
+
+            self.assertEqual(settings.persistence.host, "dev-mysql")
+            self.assertEqual(settings.persistence.port, 3307)
+            self.assertEqual(settings.persistence.name, "dev_agent")
+            self.assertEqual(settings.persistence.user, "dev-user")
+            self.assertEqual(
+                settings.persistence.password.get_secret_value(), "dev-password"
+            )
+
     def test_prod_profile_uses_same_host_service_ports(self):
         with patch.dict(
             os.environ,
@@ -77,7 +101,6 @@ class SettingsTest(unittest.TestCase):
                 settings.dictionaries.base_url,
                 "http://127.0.0.1:8082",
             )
-            self.assertTrue(settings.persistence.enabled)
             self.assertEqual(settings.persistence.name, "dh_agent")
 
     def test_prod_profile_addresses_and_accounts_can_be_overridden(self):

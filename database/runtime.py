@@ -49,10 +49,6 @@ class DatabaseRuntime:
         self._session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 
     @property
-    def enabled(self) -> bool:
-        return get_settings().persistence.enabled
-
-    @property
     def session_factory(self) -> async_sessionmaker[AsyncSession]:
         if self._session_factory is None:
             raise RuntimeError("database runtime has not been started")
@@ -60,9 +56,6 @@ class DatabaseRuntime:
 
     async def start(self) -> None:
         settings = get_settings().persistence
-        if not settings.enabled:
-            logger.info("application_persistence_disabled")
-            return
         if self._engine is not None:
             return
         await self._ensure_database(settings)
@@ -113,8 +106,6 @@ class DatabaseRuntime:
             await engine.dispose()
 
     async def ping(self) -> bool:
-        if not self.enabled:
-            return True
         if self._engine is None:
             return False
         try:

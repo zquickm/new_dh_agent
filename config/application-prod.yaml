@@ -3,15 +3,6 @@ server:
   port: "${DH_AGENT_PORT:8000}"
   reload: false
 
-persistence:
-  enabled: true
-  host: "${DH_AGENT_DB_HOST:127.0.0.1}"
-  port: "${DH_AGENT_DB_PORT:3306}"
-  user: "${DH_AGENT_DB_USERNAME}"
-  password: "${DH_AGENT_DB_PASSWORD}"
-  name: "${DH_AGENT_DB_NAME:dh_agent}"
-  migration_on_startup: true
-
 dictionaries:
   base_url: "http://${DH_KNOWLEDGE_HOST:127.0.0.1}:${DH_KNOWLEDGE_PORT:8082}"
 

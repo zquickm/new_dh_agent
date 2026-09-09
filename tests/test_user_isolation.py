@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from agents.events import AgentEvent
 from main import app
-from repositories.memory_conversation_repository import MemoryConversationRepository
+from tests.fakes.memory_conversation_repository import MemoryConversationRepository
 from schemas.chat import AgentRequest, FrontendContext
 from services.chat_service import ChatService, chat_service
 

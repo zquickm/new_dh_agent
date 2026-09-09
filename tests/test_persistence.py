@@ -8,9 +8,15 @@ from config.settings import PROJECT_DIR, PersistenceSettings
 from database.base import Base
 from database.models import ConversationMessageModel, ConversationModel
 from database.runtime import build_database_url
+from repositories.mysql_conversation_repository import MySQLConversationRepository
+from repositories.repository import conversation_repository
 
 
 class PersistenceSchemaTest(unittest.TestCase):
+    def test_runtime_repository_is_always_mysql(self):
+        self.assertIsInstance(conversation_repository, MySQLConversationRepository)
+        self.assertNotIn("enabled", PersistenceSettings.model_fields)
+
     def test_models_have_tenant_and_ordering_constraints(self):
         self.assertEqual(ConversationModel.__tablename__, "agent_conversation")
         self.assertEqual(
@@ -37,7 +43,6 @@ class PersistenceSchemaTest(unittest.TestCase):
 
     def test_initial_migration_compiles_as_mysql_sql(self):
         settings = PersistenceSettings(
-            enabled=True,
             host="127.0.0.1",
             port=3306,
             user="agent",
@@ -59,7 +64,6 @@ class PersistenceSchemaTest(unittest.TestCase):
     def test_database_url_escapes_credentials(self):
         url = build_database_url(
             PersistenceSettings(
-                enabled=True,
                 user="agent@internal",
                 password="p@ss/word",
                 name="dh_agent",

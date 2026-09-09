@@ -8,6 +8,7 @@ from agents.events import AgentEvent
 from main import app
 from services.chat_service import chat_service
 from services.sensitive_word_service import SensitiveWordMatcher
+from tests.fakes.memory_conversation_repository import MemoryConversationRepository
 
 
 INTERNAL_HEADER = "X-DH-Internal-Token"
@@ -66,6 +67,14 @@ class FakeAgent:
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
+        repository = MemoryConversationRepository()
+        for target in (
+            "services.conversation_service.conversation_repository",
+            "services.chat_service.conversation_repository",
+        ):
+            repository_patch = patch(target, repository)
+            repository_patch.start()
+            self.addCleanup(repository_patch.stop)
         self.previous_agent = chat_service._agent
         self.previous_matcher = chat_service._sensitive_word_matcher
         self.fake_agent = FakeAgent()
@@ -166,7 +175,11 @@ class ApiTest(unittest.TestCase):
     def test_rejects_request_without_gateway_internal_header(self):
         with patch(
             "main.dictionary_refresh_service.start", new=AsyncMock()
-        ), patch("main.dictionary_refresh_service.stop", new=AsyncMock()):
+        ), patch(
+            "main.dictionary_refresh_service.stop", new=AsyncMock()
+        ), patch(
+            "main.database_runtime.start", new=AsyncMock()
+        ), patch("main.database_runtime.close", new=AsyncMock()):
             with TestClient(app) as direct_client:
                 response = direct_client.get("/health")
 
