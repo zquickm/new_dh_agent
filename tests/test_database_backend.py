@@ -196,6 +196,57 @@ class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
                 allowed_tables,
             )
 
+    def test_validator_preserves_doris_group_concat_arguments(self):
+        validator = ReadonlySqlValidator()
+        table = "dwd_as_hydromet_observations_i_d"
+        for arguments in (
+            "DISTINCT sea_state",
+            "DISTINCT sea_state, '|'",
+            "sea_state, ''",
+            "sea_state ORDER BY sea_state DESC",
+            "DISTINCT sea_state, '|' ORDER BY sea_state DESC",
+        ):
+            with self.subTest(arguments=arguments):
+                sql = (
+                    f"SELECT JSON_OBJECT('海况', GROUP_CONCAT({arguments})) "
+                    f"AS metrics FROM {table}"
+                )
+                bounded = validator.validate(sql, 10, (table,))
+                self.assertEqual(bounded, sql + " LIMIT 11")
+                self.assertEqual(validator.validate(bounded, 10, (table,)), bounded)
+
+    def test_doris_validator_retains_readonly_checks(self):
+        validator = ReadonlySqlValidator()
+        table = "dwd_as_hydromet_observations_i_d"
+        for sql in (
+            f"DELETE FROM {table}",
+            f"SELECT * FROM {table}; SELECT 1",
+            f"SELECT * INTO OUTFILE '/tmp/result' FROM {table}",
+            f"SELECT * FROM {table} FOR UPDATE",
+            "SELECT * FROM unauthorized_table",
+            "SELECT GROUP_CONCAT((SELECT value FROM unauthorized_table), ',')",
+            "SELECT GROUP_CONCAT(SLEEP(1), ',')",
+            f"SELECT GROUP_CONCAT(sea_state SEPARATOR ',') FROM {table}",
+        ):
+            with self.subTest(sql=sql), self.assertRaises(SqlValidationError):
+                validator.validate(sql, 10, (table,))
+
+    def test_doris_validator_bounds_cte_union_and_preserves_offset(self):
+        validator = ReadonlySqlValidator()
+        table = "dwd_as_hydromet_observations_i_d"
+        sql = (
+            f"WITH observations AS (SELECT sea_state FROM {table}) "
+            "SELECT sea_state FROM observations UNION ALL "
+            "SELECT sea_state FROM observations"
+        )
+        self.assertEqual(validator.validate(sql, 10, (table,)), sql + " LIMIT 11")
+        for limit, expected in ((0, 0), (5, 5), (100, 11)):
+            with self.subTest(limit=limit):
+                self.assertEqual(
+                    validator.validate(sql + f" LIMIT 3, {limit}", 10, (table,)),
+                    sql + f" LIMIT {expected} OFFSET 3",
+                )
+
     async def test_execute_uses_doris_timeout_without_transaction_wrapper(self):
         gateway = self.gateway()
         cursor = AsyncMock()

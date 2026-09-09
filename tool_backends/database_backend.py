@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from sqlglot import exp, parse
+from sqlglot.dialects.doris import Doris
 from sqlglot.errors import ParseError
 
 
@@ -120,8 +121,20 @@ class DatabaseInformationCatalog:
             raise DatabaseToolError(f"Unable to read database information: {path.name}") from exc
 
 
+class _ReadonlyDoris(Doris):
+    class Parser(Doris.Parser):
+        # SQLGlot 30.12 misreads DISTINCT separators and reorders ORDER BY.
+        # Preserve Doris GROUP_CONCAT arguments while still inspecting its AST.
+        FUNCTIONS = {
+            **Doris.Parser.FUNCTIONS,
+            "GROUP_CONCAT": lambda args: exp.Anonymous(
+                this="GROUP_CONCAT", expressions=args,
+            ),
+        }
+
+
 class ReadonlySqlValidator:
-    """Allow one read-only SELECT query and enforce a bounded LIMIT."""
+    """Allow one read-only Doris query and enforce a bounded LIMIT."""
 
     def validate(
         self,
@@ -133,9 +146,9 @@ class ReadonlySqlValidator:
         if not text:
             raise SqlValidationError("SQL 不能为空")
         try:
-            statements = [item for item in parse(text, read="mysql") if item is not None]
+            statements = [item for item in parse(text, read=_ReadonlyDoris) if item is not None]
         except ParseError as exc:
-            raise SqlValidationError("SQL 无法解析") from exc
+            raise SqlValidationError("SQL 无法按 Doris 方言解析") from exc
         if len(statements) != 1 or not isinstance(statements[0], exp.Query):
             raise SqlValidationError("只允许执行一条只读 SELECT 或 WITH ... SELECT 查询")
         expression = statements[0]
@@ -181,7 +194,7 @@ class ReadonlySqlValidator:
                 if existing_value >= 0:
                     requested = min(requested, existing_value)
         return expression.limit(requested, copy=True).sql(
-            dialect="mysql",
+            dialect=_ReadonlyDoris,
             pretty=False,
         )
 
@@ -404,8 +417,9 @@ class DatabaseQueryBackend:
 5. 数据库查询指南是业务语义和查询组织规则的唯一依据，必须完整遵守。
 6. 只能使用 DDL 中真实存在的表和字段；DDL 未定义的关系不得猜测。
 7. 完整保留用户问题中的过滤条件和统计口径，不得自行改变查询目标。
-8. 只使用 Apache Doris 与当前 MySQL 校验器兼容的语法，禁止 FULL OUTER JOIN、
+8. 只使用 Apache Doris 与当前 Doris 校验器兼容的语法，禁止 FULL OUTER JOIN、
     INTERSECT、EXCEPT 和 QUALIFY。
+   GROUP_CONCAT 的分隔符使用逗号参数（如 GROUP_CONCAT(DISTINCT field, ',')），不用 SEPARATOR。
 9. 不必添加 LIMIT，执行器会强制限制行数。
 10. 输出前确认括号成对、CTE 和别名已定义、字段均来自 DDL，且 UNION 分支列对齐。
 """
