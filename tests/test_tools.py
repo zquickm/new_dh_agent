@@ -2,7 +2,7 @@ import json
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from agents.tools.current_server_time import TOOL_NAME, matches_current_server_time
 from agents.tools.database_query import (
@@ -201,14 +201,17 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         rag_tool = RagSearchTool(FakeRagBackend())
         database_tool = DatabaseQueryTool(FakeDatabaseBackend())
 
-        rag_result = await rag_tool.execute("  赤潮  ", 30)
+        rag_result = await rag_tool.execute("  赤潮  ", tags=["赤潮"])
         database_result = await database_tool.execute("  E2 平均盐度  ", 2000)
 
         self.assertEqual(rag_result["count"], 1)
         self.assertEqual(rag_result["chunks"][0]["source"], "文档")
         self.assertEqual(rag_result["chunks"][0]["page_index"], 1)
         self.assertEqual(rag_result["chunks"][0]["page"], 2)
-        self.assertEqual(rag_tool.backend.arguments, ("赤潮", 20, {}))
+        self.assertEqual(
+            rag_tool.backend.arguments,
+            ("赤潮", get_settings().tools.rag.top_n, {"tags": ["赤潮"]}),
+        )
         self.assertEqual(database_result["question"], "E2 平均盐度")
         self.assertEqual(
             database_result["limit"],
@@ -230,6 +233,43 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
             expand_query_synonyms("DO（溶解氧）和pH值"),
             "DO（溶解氧）和pH值",
         )
+
+    async def test_rag_schema_and_execution_use_only_query_and_tags(self):
+        executor = build_tool_executor()
+        self.addAsyncCleanup(executor.close)
+        schema = executor.get("rag_search").parameters
+        self.assertEqual(set(schema["properties"]), {"query", "tags"})
+        self.assertEqual(schema["required"], ["query"])
+        self.assertFalse(schema["additionalProperties"])
+
+        for enabled in (False, True):
+            with self.subTest(rerank_enabled=enabled):
+                settings = get_settings().tools.rag.model_copy(deep=True)
+                settings.top_n = 25
+                settings.rerank.enabled = enabled
+                settings.rerank.candidate_top_n = 60
+                with patch(
+                    "agents.tools.rag_search.get_settings",
+                    return_value=SimpleNamespace(tools=SimpleNamespace(rag=settings)),
+                ), patch("agents.tools.rag_search.RagSearchBackend") as factory:
+                    factory.return_value.search = AsyncMock(return_value=[])
+                    tool = RagSearchTool()
+                    await tool.execute("赤潮")
+                    factory.return_value.search.assert_awaited_once_with(
+                        "赤潮", 25, {"tags": []}
+                    )
+                    arguments = factory.call_args.kwargs
+                    self.assertEqual(arguments["candidate_top_n"], 60 if enabled else 25)
+                    self.assertEqual(arguments["knowledge_ids"], tuple(settings.knowledge_ids))
+                    self.assertEqual(arguments["dept_ids"], tuple(settings.dept_ids))
+
+        tool = RagSearchTool()
+        for arguments in ({"top_k": 1}, {"filters": {"knowledge_ids": ["other"]}}):
+            with self.subTest(arguments=arguments), self.assertRaises(TypeError):
+                await tool.execute("赤潮", **arguments)
+        for tags in ("赤潮", [1], ["赤潮"] * 51):
+            with self.subTest(tags=tags), self.assertRaises(ValueError):
+                await tool.execute("赤潮", tags=tags)
 
     def test_rag_parser_preserves_page_index_and_line(self):
         chunks = RagSearchBackend._parse_recall(

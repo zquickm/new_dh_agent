@@ -310,7 +310,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 )
             },
             {
-                "load_skill": "技能加载",
+                "load_skill": "能力加载",
                 "CurrentServerTime": "当前服务器时间",
                 "rag_search": "东溟知识库检索",
                 "database_query": "数据库查询",
