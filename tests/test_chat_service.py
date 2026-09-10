@@ -75,6 +75,35 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_body_emoji_filtered_from_tokens_done_and_history(self):
+        class EmojiAgent:
+            model_name = "fake-model"
+
+            async def run_stream(self, question, history, run_id="-"):
+                for char in "结果😀👩🏽‍💻🇨🇳1️⃣：**水温**23.5℃，共3":
+                    yield AgentEvent(type="answer_delta", content=char)
+
+        conversation = await conversation_repository.create(
+            "正文过滤测试", user_id=TEST_USER_ID
+        )
+        service = ChatService()
+        service._agent = EmojiAgent()
+        self.addAsyncCleanup(service.close)
+        events = [
+            event async for event in service.stream_chat(
+                AgentRequest(question="查询", conversation_id=conversation.id),
+                user_id=TEST_USER_ID,
+            )
+        ]
+        expected = "结果：**水温**23.5℃，共3"
+        tokens = [event["data"]["content"] for event in events if event["event"] == "token"]
+        self.assertTrue(all(tokens))
+        self.assertEqual("".join(tokens), expected)
+        self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(events[-1]["data"]["answer"], expected)
+        persisted = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
+        self.assertEqual(persisted.messages[-1].content, expected)
+
     def setUp(self):
         repository_patch = patch(
             "services.chat_service.conversation_repository", conversation_repository
