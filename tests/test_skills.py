@@ -125,7 +125,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
             }
             self.assertIn("load_skill", tool_names)
             self.assertNotIn("当前可用工具：", system_prompt)
-            self.assertNotIn("按名称加载一个可用 Skill", system_prompt)
+            self.assertNotIn("按名称加载一个可用能力", system_prompt)
             self.assertIn(
                 "- 观测站分析: Analyze operational observation stations.",
                 system_prompt,
