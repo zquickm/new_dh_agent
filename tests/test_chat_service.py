@@ -306,6 +306,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                     "database_query",
                     "observation_service",
                     "map_action",
+                    "dm_duanmian_analysis",
                 )
             },
             {
@@ -315,6 +316,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 "database_query": "数据库查询",
                 "observation_service": "观测分析",
                 "map_action": "地图操作",
+                "dm_duanmian_analysis": "断面专题分析",
             },
         )
 

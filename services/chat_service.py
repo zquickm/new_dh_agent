@@ -32,6 +32,7 @@ _TOOL_DISPLAY_NAMES = {
     "database_query": "数据库查询",
     "observation_service": "观测分析",
     "map_action": "地图操作",
+    "dm_duanmian_analysis": "断面专题分析",
 }
 
 

@@ -274,6 +274,8 @@ class AgentLoop:
                             "operation 和参数；如果现有操作无法完成问题，应明确说明能力不足，"
                             "不得编造新的 operation。"
                         )
+                    elif name == "dm_duanmian_analysis" and isinstance(exc, ValueError):
+                        observation = f"断面专题分析参数无效：{exc}"
                     elif name == "observation_service":
                         detail = str(exc).strip() or type(exc).__name__
                         observation = f"观测服务调用失败：{detail}"

@@ -288,6 +288,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                 "database_query",
                 "observation_service",
                 "map_action",
+                "dm_duanmian_analysis",
             },
         )
         await executor.close()

@@ -101,14 +101,15 @@ NEW_DH_LLM__API_KEY=your-key
 
 流式接口为 `POST /agent/chat/stream`。生产环境的会话保存在 MySQL 中。
 
-## RAG、数据库、观测与地图工具
+## RAG、数据库、观测、地图与专题分析工具
 
-Agent 已注册四个业务工具（括号内为协议调用标识）：
+Agent 已注册五个业务工具（括号内为协议调用标识）：
 
 - 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
 - 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
 - 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
+- 断面专题分析（`dm_duanmian_analysis`）：发送断面专题分析出图参数，由前端打开独立浮层并查询出图。
 
 框架还注册了技能加载（`load_skill`）和当前服务器时间（`CurrentServerTime`）两个工具。
 
@@ -230,6 +231,38 @@ data: {
 前端应在同一 `batch_id` 内按 `seq` 串行执行，并用 `action_id` 去重。地图动作
 直接复用 `/agent/chat/stream`，当前实现不会调用 `POST /api/map_action`。完整协议
 见 `地图操作SSE事件契约.txt`。
+
+### 断面专题分析动作
+
+`dm_duanmian_analysis` 对应前端文档中的同名 operationId，复用现有
+`ToolOutput.client_events → AgentLoop → ChatService → SSE` 链路。
+该动作是虚拟通道，当前实现不请求 `POST /api/duanmian_analysis`，无需新增空间服务密钥或数据库表。
+参数和动作通过现有工具调用日志记录。
+
+| 参数 | 规则 |
+| --- | --- |
+| `analysis` | 必填：`depth-curve` 沿水深曲线、`temp-section` 化学要素剖面、`ts-scatter` T-S 点聚图、`nutrient` 营养盐结构、`do-profile` 溶解氧垂向分布、`surface` 表层沿程变化 |
+| `section` | 可选：`E1` / `E2` / `E3`；`ts-scatter` 固定合并全部断面，传入的断面会被移除 |
+| `voyage` | 可选：有效的 `yyyy-MM` 或 `yyyy-MM-dd`；省略时不自动查询 |
+| `elementType` | 可选：`chemistry` / `hydromet`；`temp-section` 始终设为 `chemistry` |
+| `element` | 可选：物理列名或中文短名，例如 `temperature_c` / `温度`，不做字段映射 |
+
+前端文档未定义 SSE 事件名和 JSON 外层；本次接入约定复用 `event: map_action`，
+以 operationId `dm_duanmian_analysis` 作为 `action_type`，`payload` 保持文档参数名（包括 `elementType`）。
+前端需增加该动作分支，按 `payload` 打开断面专题分析浮层；这是新增的联调约定，需前端适配。
+
+```text
+event: map_action
+data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":"<会话ID>","run_id":"<运行ID>","batch_id":"call-analysis","action_id":"call-analysis-1","seq":1,"action_type":"dm_duanmian_analysis","payload":{"analysis":"temp-section","section":"E1","voyage":"2025-11","elementType":"chemistry","element":"温度"}}}
+```
+
+仍按 `action_id` 去重、同一 `batch_id` 内按 `seq` 顺序处理。参数无效时不发送动作。
+工具返回 `success: true, message: "action received"` 仅表示指令已接收，不是前端出图成功回执。
+用户只要求统计或文字分析时仍走 `database_query`；仅要求出图时无需先查询数据库。
+
+后续新增观测、海域等分析时，按现有方式增加独立工具模块，在
+`agents/tools/registry.py` 注册，并在 `services/chat_service.py` 添加中文展示名。
+新动作继续使用各自 operationId 和 payload，前端增加对应处理分支即可；不需要修改执行器或 SSE 编码器。
 
 ### 地图选区上下文
 

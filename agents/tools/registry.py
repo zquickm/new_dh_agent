@@ -16,6 +16,12 @@ from agents.tools.database_query import (
     DatabaseQueryTool,
     build_tool_parameters as build_database_tool_parameters,
 )
+from agents.tools.duanmian_analysis import (
+    TOOL_DESCRIPTION as DUANMIAN_TOOL_DESCRIPTION,
+    TOOL_NAME as DUANMIAN_TOOL_NAME,
+    TOOL_PARAMETERS as DUANMIAN_TOOL_PARAMETERS,
+    execute_duanmian_analysis,
+)
 from agents.tools.executor import ToolExecutor
 from agents.tools.map_action import (
     TOOL_DESCRIPTION as MAP_ACTION_TOOL_DESCRIPTION,
@@ -92,6 +98,12 @@ def build_tool_executor(
         MAP_ACTION_TOOL_DESCRIPTION,
         execute_map_action,
         MAP_ACTION_TOOL_PARAMETERS,
+    )
+    executor.register(
+        DUANMIAN_TOOL_NAME,
+        DUANMIAN_TOOL_DESCRIPTION,
+        execute_duanmian_analysis,
+        DUANMIAN_TOOL_PARAMETERS,
     )
     executor.register_closer(rag_tool.close)
     executor.register_closer(database_tool.close)
