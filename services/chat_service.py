@@ -14,9 +14,7 @@ from config.settings import get_settings
 from repositories.repository import conversation_repository
 from schemas.chat import AgentRequest, ChatMessage
 from services.citation_service import CitationService
-from services.request_context_adapter import enrich_question_with_frontend_context
 from services.sensitive_word_service import SensitiveWordMatcher
-from services.synonym_service import expand_query_synonyms
 
 
 logger = logging.getLogger(__name__)
@@ -234,11 +232,6 @@ class ChatService:
                 active_context = await conversation_repository.get_map_context(
                     conversation_id, user_id=user_id
                 )
-            expanded_question = expand_query_synonyms(request.question)
-            agent_question = enrich_question_with_frontend_context(
-                expanded_question,
-                active_context,
-            )
             # The authenticated conversation is the sole source of history.
             # Ignore client history (including stale history after account switches).
             history = [
@@ -247,17 +240,17 @@ class ChatService:
             ]
             logger.info(
                 "chat_started run_id=%s conversation_id=%s question=%r "
-                "agent_question=%r history=%r",
+                "history=%r",
                 run_id,
                 conversation_id,
                 request.question,
-                agent_question,
                 history,
             )
             async for event in self.agent.run_stream(
-                agent_question,
+                request.question,
                 history,
                 run_id=run_id,
+                frontend_context=active_context,
             ):
                 sequence += 1
                 if event.type == "tool_started":
