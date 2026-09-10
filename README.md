@@ -58,6 +58,10 @@ Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
 - `GET /conversations/{id}`：仅允许查看自己的会话。
 - `GET /conversations/{id}/runs/{run_id}`：查询本人会话中一轮 Agent 运行的
   状态、模型、耗时和失败原因。
+- `GET /conversations/{id}/runs/{run_id}/tool-calls`：按执行顺序查询该轮工具
+  调用的状态、耗时、脱敏参数、结果摘要和失败原因。
+- `GET /conversations/{id}/runs/{run_id}/tool-calls/{tool_call_id}`：查询单次工具
+  调用审计详情。
 - `POST /agent/chat/stream`：只允许续写自己的会话；未传 `conversation_id` 时，
   自动为当前用户创建会话，通过首个 `conversation` SSE 事件返回 ID。
 - 历史消息、引用来源、消息写入和当前地图选区均按用户与会话 ID 隔离；选区只临时注入本轮模型输入，不写入消息正文。
@@ -78,11 +82,16 @@ Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
 或内部 Token。生产环境不可使用默认内部 Token。
 
 所有运行环境的会话都使用独立的 `dh_agent` MySQL 数据库持久化，启动时由 Alembic
-自动执行尚未应用的版本化迁移；会话、消息、运行记录、引用来源和地图上下文均可跨重启
-及多实例共享。用户消息、助手占位消息和运行记录在 Agent 执行前通过同一事务写入；运行
+自动执行尚未应用的版本化迁移；会话、消息、运行记录、工具调用审计、引用来源和地图
+上下文均可跨重启及多实例共享。用户消息、助手占位消息和运行记录在 Agent 执行前通过
+同一事务写入；运行
 完成或失败时，助手消息和运行终态也通过同一事务更新。运行心跳超时后会自动将遗留的
 `running/streaming` 状态恢复为 `interrupted/failed`。运行时不存在内存仓储回退：MySQL
 配置错误或数据库不可用时，应用会直接启动失败。
+工具调用在实际执行前先提交 `running` 审计记录；执行成功、失败或取消后立即写入终态。
+参数和错误信息会脱敏并限长，数据库结果行、RAG 正文和观测值不写入审计表，仅保留摘要、
+原始结果字节数与 SHA-256。工具失败不会自动将整轮运行标记为失败，Agent 仍可基于失败信息
+继续生成降级回答。
 单元测试使用 `tests/fakes` 下的测试夹具，不会进入生产运行路径。
 
 当前大模型服务不需要鉴权时，`NEW_DH_LLM__API_KEY` 可以留空或省略；如果服务需要鉴权，再配置真实 Key：
@@ -106,6 +115,11 @@ NEW_DH_LLM__API_KEY=your-key
 Agent 已注册五个业务工具（括号内为协议调用标识）：
 
 - 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
+
+  工具仅接受必填的 `query` 和可选的 `tags`（标签名称数组）。标签用于优先检索，
+  未命中时平台会在配置的授权范围内扩大检索。知识库、部门、检索阈值和重排等
+  参数统一由 `tools.rag` 配置决定。`top_n` 控制最终返回片段上限；开启重排时，
+  先按 `rerank.candidate_top_n` 召回候选再重排，关闭时按 `top_n` 召回。
 - 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
 - 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。

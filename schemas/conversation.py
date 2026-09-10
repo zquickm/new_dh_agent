@@ -58,3 +58,29 @@ class ConversationRun(BaseModel):
     error_message: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class ToolCallAudit(BaseModel):
+    id: str
+    run_id: str
+    tool_call_id: str
+    round_number: int
+    sequence_no: int
+    tool_name: str
+    status: Literal["running", "succeeded", "failed", "interrupted"]
+    arguments: dict = Field(default_factory=dict)
+    arguments_truncated: bool = False
+    result_summary: Optional[str] = None
+    result_size_bytes: Optional[int] = None
+    result_sha256: Optional[str] = None
+    result_truncated: bool = False
+    started_at: str
+    finished_at: Optional[str] = None
+    duration_ms: Optional[int] = None
+    error_code: Optional[str] = None
+    error_type: Optional[str] = None
+    error_message: Optional[str] = None
+    failure_stage: Optional[str] = None
+    retryable: bool = False
+    created_at: str
+    updated_at: str

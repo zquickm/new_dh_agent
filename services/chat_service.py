@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 from collections.abc import AsyncIterator
@@ -14,7 +15,9 @@ from config.settings import get_settings
 from repositories.repository import conversation_repository
 from schemas.chat import AgentRequest, ChatMessage, FrontendContext
 from services.citation_service import CitationService
+from services.emoji_filter import EmojiStreamFilter
 from services.sensitive_word_service import SensitiveWordMatcher
+from services.tool_audit_service import PersistentToolAuditRecorder
 
 
 logger = logging.getLogger(__name__)
@@ -209,6 +212,7 @@ class ChatService:
         event_queue: asyncio.Queue,
     ) -> None:
         answer_parts: list[str] = []
+        emoji_filter = EmojiStreamFilter()
         registered_sources: list[dict] = []
         retrieval_counts: dict[str, int] = {}
         sequence = 0
@@ -242,11 +246,23 @@ class ChatService:
                 request.question,
                 history,
             )
+            run_stream_parameters = inspect.signature(
+                self.agent.run_stream
+            ).parameters
+            run_stream_kwargs = {}
+            if "run_id" in run_stream_parameters:
+                run_stream_kwargs["run_id"] = run_id
+            if "frontend_context" in run_stream_parameters:
+                run_stream_kwargs["frontend_context"] = active_context
+            if "audit_recorder" in run_stream_parameters:
+                run_stream_kwargs["audit_recorder"] = PersistentToolAuditRecorder(
+                    run_id,
+                    repository=conversation_repository,
+                )
             async for event in self.agent.run_stream(
                 request.question,
                 history,
-                run_id=run_id,
-                frontend_context=active_context,
+                **run_stream_kwargs,
             ):
                 sequence += 1
                 if event.type == "tool_started":
@@ -332,9 +348,12 @@ class ChatService:
                             ),
                         })
                 elif event.type == "answer_delta":
-                    answer_parts.append(event.content)
+                    content = emoji_filter.feed(event.content)
+                    if not content:
+                        continue
+                    answer_parts.append(content)
                     await event_queue.put(
-                        {"event": "token", "data": {"content": event.content}}
+                        {"event": "token", "data": {"content": content}}
                     )
                     draft = "".join(answer_parts)
                     now = perf_counter()
@@ -351,6 +370,10 @@ class ChatService:
                         )
                         last_persisted_length = len(draft)
                         last_persisted_at = now
+            tail = emoji_filter.feed("", final=True)
+            if tail:
+                answer_parts.append(tail)
+                await event_queue.put({"event": "token", "data": {"content": tail}})
             answer = "".join(answer_parts)
             if not answer.strip():
                 raise RuntimeError("AgentLoop 未生成有效回答")

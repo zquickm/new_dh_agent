@@ -420,7 +420,7 @@ class DatabaseQueryBackend:
 8. 只使用 Apache Doris 与当前 Doris 校验器兼容的语法，禁止 FULL OUTER JOIN、
     INTERSECT、EXCEPT 和 QUALIFY。
    GROUP_CONCAT 的分隔符使用逗号参数（如 GROUP_CONCAT(DISTINCT field, ',')），不用 SEPARATOR。
-9. 不必添加 LIMIT，执行器会强制限制行数。
+9. 数据每次最多返回 {max_rows} 行，超出部分会被截断。所有查询返回不能超出这个行数。
 10. 输出前确认括号成对、CTE 和别名已定义、字段均来自 DDL，且 UNION 分支列对齐。
 """
 
@@ -534,6 +534,7 @@ class DatabaseQueryBackend:
             try:
                 sql = await self._generate_sql(
                     question=question,
+                    limit=limit,
                     guide=guide,
                     schemas=schemas,
                     previous_sql=previous_sql,
@@ -557,6 +558,7 @@ class DatabaseQueryBackend:
         self,
         *,
         question: str,
+        limit: int,
         guide: str,
         schemas: str,
         previous_sql: Optional[str],
@@ -579,7 +581,7 @@ class DatabaseQueryBackend:
             f"{retry_context}"
         )
         messages = [
-            {"role": "system", "content": self._SYSTEM_PROMPT},
+            {"role": "system", "content": self._SYSTEM_PROMPT.format(max_rows=limit)},
             {"role": "user", "content": user_prompt},
         ]
         try:

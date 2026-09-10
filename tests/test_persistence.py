@@ -11,6 +11,7 @@ from database.models import (
     ConversationMessageModel,
     ConversationModel,
     ConversationRunModel,
+    ToolCallAuditModel,
 )
 from database.runtime import build_database_url
 from repositories.mysql_conversation_repository import MySQLConversationRepository
@@ -30,6 +31,7 @@ class PersistenceSchemaTest(unittest.TestCase):
         conversation = Base.metadata.tables["agent_conversation"]
         message = Base.metadata.tables["agent_conversation_message"]
         run = Base.metadata.tables["agent_conversation_run"]
+        tool_call = Base.metadata.tables["agent_tool_call_audit"]
 
         self.assertIn("user_id", conversation.c)
         self.assertIn("map_context", conversation.c)
@@ -44,6 +46,16 @@ class PersistenceSchemaTest(unittest.TestCase):
             any(
                 constraint.name == "fk_agent_message_conversation_owner"
                 for constraint in message.foreign_key_constraints
+            )
+        )
+        self.assertEqual(ToolCallAuditModel.__tablename__, "agent_tool_call_audit")
+        self.assertIn("arguments", tool_call.c)
+        self.assertIn("result_sha256", tool_call.c)
+        self.assertIn("failure_stage", tool_call.c)
+        self.assertTrue(
+            any(
+                constraint.name == "fk_agent_tool_call_run"
+                for constraint in tool_call.foreign_key_constraints
             )
         )
         self.assertEqual(ConversationRunModel.__tablename__, "agent_conversation_run")
@@ -80,6 +92,7 @@ class PersistenceSchemaTest(unittest.TestCase):
         self.assertIn("ADD INDEX `ix_agent_message_run`", sql)
         self.assertIn("CREATE TABLE IF NOT EXISTS `agent_conversation_run`", sql)
         self.assertIn("INSERT INTO `agent_conversation_run`", sql)
+        self.assertIn("CREATE TABLE IF NOT EXISTS `agent_tool_call_audit`", sql)
         self.assertIn("alembic_version", sql)
 
     def test_stream_state_migration_resumes_after_partial_mysql_ddl(self):

@@ -23,53 +23,18 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "不得为空。"
             ),
         },
-        "top_k": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 20,
-            "default": 20,
-            "description": (
-                "最终返回给模型的相关文档片段数量上限，范围 1 到 20；省略时默认 20。"
-            ),
-        },
-        "filters": {
-            "type": "object",
-            "description": (
-                "可选的知识库检索范围过滤条件；省略时使用服务端配置的授权范围。"
-            ),
-            "properties": {
-                "knowledge_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "description": "一个服务端已授权的知识库 ID。",
-                    },
-                    "description": (
-                        "限定检索的知识库 ID 列表，只能使用服务端已授权的 ID；"
-                        "省略或传空数组时使用全部已配置知识库。"
-                    ),
-                },
-                "dept_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "description": "一个服务端已授权的部门 ID。",
-                    },
-                    "description": (
-                        "限定检索的部门 ID 列表，只能使用服务端已授权的 ID；"
-                        "省略或传空数组时使用全部已配置部门。"
-                    ),
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "description": "一个用于缩小检索范围的文档标签。",
-                    },
-                    "description": "可选的文档标签列表，仅返回符合标签条件的内容。",
-                },
+        "tags": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "description": "一个用于优先检索的文档标签名称。",
             },
-            "additionalProperties": False,
+            "maxItems": 50,
+            "description": (
+                "可选的文档标签名称列表，优先检索指定标签；"
+                "未检索到结果时，平台会在配置的授权范围内扩大检索。"
+                "省略或传空数组时不指定优先标签。"
+            ),
         },
     },
     "required": ["query"],
@@ -121,15 +86,21 @@ class RagSearchTool:
     async def execute(
         self,
         query: str,
-        top_k: int = 20,
-        filters: Optional[dict[str, Any]] = None,
+        tags: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         query = query.strip()
         if not query:
             raise ValueError("query 不能为空")
+        if tags is not None and (
+            not isinstance(tags, list)
+            or len(tags) > 50
+            or any(not isinstance(tag, str) for tag in tags)
+        ):
+            raise ValueError("tags 必须是不超过 50 项的字符串数组")
         query = expand_query_synonyms(query)
-        top_k = min(max(int(top_k), 1), 20)
-        chunks = await self.backend.search(query, top_k, filters or {})
+        chunks = await self.backend.search(
+            query, get_settings().tools.rag.top_n, {"tags": tags or []}
+        )
         return {
             "query": query,
             "count": len(chunks),

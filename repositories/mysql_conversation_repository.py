@@ -10,6 +10,7 @@ from database.models import (
     ConversationMessageModel,
     ConversationModel,
     ConversationRunModel,
+    ToolCallAuditModel,
 )
 from database.runtime import DatabaseRuntime
 from schemas.chat import FrontendContext
@@ -18,6 +19,7 @@ from schemas.conversation import (
     ConversationMessage,
     ConversationRun,
     ConversationSummary,
+    ToolCallAudit,
 )
 
 
@@ -80,6 +82,34 @@ def _run_schema(item: ConversationRunModel) -> ConversationRun:
         error_code=item.error_code,
         error_type=item.error_type,
         error_message=item.error_message,
+        created_at=_iso(item.created_at),
+        updated_at=_iso(item.updated_at),
+    )
+
+
+def _tool_call_schema(item: ToolCallAuditModel) -> ToolCallAudit:
+    return ToolCallAudit(
+        id=item.id,
+        run_id=item.run_id,
+        tool_call_id=item.tool_call_id,
+        round_number=item.round_number,
+        sequence_no=item.sequence_no,
+        tool_name=item.tool_name,
+        status=item.status,
+        arguments=dict(item.arguments or {}),
+        arguments_truncated=item.arguments_truncated,
+        result_summary=item.result_summary,
+        result_size_bytes=item.result_size_bytes,
+        result_sha256=item.result_sha256,
+        result_truncated=item.result_truncated,
+        started_at=_iso(item.started_at),
+        finished_at=_optional_iso(item.finished_at),
+        duration_ms=item.duration_ms,
+        error_code=item.error_code,
+        error_type=item.error_type,
+        error_message=item.error_message,
+        failure_stage=item.failure_stage,
+        retryable=item.retryable,
         created_at=_iso(item.created_at),
         updated_at=_iso(item.updated_at),
     )
@@ -171,6 +201,166 @@ class MySQLConversationRepository:
                 )
             ).scalar_one_or_none()
             return _run_schema(item) if item is not None else None
+
+    async def list_tool_calls(
+        self,
+        conversation_id: str,
+        run_id: str,
+        *,
+        user_id: str,
+        limit: int = 100,
+    ) -> list[ToolCallAudit]:
+        async with self._runtime.session_factory() as session:
+            items = (
+                await session.execute(
+                    select(ToolCallAuditModel)
+                    .join(
+                        ConversationRunModel,
+                        ConversationRunModel.id == ToolCallAuditModel.run_id,
+                    )
+                    .where(
+                        ToolCallAuditModel.run_id == run_id,
+                        ConversationRunModel.conversation_id == conversation_id,
+                        ConversationRunModel.user_id == int(user_id),
+                    )
+                    .order_by(ToolCallAuditModel.sequence_no)
+                    .limit(limit)
+                )
+            ).scalars().all()
+            return [_tool_call_schema(item) for item in items]
+
+    async def get_tool_call(
+        self,
+        conversation_id: str,
+        run_id: str,
+        tool_call_id: str,
+        *,
+        user_id: str,
+    ) -> Optional[ToolCallAudit]:
+        async with self._runtime.session_factory() as session:
+            item = (
+                await session.execute(
+                    select(ToolCallAuditModel)
+                    .join(
+                        ConversationRunModel,
+                        ConversationRunModel.id == ToolCallAuditModel.run_id,
+                    )
+                    .where(
+                        ToolCallAuditModel.run_id == run_id,
+                        ToolCallAuditModel.tool_call_id == tool_call_id,
+                        ConversationRunModel.conversation_id == conversation_id,
+                        ConversationRunModel.user_id == int(user_id),
+                    )
+                )
+            ).scalar_one_or_none()
+            return _tool_call_schema(item) if item is not None else None
+
+    async def begin_tool_call(
+        self,
+        run_id: str,
+        *,
+        tool_call_id: str,
+        round_number: int,
+        sequence_no: int,
+        tool_name: str,
+        arguments: dict,
+        arguments_truncated: bool,
+    ) -> ToolCallAudit:
+        now = _now()
+        async with self._runtime.session_factory() as session:
+            async with session.begin():
+                run = (
+                    await session.execute(
+                        select(ConversationRunModel)
+                        .where(
+                            ConversationRunModel.id == run_id,
+                            ConversationRunModel.status == "running",
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if run is None:
+                    raise KeyError(run_id)
+                item = ToolCallAuditModel(
+                    id=uuid4().hex,
+                    run_id=run_id,
+                    tool_call_id=tool_call_id,
+                    round_number=round_number,
+                    sequence_no=sequence_no,
+                    tool_name=tool_name,
+                    status="running",
+                    arguments=arguments,
+                    arguments_truncated=arguments_truncated,
+                    result_summary=None,
+                    result_size_bytes=None,
+                    result_sha256=None,
+                    result_truncated=False,
+                    started_at=now,
+                    finished_at=None,
+                    duration_ms=None,
+                    error_code=None,
+                    error_type=None,
+                    error_message=None,
+                    failure_stage=None,
+                    retryable=False,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(item)
+        return _tool_call_schema(item)
+
+    async def finish_tool_call(
+        self,
+        run_id: str,
+        *,
+        tool_call_id: str,
+        status: str,
+        result_summary: str,
+        result_size_bytes: int,
+        result_sha256: str,
+        result_truncated: bool,
+        duration_ms: int,
+        error_code: Optional[str] = None,
+        error_type: Optional[str] = None,
+        error_message: Optional[str] = None,
+        failure_stage: Optional[str] = None,
+        retryable: bool = False,
+    ) -> ToolCallAudit:
+        if status not in {"succeeded", "failed", "interrupted"}:
+            raise ValueError(f"invalid tool call status: {status}")
+        now = _now()
+        async with self._runtime.session_factory() as session:
+            async with session.begin():
+                item = (
+                    await session.execute(
+                        select(ToolCallAuditModel)
+                        .where(
+                            ToolCallAuditModel.run_id == run_id,
+                            ToolCallAuditModel.tool_call_id == tool_call_id,
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if item is None:
+                    raise KeyError(tool_call_id)
+                if item.status != "running":
+                    raise RuntimeError(
+                        f"tool call already finalized: {tool_call_id}"
+                    )
+                item.status = status
+                item.result_summary = result_summary
+                item.result_size_bytes = result_size_bytes
+                item.result_sha256 = result_sha256
+                item.result_truncated = result_truncated
+                item.finished_at = now
+                item.duration_ms = max(0, duration_ms)
+                item.error_code = error_code
+                item.error_type = error_type
+                item.error_message = error_message
+                item.failure_stage = failure_stage
+                item.retryable = retryable
+                item.updated_at = now
+        return _tool_call_schema(item)
 
     async def get_map_context(
         self, conversation_id: str, *, user_id: str
@@ -411,6 +601,16 @@ class MySQLConversationRepository:
                         if effective_run_status != "running":
                             run.finished_at = now
                             run.duration_ms = _duration_ms(run.started_at, now)
+                            await self._interrupt_running_tool_calls(
+                                session,
+                                run.id,
+                                now,
+                                error_type=error_type or "RunFinalized",
+                                error_message=(
+                                    error_message
+                                    or "运行结束时工具调用仍未完成"
+                                ),
+                            )
                 conversation = (
                     await session.execute(
                         select(ConversationModel)
@@ -477,6 +677,13 @@ class MySQLConversationRepository:
                     run.error_type = "StaleRunRecovery"
                     run.error_message = "服务中断导致运行心跳超时"
                     run.updated_at = now
+                    await self._interrupt_running_tool_calls(
+                        session,
+                        run.id,
+                        now,
+                        error_type="StaleRunRecovery",
+                        error_message="服务中断导致工具调用未完成",
+                    )
                     message = (
                         await session.execute(
                             select(ConversationMessageModel)
@@ -510,3 +717,33 @@ class MySQLConversationRepository:
                         conversation.version += 1
                     recovered += 1
         return recovered
+
+    @staticmethod
+    async def _interrupt_running_tool_calls(
+        session,
+        run_id: str,
+        now: datetime,
+        *,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        items = (
+            await session.execute(
+                select(ToolCallAuditModel)
+                .where(
+                    ToolCallAuditModel.run_id == run_id,
+                    ToolCallAuditModel.status == "running",
+                )
+                .with_for_update()
+            )
+        ).scalars().all()
+        for item in items:
+            item.status = "interrupted"
+            item.finished_at = now
+            item.duration_ms = _duration_ms(item.started_at, now)
+            item.error_code = "AGENT_INTERRUPTED"
+            item.error_type = error_type
+            item.error_message = error_message
+            item.failure_stage = "execution"
+            item.retryable = True
+            item.updated_at = now

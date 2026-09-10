@@ -11,6 +11,7 @@ from schemas.conversation import (
     ConversationMessage,
     ConversationRun,
     ConversationSummary,
+    ToolCallAudit,
 )
 
 
@@ -25,6 +26,7 @@ class MemoryConversationRepository:
         self._items: dict[tuple[str, str], ConversationDetail] = {}
         self._map_contexts: dict[tuple[str, str], FrontendContext] = {}
         self._runs: dict[tuple[str, str], ConversationRun] = {}
+        self._tool_calls: dict[tuple[str, str], ToolCallAudit] = {}
         self._lock = asyncio.Lock()
 
     async def create(self, title: str, *, user_id: str) -> ConversationDetail:
@@ -63,6 +65,132 @@ class MemoryConversationRepository:
             if run is None or run.conversation_id != conversation_id:
                 return None
             return run.model_copy(deep=True)
+
+    async def list_tool_calls(
+        self,
+        conversation_id: str,
+        run_id: str,
+        *,
+        user_id: str,
+        limit: int = 100,
+    ) -> list[ToolCallAudit]:
+        async with self._lock:
+            run = self._runs.get((user_id, run_id))
+            if run is None or run.conversation_id != conversation_id:
+                return []
+            items = sorted(
+                (
+                    item
+                    for (stored_run_id, _), item in self._tool_calls.items()
+                    if stored_run_id == run_id
+                ),
+                key=lambda item: item.sequence_no,
+            )[:limit]
+            return [item.model_copy(deep=True) for item in items]
+
+    async def get_tool_call(
+        self,
+        conversation_id: str,
+        run_id: str,
+        tool_call_id: str,
+        *,
+        user_id: str,
+    ) -> Optional[ToolCallAudit]:
+        async with self._lock:
+            run = self._runs.get((user_id, run_id))
+            if run is None or run.conversation_id != conversation_id:
+                return None
+            item = self._tool_calls.get((run_id, tool_call_id))
+            return item.model_copy(deep=True) if item is not None else None
+
+    async def begin_tool_call(
+        self,
+        run_id: str,
+        *,
+        tool_call_id: str,
+        round_number: int,
+        sequence_no: int,
+        tool_name: str,
+        arguments: dict,
+        arguments_truncated: bool,
+    ) -> ToolCallAudit:
+        now = _now()
+        async with self._lock:
+            run = next(
+                (
+                    item
+                    for (_, stored_run_id), item in self._runs.items()
+                    if stored_run_id == run_id and item.status == "running"
+                ),
+                None,
+            )
+            if run is None:
+                raise KeyError(run_id)
+            key = (run_id, tool_call_id)
+            if key in self._tool_calls:
+                raise RuntimeError(f"duplicate tool call: {tool_call_id}")
+            item = ToolCallAudit(
+                id=uuid4().hex,
+                run_id=run_id,
+                tool_call_id=tool_call_id,
+                round_number=round_number,
+                sequence_no=sequence_no,
+                tool_name=tool_name,
+                status="running",
+                arguments=arguments,
+                arguments_truncated=arguments_truncated,
+                started_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            self._tool_calls[key] = item
+            return item.model_copy(deep=True)
+
+    async def finish_tool_call(
+        self,
+        run_id: str,
+        *,
+        tool_call_id: str,
+        status: str,
+        result_summary: str,
+        result_size_bytes: int,
+        result_sha256: str,
+        result_truncated: bool,
+        duration_ms: int,
+        error_code: Optional[str] = None,
+        error_type: Optional[str] = None,
+        error_message: Optional[str] = None,
+        failure_stage: Optional[str] = None,
+        retryable: bool = False,
+    ) -> ToolCallAudit:
+        now = _now()
+        async with self._lock:
+            key = (run_id, tool_call_id)
+            item = self._tool_calls.get(key)
+            if item is None:
+                raise KeyError(tool_call_id)
+            if item.status != "running":
+                raise RuntimeError(f"tool call already finalized: {tool_call_id}")
+            updated = item.model_copy(
+                update={
+                    "status": status,
+                    "result_summary": result_summary,
+                    "result_size_bytes": result_size_bytes,
+                    "result_sha256": result_sha256,
+                    "result_truncated": result_truncated,
+                    "finished_at": now,
+                    "duration_ms": max(0, duration_ms),
+                    "error_code": error_code,
+                    "error_type": error_type,
+                    "error_message": error_message,
+                    "failure_stage": failure_stage,
+                    "retryable": retryable,
+                    "updated_at": now,
+                },
+                deep=True,
+            )
+            self._tool_calls[key] = updated
+            return updated.model_copy(deep=True)
 
     async def get_map_context(
         self,
@@ -257,6 +385,16 @@ class MemoryConversationRepository:
                                     },
                                     deep=True,
                                 )
+                                if effective_status != "running":
+                                    self._interrupt_tool_calls(
+                                        message.run_id,
+                                        now,
+                                        error_type=error_type or "RunFinalized",
+                                        error_message=(
+                                            error_message
+                                            or "运行结束时工具调用仍未完成"
+                                        ),
+                                    )
                         return updated.model_copy(deep=True)
         raise KeyError(message_id)
 
@@ -303,6 +441,12 @@ class MemoryConversationRepository:
                     },
                     deep=True,
                 )
+                self._interrupt_tool_calls(
+                    run.id,
+                    now,
+                    error_type="StaleRunRecovery",
+                    error_message="服务中断导致工具调用未完成",
+                )
                 item = self._items.get((key[0], run.conversation_id))
                 if item is not None:
                     for index, message in enumerate(item.messages):
@@ -323,6 +467,36 @@ class MemoryConversationRepository:
                     item.updated_at = now
                 recovered += 1
         return recovered
+
+    def _interrupt_tool_calls(
+        self,
+        run_id: str,
+        now: str,
+        *,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        finished = datetime.fromisoformat(now)
+        for key, item in list(self._tool_calls.items()):
+            if item.run_id != run_id or item.status != "running":
+                continue
+            started = datetime.fromisoformat(item.started_at)
+            self._tool_calls[key] = item.model_copy(
+                update={
+                    "status": "interrupted",
+                    "finished_at": now,
+                    "duration_ms": max(
+                        0, int((finished - started).total_seconds() * 1000)
+                    ),
+                    "error_code": "AGENT_INTERRUPTED",
+                    "error_type": error_type,
+                    "error_message": error_message,
+                    "failure_stage": "execution",
+                    "retryable": True,
+                    "updated_at": now,
+                },
+                deep=True,
+            )
 
 
 conversation_repository = MemoryConversationRepository()

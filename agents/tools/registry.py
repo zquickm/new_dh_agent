@@ -83,9 +83,9 @@ def build_tool_executor(
     )
     executor.register(
         DATABASE_TOOL_NAME,
-        DATABASE_TOOL_DESCRIPTION,
+        DATABASE_TOOL_DESCRIPTION.format(max_rows=settings.tools.database.max_rows),
         database_tool.execute,
-        build_database_tool_parameters(settings.tools.database.max_rows),
+        build_database_tool_parameters(),
     )
     executor.register(
         OBSERVATION_TOOL_NAME,

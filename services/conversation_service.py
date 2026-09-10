@@ -21,5 +21,35 @@ class ConversationService:
             conversation_id, run_id, user_id=user_id
         )
 
+    async def list_tool_calls(
+        self,
+        conversation_id: str,
+        run_id: str,
+        *,
+        user_id: str,
+        limit: int,
+    ):
+        return await conversation_repository.list_tool_calls(
+            conversation_id,
+            run_id,
+            user_id=user_id,
+            limit=limit,
+        )
+
+    async def get_tool_call(
+        self,
+        conversation_id: str,
+        run_id: str,
+        tool_call_id: str,
+        *,
+        user_id: str,
+    ):
+        return await conversation_repository.get_tool_call(
+            conversation_id,
+            run_id,
+            tool_call_id,
+            user_id=user_id,
+        )
+
 
 conversation_service = ConversationService()
