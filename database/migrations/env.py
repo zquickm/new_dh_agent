@@ -9,11 +9,15 @@ from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
 
 from config.settings import get_settings
 from database.base import Base
-from database.models import ConversationMessageModel, ConversationModel
+from database.models import (
+    ConversationMessageModel,
+    ConversationModel,
+    ConversationRunModel,
+)
 from database.runtime import build_database_url
 
 
-del ConversationMessageModel, ConversationModel
+del ConversationMessageModel, ConversationModel, ConversationRunModel
 config = context.config
 if (
     config.config_file_name is not None

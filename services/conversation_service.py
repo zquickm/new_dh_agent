@@ -14,5 +14,12 @@ class ConversationService:
             items=await conversation_repository.list(limit, user_id=user_id)
         )
 
+    async def get_run(
+        self, conversation_id: str, run_id: str, *, user_id: str
+    ):
+        return await conversation_repository.get_run(
+            conversation_id, run_id, user_id=user_id
+        )
+
 
 conversation_service = ConversationService()

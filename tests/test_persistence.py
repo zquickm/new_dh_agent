@@ -7,7 +7,11 @@ from alembic.config import Config
 
 from config.settings import PROJECT_DIR, PersistenceSettings
 from database.base import Base
-from database.models import ConversationMessageModel, ConversationModel
+from database.models import (
+    ConversationMessageModel,
+    ConversationModel,
+    ConversationRunModel,
+)
 from database.runtime import build_database_url
 from repositories.mysql_conversation_repository import MySQLConversationRepository
 from repositories.repository import conversation_repository
@@ -25,6 +29,7 @@ class PersistenceSchemaTest(unittest.TestCase):
         )
         conversation = Base.metadata.tables["agent_conversation"]
         message = Base.metadata.tables["agent_conversation_message"]
+        run = Base.metadata.tables["agent_conversation_run"]
 
         self.assertIn("user_id", conversation.c)
         self.assertIn("map_context", conversation.c)
@@ -39,6 +44,16 @@ class PersistenceSchemaTest(unittest.TestCase):
             any(
                 constraint.name == "fk_agent_message_conversation_owner"
                 for constraint in message.foreign_key_constraints
+            )
+        )
+        self.assertEqual(ConversationRunModel.__tablename__, "agent_conversation_run")
+        self.assertIn("heartbeat_at", run.c)
+        self.assertIn("duration_ms", run.c)
+        self.assertIn("error_message", run.c)
+        self.assertTrue(
+            any(
+                constraint.name == "fk_agent_run_conversation_owner"
+                for constraint in run.foreign_key_constraints
             )
         )
 
@@ -63,6 +78,8 @@ class PersistenceSchemaTest(unittest.TestCase):
         self.assertEqual(sql.count("ALTER TABLE `agent_conversation_message`"), 1)
         self.assertIn("ADD COLUMN `run_id`", sql)
         self.assertIn("ADD INDEX `ix_agent_message_run`", sql)
+        self.assertIn("CREATE TABLE IF NOT EXISTS `agent_conversation_run`", sql)
+        self.assertIn("INSERT INTO `agent_conversation_run`", sql)
         self.assertIn("alembic_version", sql)
 
     def test_stream_state_migration_resumes_after_partial_mysql_ddl(self):

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import Optional
 from uuid import uuid4
@@ -20,6 +22,10 @@ from services.synonym_service import expand_query_synonyms
 logger = logging.getLogger(__name__)
 
 SENSITIVE_INPUT_MESSAGE = "您的输入包含敏感词，请修改后重新提问。"
+_SECRET_PATTERN = re.compile(
+    r"(?i)(password|token|api[_-]?key)\s*[=:]\s*([^\s,;]+)"
+)
+_URL_PASSWORD_PATTERN = re.compile(r"(://[^:/\s]+:)[^@/\s]+(@)")
 
 _TOOL_DISPLAY_NAMES = {
     "load_skill": "技能加载",
@@ -36,6 +42,16 @@ class ChatService:
         self._agent: Optional[AgentLoop] = None
         self._sensitive_word_matcher: Optional[SensitiveWordMatcher] = None
         self._background_tasks: set[asyncio.Task] = set()
+        self._maintenance_task: Optional[asyncio.Task] = None
+        self._instance_id = str(uuid4())
+
+    async def start(self) -> None:
+        if self._maintenance_task is not None:
+            return
+        await self._recover_stale_runs()
+        self._maintenance_task = asyncio.create_task(
+            self._recovery_loop(), name="agent-run-recovery"
+        )
 
     def replace_sensitive_word_matcher(self, rules: list[dict]) -> None:
         matcher = SensitiveWordMatcher(rules)
@@ -48,6 +64,10 @@ class ChatService:
         return self._agent
 
     async def close(self) -> None:
+        if self._maintenance_task is not None:
+            self._maintenance_task.cancel()
+            await asyncio.gather(self._maintenance_task, return_exceptions=True)
+            self._maintenance_task = None
         tasks = list(self._background_tasks)
         for task in tasks:
             task.cancel()
@@ -100,6 +120,20 @@ class ChatService:
                 }
                 return
         if contains_sensitive_input:
+            _, assistant_message = await conversation_repository.begin_exchange(
+                conversation_id,
+                request.question,
+                run_id=run_id,
+                user_id=user_id,
+                model="sensitive-word-filter",
+                owner_instance_id=self._instance_id,
+                assistant_content=SENSITIVE_INPUT_MESSAGE,
+                assistant_status="failed",
+                run_status="rejected",
+                error_code="SENSITIVE_INPUT_REJECTED",
+                error_type="SensitiveInputRejected",
+                error_message="用户输入命中敏感词规则",
+            )
             yield {
                 "event": "conversation",
                 "data": {"conversation_id": conversation_id, "run_id": run_id},
@@ -122,7 +156,7 @@ class ChatService:
                     "model": "sensitive-word-filter",
                     "sources": [],
                     "images": [],
-                    "assistant_message_id": None,
+                    "assistant_message_id": assistant_message.id,
                 },
             }
             return
@@ -134,6 +168,8 @@ class ChatService:
             request.question,
             run_id=run_id,
             user_id=user_id,
+            model=get_settings().llm.model,
+            owner_instance_id=self._instance_id,
         )
         event_queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
         task = asyncio.create_task(
@@ -179,6 +215,10 @@ class ChatService:
         sequence = 0
         last_persisted_length = 0
         last_persisted_at = perf_counter()
+        heartbeat_task = asyncio.create_task(
+            self._heartbeat_loop(run_id, user_id),
+            name=f"agent-heartbeat-{run_id}",
+        )
         try:
             active_context = request.context
             if (
@@ -326,6 +366,8 @@ class ChatService:
                 cited_sources,
                 status="completed",
                 user_id=user_id,
+                run_status="completed",
+                model=self.agent.model_name,
             )
             logger.info(
                 "chat_completed run_id=%s conversation_id=%s duration_ms=%.1f "
@@ -356,6 +398,10 @@ class ChatService:
                 status="failed",
                 error_code="AGENT_INTERRUPTED",
                 user_id=user_id,
+                run_status="interrupted",
+                model=self._resolved_model_name(),
+                error_type="CancelledError",
+                error_message="服务关闭导致回答任务被取消",
             )
             raise
         except Exception as exc:
@@ -375,6 +421,10 @@ class ChatService:
                 status="failed",
                 error_code="AGENT_STREAM_FAILED",
                 user_id=user_id,
+                run_status="failed",
+                model=self._resolved_model_name(),
+                error_type=type(exc).__name__,
+                error_message=self._safe_error_message(exc),
             )
             await event_queue.put({
                 "event": "error",
@@ -385,7 +435,51 @@ class ChatService:
                 },
             })
         finally:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
             await event_queue.put(None)
+
+    async def _heartbeat_loop(self, run_id: str, user_id: str) -> None:
+        interval = get_settings().conversation.run_heartbeat_seconds
+        while True:
+            await asyncio.sleep(interval)
+            active = await conversation_repository.heartbeat_run(
+                run_id,
+                user_id=user_id,
+                owner_instance_id=self._instance_id,
+            )
+            if not active:
+                return
+
+    async def _recover_stale_runs(self) -> None:
+        settings = get_settings().conversation
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=settings.run_lease_seconds
+        )
+        recovered = await conversation_repository.recover_stale_runs(cutoff)
+        if recovered:
+            logger.warning("stale_agent_runs_recovered count=%d", recovered)
+
+    async def _recovery_loop(self) -> None:
+        interval = get_settings().conversation.run_recovery_interval_seconds
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self._recover_stale_runs()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("stale_agent_run_recovery_failed")
+
+    def _resolved_model_name(self) -> str:
+        return self._agent.model_name if self._agent is not None else get_settings().llm.model
+
+    @staticmethod
+    def _safe_error_message(exc: Exception) -> str:
+        message = str(exc).strip() or type(exc).__name__
+        message = _SECRET_PATTERN.sub(r"\1=***", message)
+        message = _URL_PASSWORD_PATTERN.sub(r"\1***\2", message)
+        return message[:2000]
 
     @staticmethod
     def _tool_display_name(tool_name: str) -> str:

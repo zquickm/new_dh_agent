@@ -84,3 +84,47 @@ class ConversationMessageModel(Base):
     error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+
+
+class ConversationRunModel(Base):
+    __tablename__ = "agent_conversation_run"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "user_id"],
+            ["agent_conversation.id", "agent_conversation.user_id"],
+            name="fk_agent_run_conversation_owner",
+            ondelete="CASCADE",
+        ),
+        Index(
+            "ix_agent_run_user_conversation_started",
+            "user_id",
+            "conversation_id",
+            "started_at",
+        ),
+        Index("ix_agent_run_status_heartbeat", "status", "heartbeat_at"),
+        Index("ix_agent_run_user_message", "user_message_id"),
+        Index("ix_agent_run_assistant_message", "assistant_message_id"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    user_id: Mapped[int] = mapped_column(mysql.BIGINT(unsigned=False), nullable=False)
+    user_message_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    assistant_message_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    owner_instance_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        mysql.DATETIME(fsp=6), nullable=True
+    )
+    duration_ms: Mapped[Optional[int]] = mapped_column(
+        mysql.BIGINT(unsigned=True), nullable=True
+    )
+    heartbeat_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+    error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    error_type: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(mysql.LONGTEXT(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)

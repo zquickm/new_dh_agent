@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI):
     await database_runtime.start()
     try:
+        await chat_service.start()
         await dictionary_refresh_service.start()
         logger.info("application_started profile=%s", settings.app_profile)
         yield

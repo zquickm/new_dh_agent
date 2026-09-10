@@ -9,6 +9,7 @@ from schemas.chat import FrontendContext
 from schemas.conversation import (
     ConversationDetail,
     ConversationMessage,
+    ConversationRun,
     ConversationSummary,
 )
 
@@ -23,6 +24,7 @@ class MemoryConversationRepository:
     def __init__(self) -> None:
         self._items: dict[tuple[str, str], ConversationDetail] = {}
         self._map_contexts: dict[tuple[str, str], FrontendContext] = {}
+        self._runs: dict[tuple[str, str], ConversationRun] = {}
         self._lock = asyncio.Lock()
 
     async def create(self, title: str, *, user_id: str) -> ConversationDetail:
@@ -52,6 +54,15 @@ class MemoryConversationRepository:
                 reverse=True,
             )[:limit]
             return [ConversationSummary(**item.model_dump()) for item in items]
+
+    async def get_run(
+        self, conversation_id: str, run_id: str, *, user_id: str
+    ) -> Optional[ConversationRun]:
+        async with self._lock:
+            run = self._runs.get((user_id, run_id))
+            if run is None or run.conversation_id != conversation_id:
+                return None
+            return run.model_copy(deep=True)
 
     async def get_map_context(
         self,
@@ -89,7 +100,11 @@ class MemoryConversationRepository:
         user_id: str,
     ) -> ConversationMessage:
         _, assistant = await self.begin_exchange(
-            conversation_id, question, run_id=None, user_id=user_id
+            conversation_id,
+            question,
+            run_id=None,
+            user_id=user_id,
+            model="repository",
         )
         return await self.update_assistant_message(
             assistant.id,
@@ -106,24 +121,52 @@ class MemoryConversationRepository:
         *,
         run_id: Optional[str],
         user_id: str,
+        model: Optional[str] = None,
+        owner_instance_id: Optional[str] = None,
+        assistant_content: str = "",
+        assistant_status: str = "streaming",
+        run_status: str = "running",
+        error_code: Optional[str] = None,
+        error_type: Optional[str] = None,
+        error_message: Optional[str] = None,
     ) -> tuple[ConversationMessage, ConversationMessage]:
         now = _now()
+        effective_run_id = run_id or str(uuid4())
         user = ConversationMessage(
             id=uuid4().hex,
             role="user",
             content=question,
             created_at=now,
             updated_at=now,
-            run_id=run_id,
+            run_id=effective_run_id,
         )
         assistant = ConversationMessage(
             id=uuid4().hex,
             role="assistant",
-            content="",
+            content=assistant_content,
             created_at=now,
             updated_at=now,
-            run_id=run_id,
-            status="streaming",
+            run_id=effective_run_id,
+            status=assistant_status,
+            error_code=error_code,
+        )
+        is_finished = run_status != "running"
+        run = ConversationRun(
+            id=effective_run_id,
+            conversation_id=conversation_id,
+            user_message_id=user.id,
+            assistant_message_id=assistant.id,
+            status=run_status,
+            model=model,
+            started_at=now,
+            finished_at=now if is_finished else None,
+            duration_ms=0 if is_finished else None,
+            heartbeat_at=now,
+            error_code=error_code,
+            error_type=error_type,
+            error_message=error_message,
+            created_at=now,
+            updated_at=now,
         )
         async with self._lock:
             item = self._items.get((user_id, conversation_id))
@@ -134,6 +177,7 @@ class MemoryConversationRepository:
             item.updated_at = now
             if item.title == "新会话":
                 item.title = question[:30]
+            self._runs[(user_id, effective_run_id)] = run
         return user.model_copy(deep=True), assistant.model_copy(deep=True)
 
     async def update_assistant_message(
@@ -145,6 +189,10 @@ class MemoryConversationRepository:
         status: str,
         user_id: str,
         error_code: Optional[str] = None,
+        run_status: Optional[str] = None,
+        model: Optional[str] = None,
+        error_type: Optional[str] = None,
+        error_message: Optional[str] = None,
     ) -> ConversationMessage:
         now = _now()
         async with self._lock:
@@ -165,8 +213,107 @@ class MemoryConversationRepository:
                         )
                         item.messages[index] = updated
                         item.updated_at = now
+                        if message.run_id is not None:
+                            key = (user_id, message.run_id)
+                            run = self._runs.get(key)
+                            if run is not None:
+                                effective_status = run_status or (
+                                    "running" if status == "streaming" else status
+                                )
+                                started_at = datetime.fromisoformat(run.started_at)
+                                finished_at = datetime.fromisoformat(now)
+                                self._runs[key] = run.model_copy(
+                                    update={
+                                        "status": effective_status,
+                                        "model": model or run.model,
+                                        "heartbeat_at": now,
+                                        "finished_at": (
+                                            now if effective_status != "running" else None
+                                        ),
+                                        "duration_ms": (
+                                            max(
+                                                0,
+                                                int(
+                                                    (finished_at - started_at).total_seconds()
+                                                    * 1000
+                                                ),
+                                            )
+                                            if effective_status != "running"
+                                            else None
+                                        ),
+                                        "error_code": error_code,
+                                        "error_type": error_type,
+                                        "error_message": error_message,
+                                        "updated_at": now,
+                                    },
+                                    deep=True,
+                                )
                         return updated.model_copy(deep=True)
         raise KeyError(message_id)
+
+    async def heartbeat_run(
+        self,
+        run_id: str,
+        *,
+        user_id: str,
+        owner_instance_id: str,
+    ) -> bool:
+        del owner_instance_id
+        now = _now()
+        async with self._lock:
+            key = (user_id, run_id)
+            run = self._runs.get(key)
+            if run is None or run.status != "running":
+                return False
+            self._runs[key] = run.model_copy(
+                update={"heartbeat_at": now, "updated_at": now}, deep=True
+            )
+            return True
+
+    async def recover_stale_runs(self, stale_before: datetime) -> int:
+        now = _now()
+        recovered = 0
+        async with self._lock:
+            for key, run in list(self._runs.items()):
+                heartbeat = datetime.fromisoformat(run.heartbeat_at).replace(tzinfo=None)
+                if run.status != "running" or heartbeat >= stale_before:
+                    continue
+                started = datetime.fromisoformat(run.started_at)
+                finished = datetime.fromisoformat(now)
+                self._runs[key] = run.model_copy(
+                    update={
+                        "status": "interrupted",
+                        "finished_at": now,
+                        "duration_ms": max(
+                            0, int((finished - started).total_seconds() * 1000)
+                        ),
+                        "error_code": "AGENT_INTERRUPTED",
+                        "error_type": "StaleRunRecovery",
+                        "error_message": "服务中断导致运行心跳超时",
+                        "updated_at": now,
+                    },
+                    deep=True,
+                )
+                item = self._items.get((key[0], run.conversation_id))
+                if item is not None:
+                    for index, message in enumerate(item.messages):
+                        if (
+                            message.id == run.assistant_message_id
+                            and message.status == "streaming"
+                        ):
+                            item.messages[index] = message.model_copy(
+                                update={
+                                    "content": message.content
+                                    or "服务中断导致回答未完成，请重新发送。",
+                                    "status": "failed",
+                                    "error_code": "AGENT_INTERRUPTED",
+                                    "updated_at": now,
+                                },
+                                deep=True,
+                            )
+                    item.updated_at = now
+                recovered += 1
+        return recovered
 
 
 conversation_repository = MemoryConversationRepository()

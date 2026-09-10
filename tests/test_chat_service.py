@@ -81,6 +81,11 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         repository_patch.start()
         self.addCleanup(repository_patch.stop)
+        synonym_patch = patch(
+            "services.chat_service.expand_query_synonyms", side_effect=lambda value: value
+        )
+        synonym_patch.start()
+        self.addCleanup(synonym_patch.stop)
 
     @staticmethod
     def _sensitive_word_matcher(_directory: str) -> SensitiveWordMatcher:
@@ -131,16 +136,28 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                     "model": "sensitive-word-filter",
                     "sources": [],
                     "images": [],
-                    "assistant_message_id": None,
+                    "assistant_message_id": events[2]["data"]["assistant_message_id"],
                 },
             )
+            self.assertIsNotNone(events[2]["data"]["assistant_message_id"])
             self.assertEqual(agent.calls, 0)
             detail = await conversation_repository.get(
                 events[0]["data"]["conversation_id"],
                 user_id=TEST_USER_ID,
             )
-            self.assertEqual(detail.message_count, 0)
-            self.assertEqual(detail.messages, [])
+            self.assertEqual(detail.message_count, 2)
+            self.assertEqual(
+                [message.role for message in detail.messages],
+                ["user", "assistant"],
+            )
+            self.assertEqual(detail.messages[-1].status, "failed")
+            self.assertEqual(
+                detail.messages[-1].error_code, "SENSITIVE_INPUT_REJECTED"
+            )
+            run = await conversation_repository.get_run(
+                detail.id, events[0]["data"]["run_id"], user_id=TEST_USER_ID
+            )
+            self.assertEqual(run.status, "rejected")
             await service.close()
 
     async def test_generation_continues_after_stream_subscriber_disconnects(self):
@@ -187,6 +204,45 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(persisted.messages[-1].content, "断线后完成")
         self.assertEqual(persisted.messages[-1].status, "completed")
+        await service.close()
+
+    async def test_agent_failure_persists_run_error_details(self):
+        class FailingAgent:
+            model_name = "failed-model"
+
+            async def run_stream(self, question, history, run_id="-"):
+                del question, history, run_id
+                raise RuntimeError("password=do-not-store upstream unavailable")
+                yield
+
+        conversation = await conversation_repository.create(
+            "失败持久化测试", user_id=TEST_USER_ID
+        )
+        service = ChatService()
+        service._agent = FailingAgent()
+
+        events = [
+            event
+            async for event in service.stream_chat(
+                AgentRequest(question="触发失败", conversation_id=conversation.id),
+                user_id=TEST_USER_ID,
+            )
+        ]
+
+        run_id = events[0]["data"]["run_id"]
+        run = await conversation_repository.get_run(
+            conversation.id, run_id, user_id=TEST_USER_ID
+        )
+        detail = await conversation_repository.get(
+            conversation.id, user_id=TEST_USER_ID
+        )
+        self.assertEqual([event["event"] for event in events], ["conversation", "error"])
+        self.assertEqual(run.status, "failed")
+        self.assertEqual(run.model, "failed-model")
+        self.assertEqual(run.error_code, "AGENT_STREAM_FAILED")
+        self.assertEqual(run.error_type, "RuntimeError")
+        self.assertNotIn("do-not-store", run.error_message)
+        self.assertEqual(detail.messages[-1].status, "failed")
         await service.close()
 
     async def test_sensitive_input_does_not_persist_map_context(self):
@@ -236,7 +292,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             detail = await conversation_repository.get(
                 conversation.id, user_id=TEST_USER_ID
             )
-            self.assertEqual(detail.messages, [])
+            self.assertEqual(detail.message_count, 2)
+            self.assertEqual(detail.messages[-1].status, "failed")
 
     def test_all_registered_tool_names_have_chinese_display_names(self):
         self.assertEqual(
@@ -602,6 +659,13 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
         self.assertEqual([message.role for message in detail.messages], ["user", "assistant"])
         self.assertEqual(detail.messages[-1].sources[0]["preview"], "检索片段")
+        run = await conversation_repository.get_run(
+            conversation.id, events[0]["data"]["run_id"], user_id=TEST_USER_ID
+        )
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(run.model, "fake-model")
+        self.assertIsNotNone(run.finished_at)
+        self.assertIsNotNone(run.duration_ms)
         self.assertIn("完整用户问题", "\n".join(captured.output))
 
     async def test_failed_tool_process_exposes_safe_failure_reason(self):

@@ -1,3 +1,11 @@
-from database.models.conversation import ConversationModel, ConversationMessageModel
+from database.models.conversation import (
+    ConversationMessageModel,
+    ConversationModel,
+    ConversationRunModel,
+)
 
-__all__ = ["ConversationModel", "ConversationMessageModel"]
+__all__ = [
+    "ConversationModel",
+    "ConversationMessageModel",
+    "ConversationRunModel",
+]

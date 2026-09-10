@@ -40,3 +40,21 @@ class ConversationPage(BaseModel):
     items: list[ConversationSummary] = Field(default_factory=list)
     next_cursor: Optional[str] = None
     has_more: bool = False
+
+
+class ConversationRun(BaseModel):
+    id: str
+    conversation_id: str
+    user_message_id: str
+    assistant_message_id: str
+    status: Literal["running", "completed", "failed", "interrupted", "rejected"]
+    model: Optional[str] = None
+    started_at: str
+    finished_at: Optional[str] = None
+    duration_ms: Optional[int] = None
+    heartbeat_at: str
+    error_code: Optional[str] = None
+    error_type: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: str
+    updated_at: str

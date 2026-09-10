@@ -75,6 +75,11 @@ class ApiTest(unittest.TestCase):
             repository_patch = patch(target, repository)
             repository_patch.start()
             self.addCleanup(repository_patch.stop)
+        synonym_patch = patch(
+            "services.chat_service.expand_query_synonyms", side_effect=lambda value: value
+        )
+        synonym_patch.start()
+        self.addCleanup(synonym_patch.stop)
         self.previous_agent = chat_service._agent
         self.previous_matcher = chat_service._sensitive_word_matcher
         self.fake_agent = FakeAgent()
@@ -124,6 +129,13 @@ class ApiTest(unittest.TestCase):
             ["user", "assistant"],
         )
         self.assertEqual(detail["messages"][-1]["sources"][0]["citation_id"], 1)
+        run_id = detail["messages"][-1]["run_id"]
+        run_response = self.client.get(
+            f"/conversations/{conversation_id}/runs/{run_id}"
+        )
+        self.assertEqual(run_response.status_code, 200)
+        self.assertEqual(run_response.json()["data"]["status"], "completed")
+        self.assertEqual(run_response.json()["data"]["model"], "fake-model")
 
     def test_sensitive_input_uses_normal_sse_contract_without_calling_agent(self):
         with self.client.stream(
@@ -162,15 +174,30 @@ class ApiTest(unittest.TestCase):
                 "model": "sensitive-word-filter",
                 "sources": [],
                 "images": [],
-                "assistant_message_id": None,
+                "assistant_message_id": frames[2]["payload"]["data"][
+                    "assistant_message_id"
+                ],
             },
+        )
+        self.assertIsNotNone(
+            frames[2]["payload"]["data"]["assistant_message_id"]
         )
         self.assertIsNone(self.fake_agent.last_question)
         detail = self.client.get(
             f"/conversations/{conversation['conversation_id']}"
         ).json()["data"]
-        self.assertEqual(detail["message_count"], 0)
-        self.assertEqual(detail["messages"], [])
+        self.assertEqual(detail["message_count"], 2)
+        self.assertEqual(
+            [message["role"] for message in detail["messages"]],
+            ["user", "assistant"],
+        )
+        self.assertEqual(detail["messages"][-1]["status"], "failed")
+        run = self.client.get(
+            f"/conversations/{conversation['conversation_id']}/runs/"
+            f"{conversation['run_id']}"
+        ).json()["data"]
+        self.assertEqual(run["status"], "rejected")
+        self.assertEqual(run["error_code"], "SENSITIVE_INPUT_REJECTED")
 
     def test_rejects_request_without_gateway_internal_header(self):
         with patch(

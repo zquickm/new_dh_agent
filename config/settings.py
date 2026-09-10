@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     DotEnvSettingsSource,
@@ -118,6 +118,15 @@ class ReactSettings(BaseModel):
 
 class ConversationSettings(BaseModel):
     max_history_messages: int = Field(default=20, ge=1, le=100)
+    run_heartbeat_seconds: float = Field(default=10, ge=1, le=300)
+    run_lease_seconds: float = Field(default=60, ge=5, le=3600)
+    run_recovery_interval_seconds: float = Field(default=15, ge=1, le=300)
+
+    @model_validator(mode="after")
+    def validate_run_lease(self):
+        if self.run_heartbeat_seconds >= self.run_lease_seconds:
+            raise ValueError("run heartbeat interval must be shorter than run lease")
+        return self
 
 
 class PersistenceSettings(BaseModel):

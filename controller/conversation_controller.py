@@ -34,3 +34,17 @@ async def get_conversation(
     if item is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return JsonResult.success(item)
+
+
+@router.get("/conversations/{conversation_id}/runs/{run_id}")
+async def get_conversation_run(
+    conversation_id: str,
+    run_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    item = await conversation_service.get_run(
+        conversation_id, run_id, user_id=user_id
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="Conversation run not found")
+    return JsonResult.success(item)

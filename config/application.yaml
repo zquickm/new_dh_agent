@@ -19,6 +19,9 @@ react:
 
 conversation:
   max_history_messages: 20
+  run_heartbeat_seconds: 10
+  run_lease_seconds: 60
+  run_recovery_interval_seconds: 15
 
 persistence:
   host: "${DH_AGENT_DB_HOST:127.0.0.1}"

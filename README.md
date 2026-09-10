@@ -56,6 +56,8 @@ Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
 - `POST /conversations`：为当前用户创建会话。
 - `GET /conversations`：仅返回当前用户的会话，先按用户过滤再排序、限制条数。
 - `GET /conversations/{id}`：仅允许查看自己的会话。
+- `GET /conversations/{id}/runs/{run_id}`：查询本人会话中一轮 Agent 运行的
+  状态、模型、耗时和失败原因。
 - `POST /agent/chat/stream`：只允许续写自己的会话；未传 `conversation_id` 时，
   自动为当前用户创建会话，通过首个 `conversation` SSE 事件返回 ID。
 - 历史消息、引用来源、地图选区上下文和消息写入均按用户与会话 ID 隔离。
@@ -76,8 +78,11 @@ Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
 或内部 Token。生产环境不可使用默认内部 Token。
 
 所有运行环境的会话都使用独立的 `dh_agent` MySQL 数据库持久化，启动时由 Alembic
-自动执行尚未应用的版本化迁移；会话、消息、引用来源和地图上下文均可跨重启及多实例
-共享。运行时不存在内存仓储回退：MySQL 配置错误或数据库不可用时，应用会直接启动失败。
+自动执行尚未应用的版本化迁移；会话、消息、运行记录、引用来源和地图上下文均可跨重启
+及多实例共享。用户消息、助手占位消息和运行记录在 Agent 执行前通过同一事务写入；运行
+完成或失败时，助手消息和运行终态也通过同一事务更新。运行心跳超时后会自动将遗留的
+`running/streaming` 状态恢复为 `interrupted/failed`。运行时不存在内存仓储回退：MySQL
+配置错误或数据库不可用时，应用会直接启动失败。
 单元测试使用 `tests/fakes` 下的测试夹具，不会进入生产运行路径。
 
 当前大模型服务不需要鉴权时，`NEW_DH_LLM__API_KEY` 可以留空或省略；如果服务需要鉴权，再配置真实 Key：
@@ -132,7 +137,8 @@ Agent 已注册四个业务工具（括号内为协议调用标识）：
 仍会执行 Unicode NFKC 和英文大小写归一化。目前保持原有处理逻辑，不区分
 `applyScope`、`action` 和 `matchType`。
 
-命中后不会调用大模型或业务工具，也不会将原始问题写入会话历史；
+命中后不会调用大模型或业务工具，但会将用户原始问题、固定助手提示和状态为
+`rejected` 的运行记录写入会话历史；
 接口仍按 `conversation → token → done` 顺序返回 SSE，固定提示为
 “您的输入包含敏感词，请修改后重新提问。”。敏感词拦截开关由
 `sensitive_words.enabled` 配置；服务地址和缓存目录分别由 `application.yaml`
