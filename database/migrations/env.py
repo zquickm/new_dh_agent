@@ -39,11 +39,15 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection) -> None:
+    # Alembic opens a separate transaction for every revision. MySQL DML can
+    # therefore roll back normally. MySQL DDL implicitly commits, so revisions
+    # that change a table consolidate their changes into one atomic DDL statement.
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
         transaction_per_migration=True,
+        transactional_ddl=False,
     )
     with context.begin_transaction():
         context.run_migrations()
