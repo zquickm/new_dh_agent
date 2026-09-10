@@ -14,13 +14,12 @@ from tool_backends.database_backend import (
 
 TOOL_NAME = "database_query"
 TOOL_DESCRIPTION = (
-    "将自然语言问题转换为 Apache Doris（MySQL 兼容方言）只读 SQL，"
-    "查询授权业务表并返回结构化结果。"
+    "将自然语言问题转换为 Apache Doris（MySQL 兼容方言）只读 SQL，查询授权业务表并返回结构化结果。"
+    "每次查询最多返回 {max_rows} 行，超出截断。"
     "不得用于地图选区得到的业务观测站，也不得用于明确站名的站点状态、详情、"
     "最新观测、趋势或时间区间数据；这些问题必须调用 observation_service。"
-    "SQL 会经过授权表白名单和只读校验。"
 )
-def build_tool_parameters(max_rows: int) -> dict[str, Any]:
+def build_tool_parameters() -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
@@ -30,16 +29,6 @@ def build_tool_parameters(max_rows: int) -> dict[str, Any]:
                 "description": (
                     "需要从授权业务表回答的完整自然语言问题，应保留用户指定的过滤条件、"
                     "指标、排序、分组和统计要求，不得为空。"
-                ),
-            },
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": max_rows,
-                "default": max_rows,
-                "description": (
-                    f"本次查询请求返回的最大记录数，范围 1 到 {max_rows}，"
-                    f"省略时默认 {max_rows}。"
                 ),
             },
         },
@@ -110,15 +99,13 @@ class DatabaseQueryTool:
     async def execute(
         self,
         question: str,
-        limit: Optional[int] = None,
     ) -> dict[str, Any]:
         question = question.strip()
         if not question:
             raise ValueError("question 不能为空")
         max_rows = get_settings().tools.database.max_rows
-        limit = max_rows if limit is None else min(max(int(limit), 1), max_rows)
         try:
-            result = await self.backend.query(question, limit)
+            result = await self.backend.query(question, max_rows)
         except DatabaseToolError as exc:
             return {
                 "success": False,
