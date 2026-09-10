@@ -21,7 +21,7 @@ TEST_USER_ID = "101"
 class FakeAgent:
     model_name = "fake-model"
 
-    async def run_stream(self, question, history, run_id="-"):
+    async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
         del question, history, run_id
         yield AgentEvent(
             type="tool_started",
@@ -95,7 +95,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.calls = 0
 
-            async def run_stream(self, question, history, run_id="-"):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 del question, history, run_id
                 self.calls += 1
                 yield AgentEvent(type="answer_delta", content="不应返回")
@@ -150,7 +150,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.release = asyncio.Event()
 
-            async def run_stream(self, question, history, run_id="-"):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 del question, history, run_id
                 await self.release.wait()
                 yield AgentEvent(type="answer_delta", content="断线后完成")
@@ -268,9 +268,10 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.question = ""
 
-            async def run_stream(self, question, history, run_id="-"):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 del history, run_id
                 self.question = question
+                self.frontend_context = frontend_context
                 yield AgentEvent(
                     type="answer_delta",
                     content="区域内有观测站",
@@ -306,7 +307,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
 
         events = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
 
-        self.assertIn('"query_type":"polygon"', agent.question)
+        self.assertEqual(agent.question, request.question)
+        self.assertEqual(agent.frontend_context, request.context)
         self.assertEqual(events[-1]["event"], "done")
         detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
         self.assertEqual(detail.messages[0].content, "这个区域有哪些站点")
@@ -319,10 +321,12 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
 
             def __init__(self):
                 self.questions = []
+                self.contexts = []
 
-            async def run_stream(self, question, history, run_id="-"):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 del history, run_id
                 self.questions.append(question)
+                self.contexts.append(frontend_context)
                 yield AgentEvent(type="answer_delta", content="回答")
 
         def map_context(min_lon, min_lat, max_lon, max_lat):
@@ -372,9 +376,10 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         for request in requests:
             _ = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
 
-        self.assertIn('"bbox":[121.1,29.8,122.5,30.7]', agent.questions[1])
-        self.assertIn('"bbox":[123.1,30.8,124.5,31.7]', agent.questions[3])
-        self.assertNotIn('"bbox":[121.1,29.8,122.5,30.7]', agent.questions[3])
+        self.assertEqual(agent.contexts[1], requests[0].context)
+        self.assertEqual(agent.contexts[3], requests[2].context)
+        self.assertNotEqual(agent.contexts[3], requests[0].context)
+        self.assertEqual(agent.questions, [request.question for request in requests])
         detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
         self.assertTrue(
             all("selected_area" not in message.content for message in detail.messages)
@@ -386,10 +391,12 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
 
             def __init__(self):
                 self.questions = []
+                self.contexts = []
 
-            async def run_stream(self, question, history, run_id="-"):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 del history, run_id
                 self.questions.append(question)
+                self.contexts.append(frontend_context)
                 yield AgentEvent(type="answer_delta", content="回答")
 
         conversation = await conversation_repository.create("圆形选区测试", user_id=TEST_USER_ID)
@@ -438,13 +445,10 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         for request in requests:
             _ = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
 
-        self.assertIn('"query_type":"polygon"', agent.questions[0])
-        self.assertIn('"query_type":"circle"', agent.questions[1])
-        self.assertIn('"center":[123.4,31.2]', agent.questions[1])
-        self.assertIn('"radius":18000.0', agent.questions[1])
-        self.assertIn('"query_type":"circle"', agent.questions[2])
-        self.assertNotIn('"query_type":"polygon"', agent.questions[2])
-        self.assertIn("雷达、雷达站使用 radar", agent.questions[2])
+        self.assertEqual(agent.contexts[0], requests[0].context)
+        self.assertEqual(agent.contexts[1], requests[1].context)
+        self.assertEqual(agent.contexts[2], requests[1].context)
+        self.assertEqual(agent.questions, [request.question for request in requests])
 
     async def test_single_station_follow_up_uses_history_without_reusing_map_area(self):
         class CapturingAgent:
@@ -453,7 +457,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.calls = []
 
-            async def run_stream(self, question, history, run_id="-"):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 del run_id
                 self.calls.append((question, history))
                 answers = ["区域内有小洋山站", "小洋山站运行正常", "坐标已查询"]
@@ -502,7 +506,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
 
         question, history = agent.calls[2]
         self.assertNotIn("selected_area", question)
-        self.assertIn("最近一轮明确讨论的单个站点", question)
+        self.assertEqual(question, requests[2].question)
         self.assertEqual(
             [message.content for message in history],
             [
@@ -519,10 +523,12 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
 
             def __init__(self):
                 self.questions = []
+                self.contexts = []
 
-            async def run_stream(self, question, history, run_id="-"):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 del history, run_id
                 self.questions.append(question)
+                self.contexts.append(frontend_context)
                 yield AgentEvent(type="answer_delta", content="回答")
 
         first = await conversation_repository.create("选区会话", user_id=TEST_USER_ID)
@@ -560,8 +566,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             )
         ]
 
-        self.assertIn("selected_area", agent.questions[0])
-        self.assertNotIn("selected_area", agent.questions[1])
+        self.assertEqual(agent.contexts[0], first_request.context)
+        self.assertIsNone(agent.contexts[1])
 
     async def test_stream_maps_agent_events_and_persists_exchange(self):
         conversation = await conversation_repository.create("测试", user_id=TEST_USER_ID)
@@ -608,7 +614,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         class FailingAgent:
             model_name = "fake-model"
 
-            async def run_stream(self, question, history, run_id="-"):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 del question, history, run_id
                 yield AgentEvent(
                     type="tool_started",
@@ -732,7 +738,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         class MapAgent:
             model_name = "fake-model"
 
-            async def run_stream(self, question, history, run_id="-"):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 del question, history, run_id
                 yield AgentEvent(
                     type="map_action",

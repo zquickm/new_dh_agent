@@ -1,8 +1,11 @@
 import asyncio
 import unittest
+from unittest.mock import patch
 from copy import deepcopy
 
-from agents.agent_loop import SYSTEM_PROMPT, AgentLoop
+from services.synonym_service import build_synonym_matcher
+from agents.agent_loop import AgentLoop
+from services.context_service import SYSTEM_PROMPT
 from agents.tools.executor import ToolExecutor, ToolOutput
 from agents.tools.registry import build_tool_executor
 from schemas.chat import ChatMessage
@@ -26,6 +29,16 @@ class FakeLlm:
 
 
 class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        synonym_patch = patch(
+            "services.synonym_service._active_synonym_matcher",
+            build_synonym_matcher([
+                {"standardTerm": "溶解氧", "terms": [{"term": "DO"}]},
+            ]),
+        )
+        synonym_patch.start()
+        self.addCleanup(synonym_patch.stop)
+
     def test_system_prompt_routes_operational_station_data_to_observation_service(self):
         self.assertIn("必须优先调用 observation_service", SYSTEM_PROMPT)
         self.assertIn("也不得改用 database_query", SYSTEM_PROMPT)

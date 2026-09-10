@@ -21,7 +21,7 @@ class FakeAgent:
     def __init__(self):
         self.last_question = None
 
-    async def run_stream(self, question, history, run_id="-"):
+    async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
         del run_id
         self.last_question = question
         del history

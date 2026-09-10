@@ -1,9 +1,11 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from copy import deepcopy
 from pathlib import Path
 
+from services.synonym_service import build_synonym_matcher
 from agents.agent_loop import AgentLoop
 from agents.skills import SkillCatalog
 from agents.tools.registry import build_tool_executor
@@ -24,6 +26,16 @@ class FakeLlm:
 
 
 class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        synonym_patch = patch(
+            "services.synonym_service._active_synonym_matcher",
+            build_synonym_matcher([
+                {"standardTerm": "溶解氧", "terms": [{"term": "DO"}]},
+            ]),
+        )
+        synonym_patch.start()
+        self.addCleanup(synonym_patch.stop)
+
     def _create_skill(self, root: Path) -> SkillCatalog:
         directory = root / "观测站分析"
         directory.mkdir()

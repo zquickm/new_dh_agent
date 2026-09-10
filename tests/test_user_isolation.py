@@ -26,9 +26,11 @@ class CapturingAgent:
 
     def __init__(self):
         self.calls = []
+        self.contexts = []
 
-    async def run_stream(self, question, history, run_id="-"):
+    async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
         self.calls.append((question, [message.content for message in history]))
+        self.contexts.append(frontend_context)
         await asyncio.sleep(0)
         yield AgentEvent(type="answer_delta", content="回答:" + question)
 
@@ -146,9 +148,12 @@ class ChatIsolationTest(unittest.IsolatedAsyncioTestCase):
             self.stream("202", question="该区域有哪些站点", conversation_id=second.id),
         )
         self.assertTrue(all(events[-1]["event"] == "done" for events in results))
-        calls = {tuple(history): question for question, history in self.agent.calls}
-        self.assertIn("selected_area", calls[("A秘密", "A回答")])
-        self.assertNotIn("selected_area", calls[("B秘密", "B回答")])
+        contexts = {
+            tuple(history): context
+            for (_, history), context in zip(self.agent.calls, self.agent.contexts)
+        }
+        self.assertIsNotNone(contexts[("A秘密", "A回答")])
+        self.assertIsNone(contexts[("B秘密", "B回答")])
         for owner, conversation in (("101", first), ("202", second)):
             detail = await self.repo.get(conversation.id, user_id=owner)
             self.assertEqual(detail.message_count, 4)
