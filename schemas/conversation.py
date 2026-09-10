@@ -49,6 +49,9 @@ class ConversationRun(BaseModel):
     assistant_message_id: str
     status: Literal["running", "completed", "failed", "interrupted", "rejected"]
     model: Optional[str] = None
+    system_prompt_version_id: Optional[int] = None
+    system_prompt_version_no: Optional[int] = None
+    system_prompt_sha256: Optional[str] = None
     started_at: str
     finished_at: Optional[str] = None
     duration_ms: Optional[int] = None

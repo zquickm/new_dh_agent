@@ -159,6 +159,20 @@ Agent 已注册四个业务工具（括号内为协议调用标识）：
 中的 `dictionaries.base_url`、`dictionaries.cache_directory` 配置。内部调用
 复用 `internal_request` 中的请求头名称和令牌。
 
+## 系统提示词版本管理
+
+主智能体的 `SYSTEM_PROMPT` 由 `dh_agent` 数据库管理。首次启动会把代码中的默认
+提示词初始化为线上版本 v1；管理员通过 `/admin/system-prompts/main` 维护唯一草稿，
+保存草稿不会影响线上运行，发布后会生成不可变的新版本。历史版本回滚同样生成新版本，
+不会覆盖已有发布记录。
+
+每次对话运行开始时读取一次当前发布版，并在整个工具调用和回答过程中固定使用该版本。
+发布操作只影响之后开始的运行。运行记录保存提示词版本 ID、版本号和 SHA-256，便于审计。
+Skill 索引、前端地图上下文、用户问题和每轮约束仍由代码动态拼装，不属于在线编辑内容。
+
+管理接口只接受 Gateway 注入的 `ADMIN` 身份；外部地址由 Gateway 的
+`/agent-api/admin/**` 路由映射至本服务的 `/admin/**`。
+
 ## Skill 按需加载
 
 Skill 放在 `skills/<skill-name>/SKILL.md`。文件使用 YAML frontmatter 提供索引信息，

@@ -42,11 +42,12 @@ SYSTEM_PROMPT = dedent(
 
 def build_system_prompt(
     skills: tuple[SkillSummary, ...],
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> str:
     skill_lines = [f"- {skill.name}: {skill.description}" for skill in skills]
     skill_index = "\n".join(skill_lines) or "- （无）"
     return (
-        f"{SYSTEM_PROMPT}\n\n"
+        f"{system_prompt}\n\n"
         "当前可用能力：\n"
         f"{skill_index}"
     )
@@ -63,13 +64,17 @@ class ContextService:
         frontend_context: FrontendContext | None,
         skills: tuple[SkillSummary, ...],
         max_history_messages: int,
+        system_prompt: str = SYSTEM_PROMPT,
     ) -> list[dict[str, Any]]:
         expanded_question = expand_query_synonyms(question)
         agent_question = enrich_question_with_frontend_context(
             expanded_question, frontend_context
         )
         return [
-            {"role": "system", "content": build_system_prompt(skills)},
+            {
+                "role": "system",
+                "content": build_system_prompt(skills, system_prompt),
+            },
             *[
                 {
                     "role": item.role,

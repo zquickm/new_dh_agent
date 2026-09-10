@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import logging
 import re
+from hashlib import sha256
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
@@ -14,7 +15,9 @@ from agents.agent_loop import AgentLoop, build_agent_loop
 from config.settings import get_settings
 from repositories.repository import conversation_repository
 from schemas.chat import AgentRequest, ChatMessage
+from schemas.system_prompt import ActiveSystemPromptSnapshot
 from services.citation_service import CitationService
+from services.context_service import SYSTEM_PROMPT
 from services.sensitive_word_service import SensitiveWordMatcher
 from services.tool_audit_service import PersistentToolAuditRecorder
 
@@ -38,12 +41,13 @@ _TOOL_DISPLAY_NAMES = {
 
 
 class ChatService:
-    def __init__(self) -> None:
+    def __init__(self, prompt_provider=None) -> None:
         self._agent: Optional[AgentLoop] = None
         self._sensitive_word_matcher: Optional[SensitiveWordMatcher] = None
         self._background_tasks: set[asyncio.Task] = set()
         self._maintenance_task: Optional[asyncio.Task] = None
         self._instance_id = str(uuid4())
+        self._prompt_provider = prompt_provider or _StaticPromptProvider()
 
     async def start(self) -> None:
         if self._maintenance_task is not None:
@@ -52,6 +56,9 @@ class ChatService:
         self._maintenance_task = asyncio.create_task(
             self._recovery_loop(), name="agent-run-recovery"
         )
+
+    def set_prompt_provider(self, prompt_provider) -> None:
+        self._prompt_provider = prompt_provider
 
     def replace_sensitive_word_matcher(self, rules: list[dict]) -> None:
         matcher = SensitiveWordMatcher(rules)
@@ -161,6 +168,7 @@ class ChatService:
             }
             return
 
+        prompt_snapshot = await self._prompt_provider.active_snapshot()
         # Persist both sides before starting the model. The request/SSE connection is
         # only a subscriber after this point; closing it must not cancel generation.
         _, assistant_message = await conversation_repository.begin_exchange(
@@ -169,6 +177,9 @@ class ChatService:
             run_id=run_id,
             user_id=user_id,
             model=get_settings().llm.model,
+            system_prompt_version_id=prompt_snapshot.version_id,
+            system_prompt_version_no=prompt_snapshot.version_no,
+            system_prompt_sha256=prompt_snapshot.content_sha256,
             owner_instance_id=self._instance_id,
         )
         event_queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
@@ -182,6 +193,7 @@ class ChatService:
                 assistant_message_id=assistant_message.id,
                 started_at=started_at,
                 event_queue=event_queue,
+                prompt_snapshot=prompt_snapshot,
             ),
             name=f"agent-chat-{run_id}",
         )
@@ -208,6 +220,7 @@ class ChatService:
         assistant_message_id: str,
         started_at: float,
         event_queue: asyncio.Queue,
+        prompt_snapshot: ActiveSystemPromptSnapshot,
     ) -> None:
         answer_parts: list[str] = []
         registered_sources: list[dict] = []
@@ -261,6 +274,8 @@ class ChatService:
                     run_id,
                     repository=conversation_repository,
                 )
+            if "system_prompt" in run_stream_parameters:
+                run_stream_kwargs["system_prompt"] = prompt_snapshot.content
             async for event in self.agent.run_stream(
                 request.question,
                 history,
@@ -521,6 +536,18 @@ class ChatService:
             "retryable": False,
             "details": details or {},
         }
+
+
+class _StaticPromptProvider:
+    """Keep isolated ChatService unit tests independent from application startup."""
+
+    async def active_snapshot(self) -> ActiveSystemPromptSnapshot:
+        return ActiveSystemPromptSnapshot(
+            version_id=0,
+            version_no=0,
+            content=SYSTEM_PROMPT,
+            content_sha256=sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
+        )
 
 
 chat_service = ChatService()

@@ -219,6 +219,8 @@ class ApiTest(unittest.TestCase):
             "main.dictionary_refresh_service.stop", new=AsyncMock()
         ), patch(
             "main.database_runtime.start", new=AsyncMock()
+        ), patch(
+            "main.system_prompt_service.start", new=AsyncMock()
         ), patch("main.database_runtime.close", new=AsyncMock()):
             with TestClient(app) as direct_client:
                 response = direct_client.get("/health")

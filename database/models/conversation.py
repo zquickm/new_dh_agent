@@ -104,6 +104,7 @@ class ConversationRunModel(Base):
         Index("ix_agent_run_status_heartbeat", "status", "heartbeat_at"),
         Index("ix_agent_run_user_message", "user_message_id"),
         Index("ix_agent_run_assistant_message", "assistant_message_id"),
+        Index("ix_agent_run_system_prompt_version", "system_prompt_version_id"),
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
 
@@ -114,6 +115,13 @@ class ConversationRunModel(Base):
     assistant_message_id: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    system_prompt_version_id: Mapped[Optional[int]] = mapped_column(
+        mysql.BIGINT(unsigned=True), nullable=True
+    )
+    system_prompt_version_no: Mapped[Optional[int]] = mapped_column(
+        mysql.BIGINT(unsigned=True), nullable=True
+    )
+    system_prompt_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     owner_instance_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     started_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
     finished_at: Mapped[Optional[datetime]] = mapped_column(

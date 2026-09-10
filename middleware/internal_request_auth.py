@@ -26,6 +26,14 @@ def get_current_user_id(request: Request) -> str:
     return user_ids[0]
 
 
+def get_current_admin_id(request: Request) -> int:
+    user_id = get_current_user_id(request)
+    user_types = request.headers.getlist("x-user-type")
+    if user_types != ["ADMIN"]:
+        raise HTTPException(status_code=403, detail="仅管理员可执行此操作")
+    return int(user_id)
+
+
 class InternalRequestAuthMiddleware:
     """Reject requests that were not forwarded by the trusted gateway path."""
 
