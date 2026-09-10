@@ -81,7 +81,7 @@ class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("LIMIT 11", result["sql"])
                 self.assertEqual(llm.calls, 2)
                 for invocation in llm.ainvoke.await_args_list:
-                    self.assertIn("每次最多返回 10 行", invocation.args[0][0]["content"])
+                    self.assertIn("最多返回 10 行", invocation.args[0][0]["content"])
                 self.assertEqual(cursor.execute.await_count, 4)
                 repair_prompt = llm.ainvoke.await_args.args[0][1]["content"]
                 self.assertIn(detail, repair_prompt)

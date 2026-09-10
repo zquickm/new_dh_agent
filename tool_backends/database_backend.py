@@ -420,7 +420,7 @@ class DatabaseQueryBackend:
 8. 只使用 Apache Doris 与当前 Doris 校验器兼容的语法，禁止 FULL OUTER JOIN、
     INTERSECT、EXCEPT 和 QUALIFY。
    GROUP_CONCAT 的分隔符使用逗号参数（如 GROUP_CONCAT(DISTINCT field, ',')），不用 SEPARATOR。
-9. 数据每次最多返回 {max_rows} 行，超出部分会被截断。所有查询返回不能超出这个行数。
+9. 执行器最多返回 {max_rows} 行并检测截断；不要为迎合此上限主动添加 LIMIT，只有用户明确要求前若干条或分页时才使用 LIMIT。
 10. 输出前确认括号成对、CTE 和别名已定义、字段均来自 DDL，且 UNION 分支列对齐。
 """
 
