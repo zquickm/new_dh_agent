@@ -1,4 +1,5 @@
 import io
+import importlib
 import unittest
 
 from alembic import command
@@ -59,7 +60,35 @@ class PersistenceSchemaTest(unittest.TestCase):
         sql = output.getvalue()
         self.assertIn("CREATE TABLE agent_conversation", sql)
         self.assertIn("CREATE TABLE agent_conversation_message", sql)
+        self.assertEqual(sql.count("ALTER TABLE `agent_conversation_message`"), 1)
+        self.assertIn("ADD COLUMN `run_id`", sql)
+        self.assertIn("ADD INDEX `ix_agent_message_run`", sql)
         self.assertIn("alembic_version", sql)
+
+    def test_stream_state_migration_resumes_after_partial_mysql_ddl(self):
+        migration = importlib.import_module(
+            "database.migrations.versions.0002_add_message_stream_state"
+        )
+
+        clauses = migration._upgrade_clauses({"run_id"}, set())
+
+        self.assertFalse(any("`run_id` VARCHAR" in clause for clause in clauses))
+        self.assertTrue(any("`status`" in clause for clause in clauses))
+        self.assertTrue(any("`error_code`" in clause for clause in clauses))
+        self.assertTrue(any("`updated_at`" in clause for clause in clauses))
+        self.assertTrue(any("`ix_agent_message_run`" in clause for clause in clauses))
+
+    def test_stream_state_migration_is_noop_when_schema_is_complete(self):
+        migration = importlib.import_module(
+            "database.migrations.versions.0002_add_message_stream_state"
+        )
+
+        clauses = migration._upgrade_clauses(
+            {"run_id", "status", "error_code", "updated_at"},
+            {"ix_agent_message_run"},
+        )
+
+        self.assertEqual(clauses, [])
 
     def test_database_url_escapes_credentials(self):
         url = build_database_url(

@@ -31,6 +31,8 @@ class SettingsTest(unittest.TestCase):
                 "DH_BUSINESS_DB_PORT=9130\n"
                 "DH_BUSINESS_DB_USERNAME=dotenv-reader\n"
                 "BUSINESS_DB_PASSWORD=test-password\n"
+                "DH_AGENT_DB_USERNAME=agent-writer\n"
+                "DH_AGENT_DB_PASSWORD=agent-password\n"
                 "NEW_DH_REACT__MAX_ROUNDS=7\n",
                 encoding="utf-8",
             )
