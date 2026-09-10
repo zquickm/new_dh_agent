@@ -82,7 +82,7 @@ tools:
     dept_ids:
       - "c3d03091-026c-413a-974e-081a4bbfe8c0"
     score: 0.6
-    top_n: 12
+    top_n: 12 # 最终返回片段上限；关闭重排时也作为召回上限
     faq_score: 0.8
     search_method: 3
     search_scope: "knowledge"
