@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 from collections.abc import AsyncIterator
@@ -15,6 +16,7 @@ from repositories.repository import conversation_repository
 from schemas.chat import AgentRequest, ChatMessage
 from services.citation_service import CitationService
 from services.sensitive_word_service import SensitiveWordMatcher
+from services.tool_audit_service import PersistentToolAuditRecorder
 
 
 logger = logging.getLogger(__name__)
@@ -246,11 +248,23 @@ class ChatService:
                 request.question,
                 history,
             )
+            run_stream_parameters = inspect.signature(
+                self.agent.run_stream
+            ).parameters
+            run_stream_kwargs = {}
+            if "run_id" in run_stream_parameters:
+                run_stream_kwargs["run_id"] = run_id
+            if "frontend_context" in run_stream_parameters:
+                run_stream_kwargs["frontend_context"] = active_context
+            if "audit_recorder" in run_stream_parameters:
+                run_stream_kwargs["audit_recorder"] = PersistentToolAuditRecorder(
+                    run_id,
+                    repository=conversation_repository,
+                )
             async for event in self.agent.run_stream(
                 request.question,
                 history,
-                run_id=run_id,
-                frontend_context=active_context,
+                **run_stream_kwargs,
             ):
                 sequence += 1
                 if event.type == "tool_started":

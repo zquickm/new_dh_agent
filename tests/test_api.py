@@ -8,6 +8,7 @@ from agents.events import AgentEvent
 from main import app
 from services.chat_service import chat_service
 from services.sensitive_word_service import SensitiveWordMatcher
+from services.request_context_adapter import enrich_question_with_frontend_context
 from tests.fakes.memory_conversation_repository import MemoryConversationRepository
 
 
@@ -23,7 +24,9 @@ class FakeAgent:
 
     async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
         del run_id
-        self.last_question = question
+        self.last_question = enrich_question_with_frontend_context(
+            question, frontend_context
+        )
         del history
         yield AgentEvent(
             type="retrieval",
@@ -76,7 +79,8 @@ class ApiTest(unittest.TestCase):
             repository_patch.start()
             self.addCleanup(repository_patch.stop)
         synonym_patch = patch(
-            "services.chat_service.expand_query_synonyms", side_effect=lambda value: value
+            "services.context_service.expand_query_synonyms",
+            side_effect=lambda value: value,
         )
         synonym_patch.start()
         self.addCleanup(synonym_patch.stop)
@@ -136,6 +140,15 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(run_response.status_code, 200)
         self.assertEqual(run_response.json()["data"]["status"], "completed")
         self.assertEqual(run_response.json()["data"]["model"], "fake-model")
+        tool_calls_response = self.client.get(
+            f"/conversations/{conversation_id}/runs/{run_id}/tool-calls"
+        )
+        self.assertEqual(tool_calls_response.status_code, 200)
+        self.assertEqual(tool_calls_response.json()["data"], [])
+        missing_tool_call = self.client.get(
+            f"/conversations/{conversation_id}/runs/{run_id}/tool-calls/missing"
+        )
+        self.assertEqual(missing_tool_call.status_code, 404)
 
     def test_sensitive_input_uses_normal_sse_contract_without_calling_agent(self):
         with self.client.stream(

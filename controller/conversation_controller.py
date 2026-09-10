@@ -48,3 +48,45 @@ async def get_conversation_run(
     if item is None:
         raise HTTPException(status_code=404, detail="Conversation run not found")
     return JsonResult.success(item)
+
+
+@router.get("/conversations/{conversation_id}/runs/{run_id}/tool-calls")
+async def list_run_tool_calls(
+    conversation_id: str,
+    run_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    user_id: str = Depends(get_current_user_id),
+):
+    run = await conversation_service.get_run(
+        conversation_id, run_id, user_id=user_id
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="Conversation run not found")
+    return JsonResult.success(
+        await conversation_service.list_tool_calls(
+            conversation_id,
+            run_id,
+            user_id=user_id,
+            limit=limit,
+        )
+    )
+
+
+@router.get(
+    "/conversations/{conversation_id}/runs/{run_id}/tool-calls/{tool_call_id}"
+)
+async def get_run_tool_call(
+    conversation_id: str,
+    run_id: str,
+    tool_call_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    item = await conversation_service.get_tool_call(
+        conversation_id,
+        run_id,
+        tool_call_id,
+        user_id=user_id,
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="Tool call not found")
+    return JsonResult.success(item)

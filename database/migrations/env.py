@@ -13,11 +13,12 @@ from database.models import (
     ConversationMessageModel,
     ConversationModel,
     ConversationRunModel,
+    ToolCallAuditModel,
 )
 from database.runtime import build_database_url
 
 
-del ConversationMessageModel, ConversationModel, ConversationRunModel
+del ConversationMessageModel, ConversationModel, ConversationRunModel, ToolCallAuditModel
 config = context.config
 if (
     config.config_file_name is not None

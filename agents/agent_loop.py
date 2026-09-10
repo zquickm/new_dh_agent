@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from time import perf_counter
@@ -9,6 +11,7 @@ from agents.citations import CitationRegistry
 from agents.events import AgentEvent
 from agents.llm_client import HelloAgentsLLM
 from agents.skills import SkillCatalog
+from agents.tool_audit import ToolAuditRecorder
 from agents.tools.executor import ToolExecutor
 from agents.tools.registry import build_skill_catalog, build_tool_executor
 from config.settings import get_settings
@@ -17,6 +20,67 @@ from services.context_service import ContextService
 
 
 logger = logging.getLogger(__name__)
+
+
+def _classify_tool_error(
+    exc: Exception,
+    *,
+    tool_name: str,
+    failure_stage: str,
+) -> tuple[str, str, str, bool]:
+    error_type = type(exc).__name__
+    detail = str(exc).strip() or error_type
+    lowered_type = error_type.lower()
+    if failure_stage == "result_processing":
+        return "TOOL_RESULT_INVALID", error_type, detail, False
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return "TOOL_TIMEOUT", error_type, detail, True
+    if isinstance(exc, LookupError):
+        return "TOOL_NOT_FOUND", error_type, detail, False
+    if isinstance(exc, ValueError):
+        return "TOOL_ARGUMENT_INVALID", error_type, detail, False
+    if (
+        tool_name == "database_query"
+        or "sql" in lowered_type
+        or "database" in lowered_type
+    ):
+        return "TOOL_DATABASE_ERROR", error_type, detail, True
+    if any(token in lowered_type for token in ("http", "client", "connection")):
+        return "TOOL_UPSTREAM_ERROR", error_type, detail, True
+    return "TOOL_EXECUTION_FAILED", error_type, detail, failure_stage == "execution"
+
+
+def _semantic_tool_error(
+    tool_name: str, observation: str
+) -> Optional[tuple[str, str, str, bool]]:
+    try:
+        parsed = json.loads(observation)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(parsed, dict) or parsed.get("success") is not False:
+        return None
+    error = parsed.get("error")
+    if isinstance(error, dict):
+        error_type = str(error.get("type") or "ToolReportedFailure")
+        error_message = str(error.get("message") or error_type)
+        retryable = bool(error.get("retryable", False)) or (
+            tool_name == "database_query"
+            and (
+                error_type.lower() == "connection"
+                or "timeout" in error_message.lower()
+                or "超时" in error_message
+            )
+        )
+    else:
+        error_type = "ToolReportedFailure"
+        error_message = str(error or "工具返回失败状态")
+        retryable = False
+    error_code = (
+        "TOOL_DATABASE_ERROR"
+        if tool_name == "database_query"
+        else "TOOL_EXECUTION_FAILED"
+    )
+    return error_code, error_type, error_message, retryable
 
 
 class AgentLoop:
@@ -48,6 +112,7 @@ class AgentLoop:
         run_id: str = "-",
         *,
         frontend_context: FrontendContext | None = None,
+        audit_recorder: ToolAuditRecorder | None = None,
     ) -> AsyncIterator[AgentEvent]:
         limit = get_settings().conversation.max_history_messages
         tool_definitions = self.tools.definitions()
@@ -62,6 +127,7 @@ class AgentLoop:
         citation_registry = CitationRegistry()
         observation_map_rendered = False
         has_streamed_content = False
+        tool_sequence = 0
         logger.info(
             "agent_started run_id=%s question=%r history=%r",
             run_id,
@@ -211,6 +277,15 @@ class AgentLoop:
 
             for tool_call in normalized_calls:
                 name = tool_call["name"]
+                tool_sequence += 1
+                if audit_recorder is not None:
+                    await audit_recorder.started(
+                        tool_call_id=tool_call["id"],
+                        round_number=round_number,
+                        sequence_no=tool_sequence,
+                        tool_name=name,
+                        arguments=tool_call["args"],
+                    )
                 tool_started_at = perf_counter()
                 logger.info(
                     "tool_started run_id=%s round=%s tool=%s call_id=%s "
@@ -227,10 +302,16 @@ class AgentLoop:
                     tool_name=name,
                     tool_call_id=tool_call["id"],
                 )
+                failure_stage = "execution"
+                error_code = None
+                error_type = None
+                error_message = None
+                retryable = False
                 try:
                     observation, client_events = await self.tools.execute_with_events(
                         name, tool_call["args"]
                     )
+                    failure_stage = "result_processing"
                     tool_arguments = tool_call["args"]
                     if name == "rag_search":
                         rag_result = citation_registry.register_rag_observation(
@@ -252,7 +333,36 @@ class AgentLoop:
                         for event in client_events
                     ):
                         client_events = ()
-                    success = True
+                    semantic_error = _semantic_tool_error(name, observation)
+                    if semantic_error is None:
+                        success = True
+                        failure_stage = None
+                    else:
+                        success = False
+                        (
+                            error_code,
+                            error_type,
+                            error_message,
+                            retryable,
+                        ) = semantic_error
+                        failure_stage = "execution"
+                except asyncio.CancelledError:
+                    duration_ms = max(
+                        0, int((perf_counter() - tool_started_at) * 1000)
+                    )
+                    if audit_recorder is not None:
+                        await audit_recorder.finished(
+                            tool_call_id=tool_call["id"],
+                            status="interrupted",
+                            result="工具调用被取消",
+                            duration_ms=duration_ms,
+                            error_code="AGENT_INTERRUPTED",
+                            error_type="CancelledError",
+                            error_message="服务关闭导致工具调用被取消",
+                            failure_stage=failure_stage,
+                            retryable=True,
+                        )
+                    raise
                 except Exception as exc:
                     logger.exception(
                         "tool_failed run_id=%s round=%s tool=%s call_id=%s "
@@ -282,6 +392,32 @@ class AgentLoop:
                     retrieval_data = None
                     client_events = ()
                     success = False
+                    (
+                        error_code,
+                        error_type,
+                        error_message,
+                        retryable,
+                    ) = _classify_tool_error(
+                        exc,
+                        tool_name=name,
+                        failure_stage=failure_stage,
+                    )
+
+                duration_ms = max(
+                    0, int((perf_counter() - tool_started_at) * 1000)
+                )
+                if audit_recorder is not None:
+                    await audit_recorder.finished(
+                        tool_call_id=tool_call["id"],
+                        status="succeeded" if success else "failed",
+                        result=observation,
+                        duration_ms=duration_ms,
+                        error_code=error_code,
+                        error_type=error_type,
+                        error_message=error_message,
+                        failure_stage=failure_stage,
+                        retryable=retryable,
+                    )
 
                 if success:
                     logger.info(
@@ -291,7 +427,7 @@ class AgentLoop:
                         round_number,
                         name,
                         tool_call["id"],
-                        (perf_counter() - tool_started_at) * 1000,
+                        duration_ms,
                         observation,
                         client_events,
                     )

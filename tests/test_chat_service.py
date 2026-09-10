@@ -82,7 +82,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         repository_patch.start()
         self.addCleanup(repository_patch.stop)
         synonym_patch = patch(
-            "services.chat_service.expand_query_synonyms", side_effect=lambda value: value
+            "services.context_service.expand_query_synonyms",
+            side_effect=lambda value: value,
         )
         synonym_patch.start()
         self.addCleanup(synonym_patch.stop)
