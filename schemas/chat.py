@@ -254,6 +254,7 @@ class AgentRequest(BaseModel):
     context: Optional[FrontendContext] = Field(
         default=None,
         validation_alias=AliasChoices("context", "map_context", "mapContext"),
+        description="省略时继承会话选区；有效几何替换选区；显式 null、空对象或空几何清除选区",
     )
 
     @field_validator("chat_history", mode="before")

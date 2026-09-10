@@ -402,7 +402,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             ["CLEAR", "MARKER_ADD", "FLY_TO"],
         )
 
-    async def test_keeps_fly_to_marker_after_area_station_rendering(self):
+    async def test_area_rendering_suppresses_extra_flight_in_same_round(self):
         llm = FakeLlm(
             [
                 (
@@ -465,7 +465,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 for event in events
                 if event.type == "map_action"
             ],
-            ["CLEAR", "MARKER_ADD", "CLEAR", "MARKER_ADD", "FLY_TO"],
+            ["CLEAR", "MARKER_ADD"],
         )
 
     async def test_keeps_later_single_station_observation_map_events(self):

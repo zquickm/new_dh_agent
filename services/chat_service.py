@@ -12,7 +12,7 @@ from uuid import uuid4
 from agents.agent_loop import AgentLoop, build_agent_loop
 from config.settings import get_settings
 from repositories.repository import conversation_repository
-from schemas.chat import AgentRequest, ChatMessage
+from schemas.chat import AgentRequest, ChatMessage, FrontendContext
 from services.citation_service import CitationService
 from services.sensitive_word_service import SensitiveWordMatcher
 
@@ -26,7 +26,7 @@ _SECRET_PATTERN = re.compile(
 _URL_PASSWORD_PATTERN = re.compile(r"(://[^:/\s]+:)[^@/\s]+(@)")
 
 _TOOL_DISPLAY_NAMES = {
-    "load_skill": "技能加载",
+    "load_skill": "能力加载",
     "CurrentServerTime": "当前服务器时间",
     "rag_search": "东溟知识库检索",
     "database_query": "数据库查询",
@@ -219,26 +219,21 @@ class ChatService:
             name=f"agent-heartbeat-{run_id}",
         )
         try:
-            active_context = request.context
-            if (
-                active_context is not None
-                and active_context.drawn_geometry is not None
-            ):
-                await conversation_repository.save_map_context(
-                    conversation_id,
-                    active_context,
-                    user_id=user_id,
-                )
-            else:
-                active_context = await conversation_repository.get_map_context(
-                    conversation_id, user_id=user_id
-                )
             # The authenticated conversation is the sole source of history.
             # Ignore client history (including stale history after account switches).
             history = [
                 ChatMessage(role=message.role, content=message.content)
                 for message in conversation.messages
             ]
+            if "context" in request.model_fields_set:
+                active_context = request.context or FrontendContext()
+                await conversation_repository.save_map_context(
+                    conversation_id, active_context, user_id=user_id, run_id=run_id,
+                )
+            else:
+                active_context = await conversation_repository.get_map_context(
+                    conversation_id, user_id=user_id,
+                )
             logger.info(
                 "chat_started run_id=%s conversation_id=%s question=%r "
                 "history=%r",
@@ -285,6 +280,14 @@ class ChatService:
                     await event_queue.put({"event": "retrieval", "data": data})
                 elif event.type == "map_action":
                     data = event.data or {}
+                    if (
+                        event.tool_name == "map_action"
+                        and data.get("action_type") == "CLEAR"
+                        and data.get("clear_selection") is True
+                    ):
+                        await conversation_repository.save_map_context(
+                            conversation_id, FrontendContext(), user_id=user_id, run_id=run_id,
+                        )
                     action_sequence = int(data.get("seq") or 1)
                     await event_queue.put({
                         "event": "map_action",

@@ -59,6 +59,7 @@ class AgentLoop:
             skills=skill_summaries,
             max_history_messages=limit,
         )
+        input_message_count = len(messages)
         citation_registry = CitationRegistry()
         observation_map_rendered = False
         has_streamed_content = False
@@ -317,6 +318,19 @@ class AgentLoop:
                         tool_name=name,
                         tool_call_id=tool_call["id"],
                     )
+                    if (
+                        name == "map_action"
+                        and client_event.get("action_type") == "CLEAR"
+                        and client_event.get("clear_selection") is True
+                    ):
+                        # Keep tool messages; replace only the original input context.
+                        messages[:input_message_count] = self.context_service.build_messages(
+                            question=question,
+                            history=history,
+                            frontend_context=FrontendContext(),
+                            skills=skill_summaries,
+                            max_history_messages=limit,
+                        )
                 yield AgentEvent(
                     type="tool_finished",
                     content=observation,

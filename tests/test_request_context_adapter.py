@@ -238,6 +238,7 @@ class RequestContextAdapterTest(unittest.TestCase):
         self.assertIn("浮标、浮标站使用 buoy", enriched)
         self.assertIn("雷达、雷达站使用 radar", enriched)
         self.assertIn("selected_area 是本轮唯一有效选区", enriched)
+        self.assertIn("会话当前有效选区", enriched)
         self.assertIn('"query_type":"polygon"', enriched)
 
     def test_named_station_takes_priority_over_selected_area_display(self):
@@ -253,6 +254,8 @@ class RequestContextAdapterTest(unittest.TestCase):
         )
 
         self.assertIn("单个站点或地点，则该对象优先", enriched)
+        self.assertIn("未明确要求使用框选范围时，忽略 selected_area", enriched)
+        self.assertIn("除非用户明确询问或比较选区，不要复述框选范围、坐标", enriched)
         self.assertIn("station_name", enriched)
         self.assertIn("render_map=false", enriched)
 
@@ -271,6 +274,14 @@ class RequestContextAdapterTest(unittest.TestCase):
 
         self.assertNotIn("selected_area", enriched)
         self.assertIn("最近一轮明确讨论的单个站点", enriched)
+
+    def test_group_follow_up_keeps_area_even_when_it_contains_qi(self):
+        request = AgentRequest.model_validate(FRONTEND_REQUEST)
+        for question in ("具体有哪些雷达站", "其中雷达站的位置有哪些", "其中有哪些站点在线，状态如何"):
+            with self.subTest(question=question):
+                enriched = enrich_question_with_frontend_context(question, request.context)
+                self.assertIn('"query_type":"polygon"', enriched)
+                self.assertNotIn("仅指最近一轮明确讨论的单个站点", enriched)
 
     def test_normalizes_unclosed_polygon_and_recomputes_bbox(self):
         payload = {

@@ -196,6 +196,7 @@ class MySQLConversationRepository:
         context: FrontendContext,
         *,
         user_id: str,
+        run_id: Optional[str] = None,
     ) -> None:
         async with self._runtime.session_factory() as session:
             async with session.begin():
@@ -211,6 +212,22 @@ class MySQLConversationRepository:
                 ).scalar_one_or_none()
                 if item is None:
                     raise KeyError(conversation_id)
+                # A late request must not overwrite a newer turn's selection.
+                if run_id is not None:
+                    latest_run_id = (
+                        await session.execute(
+                            select(ConversationMessageModel.run_id)
+                            .where(
+                                ConversationMessageModel.conversation_id == conversation_id,
+                                ConversationMessageModel.user_id == int(user_id),
+                                ConversationMessageModel.role == "user",
+                            )
+                            .order_by(ConversationMessageModel.sequence_no.desc())
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if latest_run_id != run_id:
+                        return
                 item.map_context = context.model_dump(mode="json")
                 item.version += 1
 

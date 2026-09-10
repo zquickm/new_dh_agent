@@ -83,11 +83,20 @@ class MemoryConversationRepository:
         context: FrontendContext,
         *,
         user_id: str,
+        run_id: Optional[str] = None,
     ) -> None:
         async with self._lock:
             key = (user_id, conversation_id)
             if key not in self._items:
                 raise KeyError(conversation_id)
+            if run_id is not None:
+                latest_run_id = next(
+                    (message.run_id for message in reversed(self._items[key].messages)
+                     if message.role == "user"),
+                    None,
+                )
+                if latest_run_id != run_id:
+                    return
             self._map_contexts[key] = context.model_copy(deep=True)
 
     async def save_exchange(

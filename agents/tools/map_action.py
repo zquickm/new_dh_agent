@@ -8,10 +8,16 @@ from agents.tools.executor import ToolOutput
 TOOL_NAME = "map_action"
 TOOL_DESCRIPTION = (
     "驱动前端地图执行可视化动作，不查询或修改业务数据。"
-    "单纯查询、输出或显示观测站点时禁止调用本工具，必须调用 observation_service；"
+    "也可用 CLEAR 清除会话选区：设置顶层 clear_selection=true、payload={}；"
+    "这是后端参数，不放入 payload。有效选区下改问其他地点、无关问题或取消选区时，"
+    "必须先单独执行此操作，收到结果后再回答或查询新对象。普通区域追问、选区内单站查询"
+    "和清理标记不清除选区；清选区时沿用既有 CLEAR 事件通知前端清理地图。"
+    "除清除失效选区外，单纯查询、输出或显示观测站点时禁止调用本工具，必须调用 observation_service；"
     "observation_service 的站点查询和单站分析会自动发送 CLEAR 和 MARKER_ADD 地图事件，"
     "不得再调用本工具重复清图、标点、定位或适配站点视野。"
-    "只有用户明确要求额外执行独立的定位、飞行、绘图、清除图层、展示弹窗/表格、"
+    "空间联动对话中，用户转而询问另一个明确地点的信息时，若已有该地点的可信坐标，"
+    "应调用 FLY_TO 将视角移到该地点；观测服务已自动定位时不重复调用，不编造坐标。"
+    "其他情况下，只有用户明确要求额外执行独立的定位、飞行、绘图、清除图层、展示弹窗/表格、"
     "播放时序或轨迹等地图操作时，才使用本工具。"
     "独立调用 FLY_TO 时会先清除旧的站点和定位标记，再添加目标点标记并移动视野；"
     "使用 center（兼容 coordinates）和 zoom，可通过 marker_name 指定标记名称。"
@@ -45,6 +51,15 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "enum": list(MAP_ACTION_TYPES),
             "description": (
                 "要执行的地图动作类型；payload 必须使用对应动作所需的字段。"
+            ),
+        },
+        "clear_selection": {
+            "type": "boolean",
+            "default": False,
+            "description": (
+                "仅 CLEAR 可设为 true，清除后端会话选区及本轮选区上下文；"
+                "不属于前端 payload。清选区并通知前端清图时 payload 使用 {}；"
+                "普通清图、自动定位和选区内单站查询保持 false。"
             ),
         },
         "payload": {
@@ -256,12 +271,20 @@ _REQUIRED_PAYLOAD_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 
-def execute_map_action(action_type: str, payload: dict[str, Any]) -> ToolOutput:
+def execute_map_action(
+    action_type: str, payload: dict[str, Any], clear_selection: bool = False,
+) -> ToolOutput:
     normalized_type = str(action_type or "").strip().upper()
     if normalized_type not in _REQUIRED_PAYLOAD_FIELDS:
         raise ValueError(f"不支持的地图动作：{action_type}")
     if not isinstance(payload, dict):
         raise ValueError("payload 必须为对象")
+    if not isinstance(clear_selection, bool):
+        raise ValueError("clear_selection 必须为布尔值")
+    if clear_selection and normalized_type != "CLEAR":
+        raise ValueError("clear_selection 只能用于 CLEAR")
+    if "clear_selection" in payload:
+        raise ValueError("clear_selection 是顶层工具参数，不得放入前端 payload")
 
     normalized_payload = payload
     if normalized_type == "FLY_TO":
@@ -291,6 +314,9 @@ def execute_map_action(action_type: str, payload: dict[str, Any]) -> ToolOutput:
         )
 
     event = {"action_type": normalized_type, "payload": normalized_payload}
+    if clear_selection:
+        # Consumed by the answer loop and ChatService, never serialized to SSE.
+        event["clear_selection"] = True
     client_events = (event,)
     if normalized_type == "FLY_TO":
         marker_name = str(payload.get("marker_name") or "定位点").strip() or "定位点"
@@ -323,7 +349,7 @@ def execute_map_action(action_type: str, payload: dict[str, Any]) -> ToolOutput:
     return ToolOutput(
         content={
             "success": True,
-            "message": "地图动作已发送",
+            "message": "会话选区清除请求已提交" if clear_selection else "地图动作已发送",
             "action_type": normalized_type,
         },
         client_events=client_events,
