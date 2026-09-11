@@ -1,11 +1,11 @@
 地图操作 SSE 事件契约
 版本：1.0
-日期：2026-08-25
+日期：2026-09-11
 
 一、适用范围
 
-本契约用于智能体后端通过 POST /agent/chat/stream 的 SSE 响应向地图消费方发送可视化动作。
-地图动作只改变前端地图，不代表业务数据查询结果，也不修改业务数据。
+本契约用于智能体后端通过 POST /agent/chat/stream 的 SSE 响应向前端消费方发送地图可视化及专题分析动作。
+地图动作只改变前端地图；专题分析动作由前端打开独立分析浮层并按参数查询出图。动作事件本身不代表业务数据查询结果，也不修改业务数据。
 
 当前实现不调用虚拟接口 POST /api/map_action。若后续需要转发到该 HTTP 接口，必须由后端适配层完成字段转换，不能把 API Key 下发给前端。
 
@@ -28,7 +28,7 @@ run_id：本次对话运行 ID；同一次流式回答内保持不变。
 batch_id：动作批次 ID，当前使用产生动作的 tool_call_id。
 action_id：动作唯一 ID，格式为 "{batch_id}-{seq}"。
 seq：动作在同一批次内的顺序，从 1 开始递增。
-action_type：地图动作类型，必须使用本契约规定的大写枚举。
+action_type：动作类型，必须使用本契约规定的名称，区分大小写；既有地图动作使用大写枚举，断面专题分析使用 dm_duanmian_analysis。
 payload：动作参数对象，结构由 action_type 决定。
 
 四、动作类型及必填参数
@@ -46,6 +46,7 @@ TIMELINE_PLAY：scene。
 HEATMAP_SHOW：data_type。
 TRACK_PLAY：track_type、track_id。
 COMPARE_STATIONS：station_ids、data_types。
+dm_duanmian_analysis：analysis；断面专题分析参数和消费规则见第十节。
 
 所有地图坐标统一使用 CGCS2000（EPSG:4490），点坐标格式统一为 [经度, 纬度]。
 各 payload 的可选字段、枚举和具体数据结构以《地图操作工具定义》为准。
@@ -104,3 +105,54 @@ SSE 协议固定使用：
 
 新增可选字段属于向后兼容变更。
 删除字段、修改字段含义、修改动作名称或修改必填字段时必须升级 version，并由双方确认。
+本次新增 dm_duanmian_analysis 动作沿用 version="1.0"，不改变既有动作；前端需增加对应处理分支，未适配的消费方按未知动作规则忽略并记录错误。
+
+十、断面专题分析动作
+
+1. 接入方式
+
+对应《数据分析动作》文档中的 operationId：dm_duanmian_analysis。
+复用 event: map_action，JSON 外层仍为 {"code":200,"message":"success","data":{...}}。
+前端解析 SSE data 的 JSON 后，通过其中 data.action_type 识别动作，从 data.payload 读取分析参数。
+action_type 必须原样使用小写 dm_duanmian_analysis，不转换成大写，不使用 actionType。
+
+当前后端直接发送 SSE，不调用文档中的 POST /api/duanmian_analysis，也不向前端下发 X-API-Key。
+此处明确的是当前后端采用的 SSE 接入约定；联调时需双方确认前端支持该格式，以及出图流程是否还依赖空间服务接口或平台注册。
+
+2. payload 参数
+
+analysis：必填，分析类型，取值如下：
+  depth-curve：单要素沿水深变化曲线。
+  temp-section：断面剖面图（化学要素色阶剖面）。
+  ts-scatter：T-S 点聚图（水团识别）。
+  nutrient：营养盐结构分析。
+  do-profile：溶解氧垂向分布。
+  surface：表层沿程变化图。
+section：可选，E1、E2 或 E3；ts-scatter 固定合并全部断面，后端会移除传入的 section。
+voyage：可选，有效的 yyyy-MM 或 yyyy-MM-dd；省略时只打开浮层，不自动查询，不猜测航次。
+elementType：可选，chemistry（海水化学）或 hydromet（水文气象）；temp-section 固定为 chemistry，后端会补充或覆盖该字段。
+element：可选，要素物理列名或中文短名，例如 temperature_c 或 温度；后端仅去除首尾空白，不做字段映射，前端需匹配相应要素选项。
+
+后端省略未提供的可选参数，不发送 null 占位。传入参数须为非空字符串，日期须有效；参数无效时不发送该动作事件。
+
+3. 完整 SSE 示例
+
+请求示例：请绘制 2025 年 11 月 E1 断面的温度剖面图。
+以下 data 为实际传输使用的单行 JSON；事件以两个换行符结束。
+
+event: map_action
+data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":"conversation-1","run_id":"run-1","batch_id":"call-analysis","action_id":"call-analysis-1","seq":1,"action_type":"dm_duanmian_analysis","payload":{"analysis":"temp-section","section":"E1","voyage":"2025-11","elementType":"chemistry","element":"温度"}}}
+
+未指定航次时的 payload 示例：{"analysis":"temp-section","section":"E1","elementType":"chemistry","element":"温度"}。此时只打开浮层，不自动查询。
+
+4. 前端消费规则
+
+收到该动作后，打开「断面专题分析」独立浮层，根据 analysis 切换分析类型，并按 payload 回填断面、航次和要素等参数。
+提供 voyage 时按参数发起对应数据查询并出图；未提供 voyage 时只打开浮层等待用户选择。参数匹配失败、查询失败或无数据时应明确展示状态，不使用旧图冒充本次结果。
+沿用第六节消费规则：按 action_id 去重，同一 batch_id 内按 seq 顺序处理，动作到达后即可执行，无需等待 event: done。
+本动作不要求前端先执行 CLEAR、MARKER_ADD 或 FLY_TO，也不要求后端为了出图额外调用 database_query。
+
+5. 成功含义与联调检查
+
+工具返回 success=true、message="action received" 仅表示动作已接收；event: done 仅表示智能体流式回答结束，两者均不代表前端图表已经渲染完成。当前协议没有前端出图完成回执。
+联调分别确认：聊天流包含该动作事件；前端正确识别并打开浮层；参数回填正确；使用实际存在的航次能够查询出图；不传航次时不自动查询；重复 action_id 不重复执行。
