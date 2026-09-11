@@ -672,6 +672,28 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next_events[-1]["data"]["answer"], "你好。")
         await service._agent.close()
 
+    async def test_explicit_article_without_marker_is_returned_and_persisted(self):
+        class NamedArticleAgent(FakeAgent):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
+                async for event in super().run_stream(question, history, run_id):
+                    if event.type != "answer_delta":
+                        yield event
+                yield AgentEvent(type="answer_delta", content="根据《资料》中的内容回答。")
+
+        conversation = await conversation_repository.create("测试", user_id=TEST_USER_ID)
+        service = ChatService()
+        service._agent = NamedArticleAgent()
+        events = [event async for event in service.stream_chat(
+            AgentRequest(question="查询资料", conversation_id=conversation.id),
+            user_id=TEST_USER_ID,
+        )]
+        self.assertEqual(events[-1]["event"], "done")
+        done = events[-1]["data"]
+        self.assertEqual(done["answer"], "根据《资料》中的内容回答。")
+        self.assertEqual([item["source"] for item in done["sources"]], ["资料.pdf"])
+        detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
+        self.assertEqual(detail.messages[-1].sources, done["sources"])
+
     async def test_stream_maps_agent_events_and_persists_exchange(self):
         conversation = await conversation_repository.create("测试", user_id=TEST_USER_ID)
         service = ChatService()

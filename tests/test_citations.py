@@ -332,6 +332,39 @@ class CitationRegistryTest(unittest.TestCase):
 
 
 class CitationServiceTest(unittest.TestCase):
+    def test_explicit_article_names_add_one_source_without_changing_answer(self):
+        sources = [
+            {"citation_id": 1, "source": "2024年2月东海断面调查通报.doc", "url": "doc-a", "page_index": 0},
+            {"citation_id": 2, "source": "2024年2月东海断面调查通报.doc", "url": "doc-a", "page_index": 1},
+            {"citation_id": 3, "source": "2024年5月东海断面调查通报.docx", "url": "doc-b"},
+            {"citation_id": 4, "source": "GB 17378.3-2007 海洋监测规范.pdf", "url": "doc-c"},
+        ]
+        for answer in (
+            "根据《2024年2月东海断面调查通报》及《ＧＢ 17378.3-2007 海洋监测规范.pdf》中的内容。",
+            "根据 **2024年2月东海断面调查通报** 和 GB 17378.3-2007 海洋监测规范的内容。",
+        ):
+            with self.subTest(answer=answer):
+                actual, selected = CitationService.finalize(answer, sources)
+                self.assertEqual(actual, answer)
+                self.assertEqual([item["citation_id"] for item in selected], [1, 4])
+        _, selected = CitationService.finalize("根据《2024年2月东海断面调查通报》[[cite:2]]", sources)
+        self.assertEqual([item["citation_id"] for item in selected], [2])
+
+    def test_article_fallback_does_not_guess_from_partial_or_chunk_titles(self):
+        sources = [
+            {"citation_id": 1, "source": "2024年2月东海断面调查通报.doc", "title": "盐度变化"},
+            {"citation_id": 2, "source": "一.pdf"},
+            {"citation_id": 3, "source": "断面数据库", "source_type": "database"},
+        ]
+        for answer in (
+            "根据《东海断面调查通报》的盐度变化内容，这是一项结论。",
+            "根据《2025年2月东海断面调查通报》以及断面数据库。",
+            "根据《2024年2月东海断面调查通报补充说明》中的内容。",
+        ):
+            with self.subTest(answer=answer):
+                _, selected = CitationService.finalize(answer, sources)
+                self.assertEqual(selected, [])
+
     def test_finalize_removes_invalid_markers_and_unused_sources(self):
         sources = [
             {"citation_id": 1, "source": "一.pdf", "preview": "一"},
