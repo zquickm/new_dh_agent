@@ -16,7 +16,7 @@ from agents.tools.executor import ToolExecutor
 from agents.tools.registry import build_skill_catalog, build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage, FrontendContext
-from services.context_service import ContextService
+from services.context_service import ContextService, SYSTEM_PROMPT
 
 
 logger = logging.getLogger(__name__)
@@ -113,6 +113,7 @@ class AgentLoop:
         *,
         frontend_context: FrontendContext | None = None,
         audit_recorder: ToolAuditRecorder | None = None,
+        system_prompt: str = SYSTEM_PROMPT,
     ) -> AsyncIterator[AgentEvent]:
         limit = get_settings().conversation.max_history_messages
         tool_definitions = self.tools.definitions()
@@ -123,6 +124,7 @@ class AgentLoop:
             frontend_context=frontend_context,
             skills=skill_summaries,
             max_history_messages=limit,
+            system_prompt=system_prompt,
         )
         input_message_count = len(messages)
         citation_registry = CitationRegistry()
@@ -422,6 +424,10 @@ class AgentLoop:
                         retryable=retryable,
                     )
 
+                if success and name == "database_query":
+                    citation_registry.register_database_observation(
+                        observation, question=str(tool_call["args"].get("question", ""))
+                    )
                 if success:
                     logger.info(
                         "tool_completed run_id=%s round=%s tool=%s call_id=%s "
@@ -474,6 +480,7 @@ class AgentLoop:
                     tool_name=name,
                     tool_call_id=tool_call["id"],
                     success=success,
+                    sources=citation_registry.sources(),
                 )
                 messages.append(
                     {

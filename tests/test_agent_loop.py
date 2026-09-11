@@ -99,6 +99,23 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("READY_TO_ANSWER", messages[0]["content"])
         await agent.close()
 
+    async def test_uses_managed_system_prompt_for_the_whole_run(self):
+        llm = FakeLlm([(["完成"], [])])
+        agent = AgentLoop(llm, build_tool_executor())
+
+        _ = [
+            event
+            async for event in agent.run_stream(
+                "测试在线提示词", [], system_prompt="当前发布版提示词"
+            )
+        ]
+
+        self.assertTrue(
+            llm.calls[0][0][0]["content"].startswith("当前发布版提示词\n\n")
+        )
+        self.assertIn("当前可用能力", llm.calls[0][0][0]["content"])
+        await agent.close()
+
     async def test_native_tool_call_is_executed_before_answer(self):
         tool_call = {
             "id": "call-time",

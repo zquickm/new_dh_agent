@@ -12,10 +12,12 @@ from controller.agent_controller import router as agent_router
 from controller.conversation_controller import router as conversation_router
 from controller.health_controller import router as health_router
 from controller.recommend_controller import router as recommend_router
+from controller.system_prompt_controller import router as system_prompt_router
 from database.runtime import database_runtime
 from middleware.internal_request_auth import InternalRequestAuthMiddleware
 from services.chat_service import chat_service
 from services.dictionary_refresh_service import dictionary_refresh_service
+from services.system_prompt_service import system_prompt_service
 
 
 settings = get_settings()
@@ -25,13 +27,17 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    previous_prompt_provider = chat_service._prompt_provider
     await database_runtime.start()
     try:
+        await system_prompt_service.start()
+        chat_service.set_prompt_provider(system_prompt_service)
         await chat_service.start()
         await dictionary_refresh_service.start()
         logger.info("application_started profile=%s", settings.app_profile)
         yield
     finally:
+        chat_service.set_prompt_provider(previous_prompt_provider)
         await dictionary_refresh_service.stop()
         await chat_service.close()
         await database_runtime.close()
@@ -48,6 +54,7 @@ app.include_router(health_router)
 app.include_router(conversation_router)
 app.include_router(recommend_router)
 app.include_router(agent_router)
+app.include_router(system_prompt_router)
 
 
 @app.exception_handler(HTTPException)
