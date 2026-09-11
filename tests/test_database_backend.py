@@ -71,13 +71,17 @@ class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
                 )
                 executor = ToolExecutor()
                 executor.register("database_query", "query", DatabaseQueryTool(backend).execute)
-                result = json.loads(await executor.execute("database_query", {"question": "站位数量", "limit": 10}))
+                settings = SimpleNamespace(tools=SimpleNamespace(database=SimpleNamespace(max_rows=10)))
+                with patch("agents.tools.database_query.get_settings", return_value=settings):
+                    result = json.loads(await executor.execute("database_query", {"question": "站位数量"}))
                 self.assertFalse(result["success"])
                 self.assertEqual(result["error"], {
                     "type": "sql_execution", "code": code, "message": detail,
                 })
                 self.assertIn("LIMIT 11", result["sql"])
                 self.assertEqual(llm.calls, 2)
+                for invocation in llm.ainvoke.await_args_list:
+                    self.assertIn("最多返回 10 行", invocation.args[0][0]["content"])
                 self.assertEqual(cursor.execute.await_count, 4)
                 repair_prompt = llm.ainvoke.await_args.args[0][1]["content"]
                 self.assertIn(detail, repair_prompt)

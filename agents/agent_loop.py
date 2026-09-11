@@ -126,6 +126,7 @@ class AgentLoop:
             max_history_messages=limit,
             system_prompt=system_prompt,
         )
+        input_message_count = len(messages)
         citation_registry = CitationRegistry()
         observation_map_rendered = False
         has_streamed_content = False
@@ -386,6 +387,8 @@ class AgentLoop:
                             "operation 和参数；如果现有操作无法完成问题，应明确说明能力不足，"
                             "不得编造新的 operation。"
                         )
+                    elif name == "dm_duanmian_analysis" and isinstance(exc, ValueError):
+                        observation = f"断面专题分析参数无效：{exc}"
                     elif name == "observation_service":
                         detail = str(exc).strip() or type(exc).__name__
                         observation = f"观测服务调用失败：{detail}"
@@ -453,6 +456,19 @@ class AgentLoop:
                         tool_name=name,
                         tool_call_id=tool_call["id"],
                     )
+                    if (
+                        name == "map_action"
+                        and client_event.get("action_type") == "CLEAR"
+                        and client_event.get("clear_selection") is True
+                    ):
+                        # Keep tool messages; replace only the original input context.
+                        messages[:input_message_count] = self.context_service.build_messages(
+                            question=question,
+                            history=history,
+                            frontend_context=FrontendContext(),
+                            skills=skill_summaries,
+                            max_history_messages=limit,
+                        )
                 yield AgentEvent(
                     type="tool_finished",
                     content=observation,

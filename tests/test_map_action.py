@@ -1,6 +1,6 @@
 import unittest
 
-from agents.tools.map_action import TOOL_DESCRIPTION, execute_map_action
+from agents.tools.map_action import TOOL_DESCRIPTION, TOOL_PARAMETERS, execute_map_action
 
 
 class MapActionToolTest(unittest.TestCase):
@@ -66,7 +66,27 @@ class MapActionToolTest(unittest.TestCase):
     def test_clear_accepts_empty_payload(self):
         output = execute_map_action("CLEAR", {})
 
-        self.assertEqual(output.client_events[0]["action_type"], "CLEAR")
+        self.assertEqual(output.client_events, ({"action_type": "CLEAR", "payload": {}},))
+
+    def test_selection_clear_uses_backend_metadata_without_changing_payload(self):
+        self.assertIn("clear_selection", TOOL_PARAMETERS["properties"])
+        self.assertNotIn("clear_selection", TOOL_PARAMETERS["properties"]["payload"]["properties"])
+        for payload in ({}, {"layer_ids": []}, {"layer_ids": ["observation-stations"]}):
+            with self.subTest(payload=payload):
+                before = dict(payload)
+                output = execute_map_action("CLEAR", payload, clear_selection=True)
+                self.assertTrue(output.client_events[0]["clear_selection"])
+                self.assertEqual(output.client_events[0]["payload"], payload)
+                self.assertEqual(payload, before)
+
+    def test_selection_clear_rejects_wrong_action_type_and_frontend_parameter(self):
+        for value in ("true", 1, None):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "布尔值"):
+                execute_map_action("CLEAR", {}, clear_selection=value)
+        with self.assertRaisesRegex(ValueError, "只能用于 CLEAR"):
+            execute_map_action("FLY_TO", {"center": [118.1, 24.5]}, clear_selection=True)
+        with self.assertRaisesRegex(ValueError, "不得放入前端 payload"):
+            execute_map_action("CLEAR", {"clear_selection": True})
 
     def test_rejects_unknown_action(self):
         with self.assertRaisesRegex(ValueError, "不支持的地图动作"):

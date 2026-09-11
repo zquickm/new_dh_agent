@@ -43,13 +43,11 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("必须调用 observation_service", DATABASE_TOOL_DESCRIPTION)
         self.assertNotIn("断面", DATABASE_TOOL_DESCRIPTION)
 
-    async def test_database_schema_limit_matches_server_max_rows(self):
+    async def test_database_schema_only_accepts_question(self):
         executor = build_tool_executor()
-        schema = executor.get("database_query").parameters["properties"]["limit"]
-        max_rows = get_settings().tools.database.max_rows
-
-        self.assertEqual(schema["maximum"], max_rows)
-        self.assertEqual(schema["default"], max_rows)
+        schema = executor.get("database_query").parameters
+        self.assertEqual(set(schema["properties"]), {"question"})
+        self.assertFalse(schema["additionalProperties"])
         await executor.close()
 
     async def test_registered_tool_can_be_described_and_executed(self):
@@ -202,7 +200,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         database_tool = DatabaseQueryTool(FakeDatabaseBackend())
 
         rag_result = await rag_tool.execute("  赤潮  ", tags=["赤潮"])
-        database_result = await database_tool.execute("  E2 平均盐度  ", 2000)
+        database_result = await database_tool.execute("  E2 平均盐度  ")
 
         self.assertEqual(rag_result["count"], 1)
         self.assertEqual(rag_result["chunks"][0]["source"], "文档")
@@ -328,6 +326,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                 "database_query",
                 "observation_service",
                 "map_action",
+                "dm_duanmian_analysis",
             },
         )
         await executor.close()

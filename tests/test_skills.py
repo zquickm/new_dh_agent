@@ -75,7 +75,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("observation_service", skill.instructions)
         self.assertIn("rag_search", skill.instructions)
         self.assertIn("E1、E2、E3", skill.instructions)
-        self.assertIn("有且仅有三条", skill.instructions)
+        self.assertIn("E1、E2、E3、EL、EK", skill.instructions)
         self.assertIn("E1001", skill.instructions)
         self.assertIn("E1-001", skill.instructions)
         self.assertIn("91 个纯数字历史编码", skill.instructions)

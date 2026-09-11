@@ -64,7 +64,7 @@ Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
   调用审计详情。
 - `POST /agent/chat/stream`：只允许续写自己的会话；未传 `conversation_id` 时，
   自动为当前用户创建会话，通过首个 `conversation` SSE 事件返回 ID。
-- 历史消息、引用来源、地图选区上下文和消息写入均按用户与会话 ID 隔离。
+- 历史消息、引用来源、消息写入和当前地图选区均按用户与会话 ID 隔离；选区只临时注入本轮模型输入，不写入消息正文。
 
 以上是本服务路径；前端经过网关时使用 `/api/conversations`、
 `/api/agent/chat/stream` 等带 `/api` 前缀的路径。
@@ -110,9 +110,9 @@ NEW_DH_LLM__API_KEY=your-key
 
 流式接口为 `POST /agent/chat/stream`。生产环境的会话保存在 MySQL 中。
 
-## RAG、数据库、观测与地图工具
+## RAG、数据库、观测、地图与专题分析工具
 
-Agent 已注册四个业务工具（括号内为协议调用标识）：
+Agent 已注册五个业务工具（括号内为协议调用标识）：
 
 - 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
 
@@ -123,6 +123,7 @@ Agent 已注册四个业务工具（括号内为协议调用标识）：
 - 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
 - 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
+- 断面专题分析（`dm_duanmian_analysis`）：发送断面专题分析出图参数，由前端打开独立浮层并查询出图。
 
 框架还注册了技能加载（`load_skill`）和当前服务器时间（`CurrentServerTime`）两个工具。
 
@@ -259,6 +260,38 @@ data: {
 直接复用 `/agent/chat/stream`，当前实现不会调用 `POST /api/map_action`。完整协议
 见 `地图操作SSE事件契约.txt`。
 
+### 断面专题分析动作
+
+`dm_duanmian_analysis` 对应前端文档中的同名 operationId，复用现有
+`ToolOutput.client_events → AgentLoop → ChatService → SSE` 链路。
+该动作是虚拟通道，当前实现不请求 `POST /api/duanmian_analysis`，无需新增空间服务密钥或数据库表。
+参数和动作通过现有工具调用日志记录。
+
+| 参数 | 规则 |
+| --- | --- |
+| `analysis` | 必填：`depth-curve` 沿水深曲线、`temp-section` 化学要素剖面、`ts-scatter` T-S 点聚图、`nutrient` 营养盐结构、`do-profile` 溶解氧垂向分布、`surface` 表层沿程变化 |
+| `section` | 可选：`E1` / `E2` / `E3`；`ts-scatter` 固定合并全部断面，传入的断面会被移除 |
+| `voyage` | 可选：有效的 `yyyy-MM` 或 `yyyy-MM-dd`；省略时不自动查询 |
+| `elementType` | 可选：`chemistry` / `hydromet`；`temp-section` 始终设为 `chemistry` |
+| `element` | 可选：物理列名或中文短名，例如 `temperature_c` / `温度`，不做字段映射 |
+
+前端文档未定义 SSE 事件名和 JSON 外层；本次接入约定复用 `event: map_action`，
+以 operationId `dm_duanmian_analysis` 作为 `action_type`，`payload` 保持文档参数名（包括 `elementType`）。
+前端需增加该动作分支，按 `payload` 打开断面专题分析浮层；这是新增的联调约定，需前端适配。
+
+```text
+event: map_action
+data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":"<会话ID>","run_id":"<运行ID>","batch_id":"call-analysis","action_id":"call-analysis-1","seq":1,"action_type":"dm_duanmian_analysis","payload":{"analysis":"temp-section","section":"E1","voyage":"2025-11","elementType":"chemistry","element":"温度"}}}
+```
+
+仍按 `action_id` 去重、同一 `batch_id` 内按 `seq` 顺序处理。参数无效时不发送动作。
+工具返回 `success: true, message: "action received"` 仅表示指令已接收，不是前端出图成功回执。
+用户只要求统计或文字分析时仍走 `database_query`；仅要求出图时无需先查询数据库。
+
+后续新增观测、海域等分析时，按现有方式增加独立工具模块，在
+`agents/tools/registry.py` 注册，并在 `services/chat_service.py` 添加中文展示名。
+新动作继续使用各自 operationId 和 payload，前端增加对应处理分支即可；不需要修改执行器或 SSE 编码器。
+
 ### 地图选区上下文
 
 `/agent/chat/stream` 接受前端通过 `map_context.drawn_geometry` 传入 GeoJSON
@@ -266,8 +299,27 @@ data: {
 圆心坐标格式为 `[经度, 纬度]`，半径单位为米。后端会在接口边界校验坐标并转换为
 Agent 可使用的内部上下文；
 `AgentLoop`、LLM 客户端和工具不直接依赖前端字段名。
-同一 `conversation_id` 会保存最近一次有效选区；后续请求未再次携带几何数据时会沿用该选区，
-传入新选区时覆盖旧选区。选区状态不会写入用户消息正文。
+会话保存当前有效选区，每轮只临时拼接在用户问题后，不写入用户消息正文。
+未携带 `map_context` 表示继承当前选区；有效几何数据替换选区；显式传入 `null`、空对象或
+`drawn_geometry: null` 表示清除选区。`context`、`mapContext` 别名遵循相同规则。
+例如，框选后问“有哪些观测站”，再不携带选区追问“具体有哪些雷达站”，仍查询原区域并按雷达类型过滤。
+前端应只在选区更新或清空时发送该字段；普通追问省略该字段，不要默认发送空对象或反复回传旧选区。
+不额外调用模型判断选区状态。正式回答模型在有效选区下遇到其他地点、无关问题或取消选区时，
+先单独调用现有 `map_action(action_type="CLEAR", payload={}, clear_selection=true)`，
+收到结果后再回答或查询；例如“介绍一下厦门”“解释潮汐原理”都应先清除旧选区。
+`clear_selection` 是新增的顶层工具参数，仅后端使用，不属于前端 payload，不新增工具或 SSE 字段。
+会话服务保存空选区，当前回答循环移除已经注入的选区数据并保留工具调用记录；清除后后续请求不再继承旧选区。
+清除会话选区后，沿用已约定的 `CLEAR` SSE 事件通知前端清图，`payload` 原样发送；
+空对象表示按现有契约清除全部 Map Action 图层，指定 `layer_ids` 时只清理指定图层，无需新增前端字段。
+切换地点后的“这里”“该地区”应指向最近明确地点；新地点缺少范围或查询失败时，不借用旧选区。
+前端仍可显式发送上述清空字段。普通 CLEAR、单站自动定位、适配视野和清理标记图层不清除会话选区。
+查询本轮新框选范围时保留新选区。前端按既有 CLEAR 契约处理地图清理；后端不等待前端渲染回执。
+前端普通追问必须省略 `map_context`，否则重复提交的旧几何会按新选区重新保存。
+较早请求迟到的选区写入不能覆盖较新请求的选区状态。
+用户明确指定的地点优先于默认选区；除非用户明确询问或比较选区，回答不主动复述框选范围、坐标或无关的历史站点结果。
+这些回答规则通过提示词约束，输出端不另做选区内容过滤。单站查询自动定位；
+空间联动中切换到其他地点时，已有可信坐标则通过 `FLY_TO` 移动视角。
+只有地点名称或坐标时，不自动猜测区域边界或搜索半径；用户重新框选后，以新选区为准。
 
 ```json
 {

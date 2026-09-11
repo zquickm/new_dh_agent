@@ -14,10 +14,11 @@ from uuid import uuid4
 from agents.agent_loop import AgentLoop, build_agent_loop
 from config.settings import get_settings
 from repositories.repository import conversation_repository
-from schemas.chat import AgentRequest, ChatMessage
 from schemas.system_prompt import ActiveSystemPromptSnapshot
+from schemas.chat import AgentRequest, ChatMessage, FrontendContext
 from services.citation_service import CitationService
 from services.context_service import SYSTEM_PROMPT
+from services.emoji_filter import EmojiStreamFilter
 from services.sensitive_word_service import SensitiveWordMatcher
 from services.tool_audit_service import PersistentToolAuditRecorder
 
@@ -37,6 +38,7 @@ _TOOL_DISPLAY_NAMES = {
     "database_query": "数据库查询",
     "observation_service": "观测分析",
     "map_action": "地图操作",
+    "dm_duanmian_analysis": "断面专题分析",
 }
 
 
@@ -223,6 +225,7 @@ class ChatService:
         prompt_snapshot: ActiveSystemPromptSnapshot,
     ) -> None:
         answer_parts: list[str] = []
+        emoji_filter = EmojiStreamFilter()
         registered_sources: list[dict] = []
         retrieval_counts: dict[str, int] = {}
         sequence = 0
@@ -233,26 +236,21 @@ class ChatService:
             name=f"agent-heartbeat-{run_id}",
         )
         try:
-            active_context = request.context
-            if (
-                active_context is not None
-                and active_context.drawn_geometry is not None
-            ):
-                await conversation_repository.save_map_context(
-                    conversation_id,
-                    active_context,
-                    user_id=user_id,
-                )
-            else:
-                active_context = await conversation_repository.get_map_context(
-                    conversation_id, user_id=user_id
-                )
             # The authenticated conversation is the sole source of history.
             # Ignore client history (including stale history after account switches).
             history = [
                 ChatMessage(role=message.role, content=message.content)
                 for message in conversation.messages
             ]
+            if "context" in request.model_fields_set:
+                active_context = request.context or FrontendContext()
+                await conversation_repository.save_map_context(
+                    conversation_id, active_context, user_id=user_id, run_id=run_id,
+                )
+            else:
+                active_context = await conversation_repository.get_map_context(
+                    conversation_id, user_id=user_id,
+                )
             logger.info(
                 "chat_started run_id=%s conversation_id=%s question=%r "
                 "history=%r",
@@ -313,6 +311,14 @@ class ChatService:
                     await event_queue.put({"event": "retrieval", "data": data})
                 elif event.type == "map_action":
                     data = event.data or {}
+                    if (
+                        event.tool_name == "map_action"
+                        and data.get("action_type") == "CLEAR"
+                        and data.get("clear_selection") is True
+                    ):
+                        await conversation_repository.save_map_context(
+                            conversation_id, FrontendContext(), user_id=user_id, run_id=run_id,
+                        )
                     action_sequence = int(data.get("seq") or 1)
                     await event_queue.put({
                         "event": "map_action",
@@ -357,9 +363,12 @@ class ChatService:
                             ),
                         })
                 elif event.type == "answer_delta":
-                    answer_parts.append(event.content)
+                    content = emoji_filter.feed(event.content)
+                    if not content:
+                        continue
+                    answer_parts.append(content)
                     await event_queue.put(
-                        {"event": "token", "data": {"content": event.content}}
+                        {"event": "token", "data": {"content": content}}
                     )
                     draft = "".join(answer_parts)
                     now = perf_counter()
@@ -376,6 +385,10 @@ class ChatService:
                         )
                         last_persisted_length = len(draft)
                         last_persisted_at = now
+            tail = emoji_filter.feed("", final=True)
+            if tail:
+                answer_parts.append(tail)
+                await event_queue.put({"event": "token", "data": {"content": tail}})
             answer = "".join(answer_parts)
             if not answer.strip():
                 raise RuntimeError("AgentLoop 未生成有效回答")

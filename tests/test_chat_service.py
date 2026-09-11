@@ -82,8 +82,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         repository_patch.start()
         self.addCleanup(repository_patch.stop)
         synonym_patch = patch(
-            "services.context_service.expand_query_synonyms",
-            side_effect=lambda value: value,
+            "services.context_service.expand_query_synonyms", side_effect=lambda value: value
         )
         synonym_patch.start()
         self.addCleanup(synonym_patch.stop)
@@ -211,7 +210,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         class FailingAgent:
             model_name = "failed-model"
 
-            async def run_stream(self, question, history, run_id="-"):
+            async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 del question, history, run_id
                 raise RuntimeError("password=do-not-store upstream unavailable")
                 yield
@@ -307,6 +306,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                     "database_query",
                     "observation_service",
                     "map_action",
+                    "dm_duanmian_analysis",
                 )
             },
             {
@@ -316,6 +316,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 "database_query": "数据库查询",
                 "observation_service": "观测分析",
                 "map_action": "地图操作",
+                "dm_duanmian_analysis": "断面专题分析",
             },
         )
 
@@ -373,7 +374,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("selected_area", detail.messages[0].content)
         await service.close()
 
-    async def test_conversation_reuses_and_overrides_latest_map_area(self):
+    async def test_conversation_inherits_and_replaces_map_area(self):
         class CapturingAgent:
             model_name = "fake-model"
 
@@ -416,7 +417,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 }
             ),
             AgentRequest(
-                question="该区域的站点状态怎么样",
+                question="具体有哪些雷达站",
                 conversation_id=conversation.id,
             ),
             AgentRequest.model_validate(
@@ -427,23 +428,29 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 }
             ),
             AgentRequest(
-                question="该区域有哪些站点",
+                question="其中有哪些浮标站",
                 conversation_id=conversation.id,
             ),
         ]
         for request in requests:
-            _ = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
-
-        self.assertEqual(agent.contexts[1], requests[0].context)
-        self.assertEqual(agent.contexts[3], requests[2].context)
-        self.assertNotEqual(agent.contexts[3], requests[0].context)
+            events = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
+            self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(agent.contexts, [
+            requests[0].context, requests[0].context,
+            requests[2].context, requests[2].context,
+        ])
+        self.assertEqual(
+            await conversation_repository.get_map_context(conversation.id, user_id=TEST_USER_ID),
+            requests[2].context,
+        )
         self.assertEqual(agent.questions, [request.question for request in requests])
         detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
         self.assertTrue(
             all("selected_area" not in message.content for message in detail.messages)
         )
+        await service.close()
 
-    async def test_conversation_switches_from_polygon_to_circle_and_reuses_circle(self):
+    async def test_conversation_switches_to_circle_and_inherits_it(self):
         class CapturingAgent:
             model_name = "fake-model"
 

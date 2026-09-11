@@ -114,7 +114,7 @@ tools:
     name: "donghai_dwd"
     connect_timeout: 5
     query_timeout: 10
-    max_rows: 100
+    max_rows: 300
     pool_max_size: 3
     ssl_enabled: false
     ssl_ca: null
