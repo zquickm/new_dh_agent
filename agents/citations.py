@@ -38,7 +38,7 @@ def _safe_model_text(text: str) -> str:
 
 
 class CitationRegistry:
-    """Request-local mapping between retrieved RAG chunks and citation IDs."""
+    """Request-local registry for document and database citation sources."""
 
     def __init__(self) -> None:
         self._sources: list[dict[str, Any]] = []
@@ -50,6 +50,42 @@ class CitationRegistry:
 
     def sources(self) -> list[dict[str, Any]]:
         return [dict(source) for source in self._sources]
+
+    def register_database_observation(self, observation: str, *, question: str) -> None:
+        try:
+            result = json.loads(observation)
+        except (TypeError, json.JSONDecodeError):
+            return
+        if not isinstance(result, dict) or result.get("success") is not True:
+            return
+        rows = result.get("rows")
+        if not isinstance(rows, list) or not any(
+            isinstance(row, dict) and any(
+                value is not None and value != "" for value in row.values()
+            ) for row in rows
+        ):
+            return
+        source = next(
+            (item for item in self._sources if item.get("source_type") == "database"),
+            None,
+        )
+        if source is None:
+            source = {
+                "citation_id": len(self._sources) + 1,
+                "source": "断面数据库",
+                "source_type": "database",
+                "title": "断面观测数据",
+                "preview": "",
+                "url": None,
+                "line": None,
+                "page_index": None,
+                "score": 0.0,
+            }
+            self._sources.append(source)
+        preview = f"查询：{question}；返回 {len(rows)} 行结果"
+        if result.get("truncated"):
+            preview += "（结果截断）"
+        source["preview"] = "\n\n".join(filter(None, (source["preview"], preview)))
 
     def register_rag_observation(
         self,

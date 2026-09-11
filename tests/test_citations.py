@@ -6,6 +6,36 @@ from services.citation_service import CitationService
 
 
 class CitationRegistryTest(unittest.TestCase):
+    def test_database_sources_require_valid_results_and_share_turn_ids(self):
+        registry = CitationRegistry()
+        for result in (
+            {"success": False, "rows": [{"value": 1}]},
+            {"success": True, "rows": []},
+            {"success": True, "rows": [{"value": None}]},
+            {"success": True, "rows": [{"value": ""}]},
+        ):
+            registry.register_database_observation(json.dumps(result), question="无数据")
+        self.assertEqual(registry.sources(), [])
+        registry.register_database_observation(
+            json.dumps({"success": True, "rows": [{"value": 0}]}), question="零值"
+        )
+        registry.register_rag_observation(
+            json.dumps({"chunks": [{"text": "资料", "source": "报告.pdf"}]}),
+            tool_call_id="rag", fallback_query="",
+        )
+        registry.register_database_observation(
+            json.dumps({"success": True, "rows": [{"value": 2}]}), question="第二批"
+        )
+        sources = registry.sources()
+        self.assertEqual([item["citation_id"] for item in sources], [1, 2])
+        self.assertIn("第二批", sources[0]["preview"])
+        answer = registry.transform_answer("正文<<SRC_2>>")
+        answer += CitationService.database_footer(sources)
+        answer, cited = CitationService.finalize(answer, sources)
+        self.assertEqual(answer, "正文[[cite:2]]\n\n数据来源：断面数据库[[cite:1]]")
+        self.assertEqual(len(cited), 2)
+        self.assertEqual(CitationRegistry().sources(), [])
+
     def test_registers_and_merges_chunks_from_the_same_document_page(self):
         registry = CitationRegistry()
         retrieval, model_observation = registry.register_rag_observation(

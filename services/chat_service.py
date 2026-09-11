@@ -280,6 +280,8 @@ class ChatService:
                 **run_stream_kwargs,
             ):
                 sequence += 1
+                if event.sources is not None:
+                    registered_sources = event.sources
                 if event.type == "tool_started":
                     if get_settings().stream.include_process:
                         tool_display_name = self._tool_display_name(event.tool_name)
@@ -301,8 +303,6 @@ class ChatService:
                         **(event.data or {}),
                         "tool_name": self._tool_display_name(event.tool_name),
                     }
-                    if event.sources is not None:
-                        registered_sources = event.sources
                     result_count = data.get("result_count")
                     if isinstance(result_count, int) and not isinstance(
                         result_count, bool
@@ -392,6 +392,10 @@ class ChatService:
             answer = "".join(answer_parts)
             if not answer.strip():
                 raise RuntimeError("AgentLoop 未生成有效回答")
+            database_footer = CitationService.database_footer(registered_sources)
+            if database_footer:
+                answer += database_footer
+                await event_queue.put({"event": "token", "data": {"content": database_footer}})
             answer, cited_sources = CitationService.finalize(
                 answer, registered_sources
             )

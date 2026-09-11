@@ -634,6 +634,44 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.contexts[0], first_request.context)
         self.assertIsNone(agent.contexts[1])
 
+    async def test_database_citation_streams_and_persists_without_model_marker(self):
+        from tests.test_agent_loop import FakeLlm
+
+        async def query(question):
+            return {"success": True, "rows": [{"平均水温": 20.5}]}
+
+        executor = ToolExecutor()
+        executor.register("database_query", "查询", query)
+        llm = FakeLlm([
+            ([], [{"id": "db-1", "name": "database_query",
+                   "args": {"question": "水温统计"}, "type": "tool_call"}]),
+            (["平均水温为20.5℃。"], []),
+            (["你好。"], []),
+        ])
+        service = ChatService()
+        service._agent = AgentLoop(llm, executor)
+        conversation = await conversation_repository.create("测试", user_id=TEST_USER_ID)
+        events = [event async for event in service.stream_chat(
+            AgentRequest(question="水温统计", conversation_id=conversation.id),
+            user_id=TEST_USER_ID,
+        )]
+        done = events[-1]["data"]
+        self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(done["answer"], "平均水温为20.5℃。\n\n数据来源：断面数据库[[cite:1]]")
+        self.assertEqual("".join(event["data"]["content"] for event in events
+                                 if event["event"] == "token"), done["answer"])
+        self.assertEqual(done["sources"][0]["source_type"], "database")
+        detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
+        self.assertEqual(detail.messages[-1].sources, done["sources"])
+        self.assertEqual(detail.messages[-1].content, done["answer"])
+        next_events = [event async for event in service.stream_chat(
+            AgentRequest(question="你好", conversation_id=conversation.id),
+            user_id=TEST_USER_ID,
+        )]
+        self.assertEqual(next_events[-1]["data"]["sources"], [])
+        self.assertEqual(next_events[-1]["data"]["answer"], "你好。")
+        await service._agent.close()
+
     async def test_stream_maps_agent_events_and_persists_exchange(self):
         conversation = await conversation_repository.create("测试", user_id=TEST_USER_ID)
         service = ChatService()

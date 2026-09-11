@@ -424,6 +424,10 @@ class AgentLoop:
                         retryable=retryable,
                     )
 
+                if success and name == "database_query":
+                    citation_registry.register_database_observation(
+                        observation, question=str(tool_call["args"].get("question", ""))
+                    )
                 if success:
                     logger.info(
                         "tool_completed run_id=%s round=%s tool=%s call_id=%s "
@@ -476,6 +480,7 @@ class AgentLoop:
                     tool_name=name,
                     tool_call_id=tool_call["id"],
                     success=success,
+                    sources=citation_registry.sources(),
                 )
                 messages.append(
                     {

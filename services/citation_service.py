@@ -7,6 +7,14 @@ _CITATION_PATTERN = re.compile(r"\[\[cite:(\d+)\]\]")
 
 class CitationService:
     @staticmethod
+    def database_footer(sources: list[dict[str, Any]]) -> str:
+        markers = "".join(
+            f"[[cite:{source['citation_id']}]]"
+            for source in sources if source.get("source_type") == "database"
+        )
+        return f"\n\n数据来源：断面数据库{markers}" if markers else ""
+
+    @staticmethod
     def finalize(
         answer: str,
         sources: list[dict[str, Any]],
