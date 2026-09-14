@@ -253,11 +253,11 @@ class ChatService:
                 )
             logger.info(
                 "chat_started run_id=%s conversation_id=%s question=%r "
-                "history=%r",
+                "history_count=%d",
                 run_id,
                 conversation_id,
-                request.question,
-                history,
+                request.question[:1000],
+                len(history),
             )
             run_stream_parameters = inspect.signature(
                 self.agent.run_stream
@@ -410,12 +410,12 @@ class ChatService:
             )
             logger.info(
                 "chat_completed run_id=%s conversation_id=%s duration_ms=%.1f "
-                "answer=%r sources=%r",
+                "answer_chars=%d source_count=%d",
                 run_id,
                 conversation_id,
                 (perf_counter() - started_at) * 1000,
-                answer,
-                cited_sources,
+                len(answer),
+                len(cited_sources),
             )
             await event_queue.put({
                 "event": "done",

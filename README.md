@@ -265,7 +265,7 @@ data: {
 `dm_duanmian_analysis` 对应前端文档中的同名 operationId，复用现有
 `ToolOutput.client_events → AgentLoop → ChatService → SSE` 链路。
 该动作是虚拟通道，当前实现不请求 `POST /api/duanmian_analysis`，无需新增空间服务密钥或数据库表。
-参数和动作通过现有工具调用日志记录。
+调用参数和动作数量通过工具调用日志记录。
 
 | 参数 | 规则 |
 | --- | --- |
@@ -571,3 +571,31 @@ python -m pip install \
 $env:NEW_DH_LLM__API_KEY = "test-key"
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
+
+
+## 模型工具调用诊断日志
+
+当前 `config/application.yaml` 默认开启诊断，INFO 级别即可记录；定位后可设置
+`NEW_DH_LLM__DIAGNOSTICS_ENABLED=false` 并重启。无需启用 HTTPX/SDK DEBUG，也无新增依赖。
+
+按同一 `run_id`、`round` 对照三层 `llm_diagnostic`：
+
+- `stage=upstream_text/upstream_tools`：OpenAI SDK 解码后的上游 JSON delta，位于 LangChain 工具解析前；包含普通文本、`tool_calls` 或旧式 `function_call`。这不是原始 HTTP 字节抓包；SDK 解码前的协议损坏仍需服务端日志或抓包核查。
+- `stage=langchain_text/langchain_tools`：应用收到的 LangChain chunk，记录 `content`、`tool_call_chunks`、`tool_calls`、`invalid_tool_calls` 和结束原因。
+- `stage=application_tools`：流结束后的合并结果，包括有效与无效调用。
+
+`llm_stream_summary` 保留所有 chunk 的计数、上游工具 delta 数、解析无效调用数、最终调用数、
+真实 `finish_reasons`、上游响应 ID 和模型。未收到结束原因时为空，不推断成 `stop`。
+`status=completed` 仅代表应用读完流；例如 `finish_reasons={'length': 1}` 仍表示上游长度截断。
+`llm_usage` 在上游提供用量时记录，不为获取用量改变请求参数。
+
+每轮每层的文本、工具日志分别最多 100 条、16384 个 JSON 载荷字符，可通过
+`NEW_DH_LLM__DIAGNOSTICS_MAX_EVENTS`、`NEW_DH_LLM__DIAGNOSTICS_MAX_CHARS` 调整。
+限额不影响模型生成或工具执行；超限显示 `truncated=true` 或在汇总中计入 `*_omitted`。
+文本耗尽额度不会占用工具额度，结束原因与最终计数始终保留；存在截断时不要把未打印的内容当作上游未返回。
+日志不采集请求认证头或 API Key，但诊断片段本身可能包含业务数据。
+
+普通日志已取消整段系统提示词、历史消息、检索片段、数据库数据行及完整回答的重复打印。
+保留用户问题预览（最多1000字符）、消息角色和长度、工具名称/参数、耗时、错误堆栈、
+结果长度、查询/SQL摘要、行数/片段数、文章名、最终回答长度及来源数量。
+`agent_completed reason=no_tool_calls` 是业务循环退出条件，与上游 `finish_reason` 分开记录。
