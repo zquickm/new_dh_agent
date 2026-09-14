@@ -4,7 +4,7 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
@@ -203,12 +203,16 @@ class RerankSettings(BaseModel):
     path: str = "/v1/rerank"
     url: str = ""
     model: str = "Qwen3-Reranker-4B"
-    candidate_top_n: int = Field(default=100, ge=1)
     timeout: float = Field(default=15, gt=0)
     connect_timeout: float = Field(default=5, gt=0)
     max_retries: int = Field(default=1, ge=0)
     retry_backoff: float = Field(default=0.3, ge=0)
     verify_ssl: bool = True
+
+
+class RagLibrarySettings(BaseModel):
+    top_n: int = Field(default=12, ge=1)
+    api_token: SecretStr = SecretStr("")
 
 
 class RagToolSettings(BaseModel):
@@ -217,10 +221,9 @@ class RagToolSettings(BaseModel):
     recall_url: str = ""
     api_token: SecretStr = SecretStr("")
     tenant_id: str = ""
-    knowledge_ids: list[str] = Field(default_factory=list)
+    libraries: dict[str, RagLibrarySettings] = Field(default_factory=dict)
     dept_ids: list[str] = Field(default_factory=list)
-    score: float = Field(default=0.6, ge=0, le=1)
-    top_n: int = Field(default=20, ge=1)
+    score: Literal[0.6] = 0.6
     faq_score: float = Field(default=0.8, ge=0, le=1)
     search_method: int = 3
     search_scope: str = "knowledge"

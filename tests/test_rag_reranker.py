@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import unittest
+import asyncio
+from unittest.mock import patch
 from typing import Any, Optional
 
+from agents.tools.rag_search import RagSearchTool
+from config.settings import get_settings, RagLibrarySettings
 from tool_backends.rag_backend import RagSearchBackend
 from tool_backends.rag_models import RagChunk, RagToolError
 from tool_backends.rerank_backend import (
@@ -208,6 +212,69 @@ class VllmDocumentRerankerTest(unittest.IsolatedAsyncioTestCase):
 
 
 class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
+    async def test_three_libraries_query_concurrently_with_independent_limits(self):
+        settings = get_settings().model_copy(deep=True)
+        settings.tools.rag.api_token = "shared-token"
+        settings.tools.rag.rerank.enabled = False
+        settings.tools.rag.libraries = {
+            name: RagLibrarySettings(top_n=i, api_token=f"token-{i}")
+            for i, name in enumerate(("政策法规与标准规范", "核心业务", "海洋图书与文献"), 1)
+        }
+        calls = []
+        all_started = asyncio.Event()
+
+        async def recall(backend, url, payload, headers, **kwargs):
+            calls.append((payload, headers))
+            if len(calls) == 3:
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(), 1)
+            library_id = "kb-" + headers["Authorization"].rsplit("-", 1)[1]
+            return {"code": 200, "data": {"records": [
+                {"chunk_text": f"{library_id}-{j}", "knowledge_id": library_id, "doc_title": "报告"}
+                for j in range(5)
+            ]}}
+
+        with patch("agents.tools.rag_search.get_settings", return_value=settings), patch(
+            "agents.tools.rag_search.expand_query_synonyms", side_effect=lambda query: query,
+        ), patch.object(RagSearchBackend, "_post_json", recall):
+            tool = RagSearchTool()
+            try:
+                result = await tool.execute("断面", tags=["断面"])
+                self.assertEqual(result["count"], 6)
+                self.assertEqual([chunk["knowledge_id"] for chunk in result["chunks"]],
+                                 ["kb-1", "kb-2", "kb-2", "kb-3", "kb-3", "kb-3"])
+                self.assertEqual(len(calls), 3)
+                for i, (payload, headers) in enumerate(calls, 1):
+                    self.assertNotIn("knowledge_ids", payload)
+                    self.assertEqual(payload["top_n"], i)
+                    self.assertEqual(payload["score"], 0.6)
+                    self.assertEqual(payload["tags"], ["断面"])
+                    self.assertEqual(headers["Authorization"], f"Bearer token-{i}")
+            finally:
+                await tool.close()
+
+    async def test_missing_library_key_fails_before_any_request(self):
+        settings = get_settings().model_copy(deep=True)
+        settings.tools.rag.libraries = {
+            str(i): RagLibrarySettings(api_token=f"token-{i}" if i else "") for i in range(3)
+        }
+        with patch("agents.tools.rag_search.get_settings", return_value=settings), patch(
+            "agents.tools.rag_search.expand_query_synonyms", side_effect=lambda query: query,
+        ), patch.object(RagSearchBackend, "_post_json") as post:
+            with self.assertRaisesRegex(ValueError, "api_token"):
+                await RagSearchTool().execute("断面")
+            post.assert_not_called()
+
+    async def test_sparse_or_empty_recall_does_not_lower_score_or_repeat_request(self):
+        for records in ([], [{"chunk_text": "有效证据", "fileName": "报告.pdf"}]):
+            with self.subTest(records=records):
+                session = FakeSession(FakeResponse({"code": 200, "data": {"records": records}}))
+                backend = make_backend(session, FakeReranker())
+                result = await backend.search("测试", 1)
+                self.assertEqual(len(session.calls), 1)
+                self.assertEqual(session.calls[0]["json"]["score"], 0.6)
+                self.assertEqual(len(result), len(records))
+
     async def test_recall_candidates_are_reranked_before_final_limit(self) -> None:
         records = [
             {"chunk_text": chunk.text, "fileName": chunk.source, "chunk_id": chunk.chunk_id}
