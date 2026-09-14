@@ -75,7 +75,7 @@ class SpatialCondition(QueryModel):
 
 
 class SpatialElementQuery(QueryModel):
-    element: str = Field(min_length=1, description="目录返回的 dataKey，如 dm_duanmian。")
+    element: str = Field(min_length=1, description="目录返回的 dataKey。")
     mode: Literal["attribute", "spatial"] = Field(
         default="attribute", description="attribute 仅属性查询；spatial 为空间与属性联合查询。"
     )

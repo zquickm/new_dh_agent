@@ -121,7 +121,7 @@ Agent 已注册五个业务工具（括号内为协议调用标识）：
   参数统一由 `tools.rag` 配置决定。`top_n` 控制最终返回片段上限；开启重排时，
   先按 `rerank.candidate_top_n` 召回候选再重排，关闭时按 `top_n` 召回。
 - 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
-- 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据，也通过同一个工具查询断面测点等注册空间要素的位置与属性。
+- 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据，也支持通用注册空间要素查询。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
 - 断面专题分析（`dm_duanmian_analysis`）：发送断面专题分析出图参数，由前端打开独立浮层并查询出图。
 
@@ -228,19 +228,12 @@ SPATIAL_API_KEY=
 - `get_spatial_element_detail`：传 `dataKey`，调用 `/api/spatial/v2/elements/detail`，获取字段、枚举及查询约束。
 - `query_spatial_element`：只传 `query`，对应 `/api/spatial/v2/elements/query` 原始请求体。
 
-确认要素详情允许 `code` 等值过滤后，查询断面测点的调用示例：
-
-```json
-{"operation":"query_spatial_element","query":{"element":"dm_duanmian","mode":"attribute","conditions":[{"field":"code","operator":"=","value":"E1001"}],"includeGeometry":true}}
-```
-
 通用查询保留 FeatureCollection、features、total、returned；不自动发送地图事件。
-`includeGeometry=true` 只控制返回几何。空间过滤、字段白名单、枚举和最大条数由空间服务最终校验；
-历史观测统计仍使用 `database_query`，不把断面测点 code 当成观测站 tzno。
+`includeGeometry=true` 只控制返回几何；字段及查询约束以目录详情为准，由空间服务最终校验。
 复用 `tools.spatial` 和 `SPATIAL_API_KEY`，base_url 继续只配置主机与端口，不附加 v2 路径。
 
-已有环境的线上系统提示词由数据库管理，修改默认代码不会覆盖已发布版本。部署时应在提示词管理中同步并发布：
-“断面测点等注册空间要素的位置、属性和范围筛选使用 observation_service 的通用空间操作；断面历史观测和聚合统计使用 database_query。”
+空间联动与断面查询分别按各自 Skill 执行；断面数据使用 `database_query`，专题出图使用 `dm_duanmian_analysis`。
+已有环境若发布过断面转空间查询的提示词，应同步移除该规则，改为先加载“断面数据库查询” Skill；代码不会覆盖线上已发布版本。
 
 ### 观测站地图联动事件
 

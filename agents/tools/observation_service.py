@@ -37,11 +37,11 @@ _STATION_TYPE_ALIASES = {
 TOOL_NAME = "observation_service"
 TOOL_DESCRIPTION = (
     "查询海洋观测站的空间分布、类型、详情、在线状态、最新观测、要素趋势或指定时间区间观测数据。"
-    "也查询断面测点等已注册空间要素的位置和属性：list_spatial_elements 发现目录，"
+    "也查询已注册空间要素的位置和属性：list_spatial_elements 发现目录，"
     "get_spatial_element_detail 获取字段定义，query_spatial_element 执行通用查询。"
     "通用查询参数放在 query 对象中，字段及运算符以详情为准，不编造；结果为 GeoJSON，"
-    "不会自动发送地图动作。断面历史观测、聚合统计仍使用 database_query。"
-    "这是地图选区观测站和明确站名的站点数据的唯一业务工具；用户继续询问前一轮返回的某个站点时，"
+    "不会自动发送地图动作。"
+    "这是地图选区观测站和明确站名的业务观测站数据的唯一业务工具；用户继续询问前一轮返回的某个业务观测站时，"
     "无论问题涉及水温、盐度、风、浪、潮位、状态、最新值还是趋势，都必须继续使用本工具，"
     "不得改用 database_query。站点查询和单站分析结果会自动清除旧站点图层并联动地图。"
     "查询明确指定的站点时，如需先用 search_stations 解析站号，应传 station_name；"
@@ -89,7 +89,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
         "dataKey": {
             "type": "string",
             "minLength": 1,
-            "description": "get_spatial_element_detail 必填的目录要素标识，如 dm_duanmian。",
+            "description": "get_spatial_element_detail 必填的目录要素标识。",
         },
         "query": {
             **{key: value for key, value in QUERY_PARAMETERS.items() if key != "$defs"},

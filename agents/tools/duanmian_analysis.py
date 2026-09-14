@@ -10,14 +10,8 @@ from agents.tools.executor import ToolOutput
 TOOL_NAME = "dm_duanmian_analysis"
 TOOL_DESCRIPTION = (
     "打开前端断面专题分析浮层，由前端按参数查询并出图。"
-    "用户要求断面专题出图、沿水深曲线、断面剖面图、T-S 点聚图、营养盐结构、"
-    "溶解氧垂向分布或表层沿程变化图时使用。"
-    "仅发送展示动作，不返回实测数据或分析结论，不表示前端已完成出图；"
-    "用户只要求查询数据、统计或文字分析时使用 database_query。"
-    "不要为出图额外调用 database_query 或 map_action。"
-    "analysis 必填，无法确定分析类型时先询问用户。"
-    "可选参数只传用户指定或上下文明确的值；voyage 缺省时仅打开浮层，不自动查询。"
-    "ts-scatter 固定合并全部断面，会忽略 section；temp-section 固定使用 chemistry。"
+    "使用前加载“断面数据库查询” Skill；analysis 必填，可选参数不猜测。"
+    "仅返回动作回执，不返回实测数据或分析结论。voyage 缺省时仅打开浮层。"
 )
 ANALYSIS_TYPES = (
     "depth-curve", "temp-section", "ts-scatter", "nutrient", "do-profile", "surface",

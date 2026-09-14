@@ -105,10 +105,6 @@ def enrich_question_with_frontend_context(
         "不得根据旧选区解释本轮查询结果。"
         "直接回答本轮问题；除非用户明确询问或比较选区，不要复述框选范围、坐标。"
         "切换地点时不要先查询或展示旧选区。"
-        "执行选区内查询时必须完整使用 selected_area 的几何范围，不得遗漏、估算、扩大或改写坐标。"
-        "search_stations 必须完整使用 selected_area 中的 query_type 及其对应几何参数；"
-        "断面等通用要素使用 query_spatial_element，"
-        "在 query 中设置 mode=spatial：圆形转换为 spatial.relation=dwithin、point={lon,lat} 和 "
-        "distance=radius；多边形转换为 spatial.geometry={type:Polygon,coordinates:[polygon]}，"
-        "选区内或与选区相交的要素使用 relation=intersects，不用 bbox 替代原多边形。"
+        "执行选区内查询时必须完整使用 selected_area 中的 query_type 及其对应几何参数，"
+        "不得遗漏、估算、扩大或改写坐标。"
     )
