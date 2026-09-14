@@ -193,8 +193,9 @@ description: 查询或分析业务观测站时使用。
 任务相关时，通过 `load_skill` 加载正文；文件路径不会暴露给模型。Skill 根目录由
 `skills.directory` 配置，默认是项目下的 `skills`。
 
-项目内置“断面数据库查询” Skill，负责断面历史调查数据的查询路由、
-条件组织和结果解释；底层 `database_query` 保持为通用只读数据库工具。
+项目内置“断面业务” Skill，当前已实现断面数据库查询和专题分析图两项能力。
+数据查询、统计比较与描述性分析使用 `database_query`，专题分析图使用
+`dm_duanmian_analysis`；底层数据库工具保持通用只读职责。
 
 RAG、重排、数据库和 SQL 生成模型的地址、超时、重试、知识库 ID、数据库账号等
 普通参数统一配置在 `config/application.yaml`，不同环境的差异写入对应的
@@ -233,7 +234,7 @@ SPATIAL_API_KEY=
 复用 `tools.spatial` 和 `SPATIAL_API_KEY`，base_url 继续只配置主机与端口，不附加 v2 路径。
 
 空间联动与断面查询分别按各自 Skill 执行；断面数据使用 `database_query`，专题出图使用 `dm_duanmian_analysis`。
-已有环境若发布过断面转空间查询的提示词，应同步移除该规则，改为先加载“断面数据库查询” Skill；代码不会覆盖线上已发布版本。
+已有环境若发布过旧 Skill 名称或断面转空间查询的提示词，应同步更新为先加载“断面业务” Skill，再按其说明选择工具；代码不会覆盖线上已发布版本。
 
 ### 观测站地图联动事件
 
@@ -286,9 +287,9 @@ data: {
 | --- | --- |
 | `analysis` | 必填：`depth-curve` 沿水深曲线、`temp-section` 化学要素剖面、`ts-scatter` T-S 点聚图、`nutrient` 营养盐结构、`do-profile` 溶解氧垂向分布、`surface` 表层沿程变化 |
 | `section` | 可选：`E1` / `E2` / `E3`；`ts-scatter` 固定合并全部断面，传入的断面会被移除 |
-| `voyage` | 可选：有效的 `yyyy-MM` 或 `yyyy-MM-dd`；省略时不自动查询 |
+| `voyage` | 可选：有效的 `yyyy-MM`；省略时不自动查询 |
 | `elementType` | 可选：`chemistry` / `hydromet`；`temp-section` 始终设为 `chemistry` |
-| `element` | 可选：物理列名或中文短名，例如 `temperature_c` / `温度`，不做字段映射 |
+| `element` | 可选：仅接受 Schema 枚举中的中文名称（如 `温度 T`、`气温`），不接受物理列名；按 `elementType` 选择对应要素 |
 
 前端文档未定义 SSE 事件名和 JSON 外层；本次接入约定复用 `event: map_action`，
 以 operationId `dm_duanmian_analysis` 作为 `action_type`，`payload` 保持文档参数名（包括 `elementType`）。
@@ -296,7 +297,7 @@ data: {
 
 ```text
 event: map_action
-data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":"<会话ID>","run_id":"<运行ID>","batch_id":"call-analysis","action_id":"call-analysis-1","seq":1,"action_type":"dm_duanmian_analysis","payload":{"analysis":"temp-section","section":"E1","voyage":"2025-11","elementType":"chemistry","element":"温度"}}}
+data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":"<会话ID>","run_id":"<运行ID>","batch_id":"call-analysis","action_id":"call-analysis-1","seq":1,"action_type":"dm_duanmian_analysis","payload":{"analysis":"temp-section","section":"E1","voyage":"2025-11","elementType":"chemistry","element":"温度 T"}}}
 ```
 
 仍按 `action_id` 去重、同一 `batch_id` 内按 `seq` 顺序处理。参数无效时不发送动作。

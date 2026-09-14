@@ -16,7 +16,7 @@ class DuanmianAnalysisStreamTest(unittest.IsolatedAsyncioTestCase):
         llm = FakeLlm([
             ([], [{"id": "call-analysis", "name": "dm_duanmian_analysis", "args": {
                 "analysis": "temp-section", "section": "E1", "voyage": "2025-11",
-                "element": "温度",
+                "element": "温度 T",
             }}]),
             (["已发送出图指令。"], []),
         ])
@@ -44,7 +44,7 @@ class DuanmianAnalysisStreamTest(unittest.IsolatedAsyncioTestCase):
             "action_id": "call-analysis-1", "seq": 1,
             "action_type": "dm_duanmian_analysis", "payload": {
                 "analysis": "temp-section", "section": "E1", "voyage": "2025-11",
-                "elementType": "chemistry", "element": "温度",
+                "elementType": "chemistry", "element": "温度 T",
             },
         }])
         self.assertEqual(events[-1][0], "done")
