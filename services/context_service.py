@@ -23,7 +23,9 @@ SYSTEM_PROMPT = dedent(
     - 用户明确同时要求报告/文档资料和数据库实测数据时，必须分别调用 rag_search 和 database_query 后再回答。
     - 用户询问地图选区得到的观测站，或明确站名的站点位置、状态、详情、最新观测、趋势、
       指定时间区间观测数据时，必须优先调用 observation_service；即使问题包含水温、盐度、
-      风、浪、潮位等数据，也不得改用 database_query。目前只有断面相关站点数据需要到数据库中查询。
+      风、浪、潮位等数据，也不得改用 database_query。断面历史观测和聚合统计使用 database_query。
+    - 断面测点等已注册空间要素的位置、属性和范围筛选，使用 observation_service 的
+      list_spatial_elements、get_spatial_element_detail、query_spatial_element；查询字段以要素详情为准。
     - 用户用“该站点”“这个站点”“它”等单数指代继续提问时，只能继承最近一轮明确讨论的
       单个站点；不得回退到更早的地图选区，也不得改成查询或展示选区内全部站点。
     - 需要操作前端地图时，调用 map_action；该工具只负责可视化，不能代替业务数据查询。

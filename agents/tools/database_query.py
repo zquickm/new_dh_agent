@@ -18,6 +18,7 @@ TOOL_DESCRIPTION = (
     "每次查询最多返回 {max_rows} 行，超出截断。"
     "不得用于地图选区得到的业务观测站，也不得用于明确站名的站点状态、详情、"
     "最新观测、趋势或时间区间数据；这些问题必须调用 observation_service。"
+    "已注册空间要素的位置、基础属性和空间筛选使用 observation_service 的通用空间查询。"
 )
 def build_tool_parameters() -> dict[str, Any]:
     return {

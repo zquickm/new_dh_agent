@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from agents.tools.executor import ToolOutput
+from agents.tools.spatial_query import QUERY_PARAMETERS, SpatialElementQuery
 from config.settings import get_settings
 from tool_backends.spatial_backend import SpatialServiceClient
 
@@ -36,6 +37,10 @@ _STATION_TYPE_ALIASES = {
 TOOL_NAME = "observation_service"
 TOOL_DESCRIPTION = (
     "查询海洋观测站的空间分布、类型、详情、在线状态、最新观测、要素趋势或指定时间区间观测数据。"
+    "也查询断面测点等已注册空间要素的位置和属性：list_spatial_elements 发现目录，"
+    "get_spatial_element_detail 获取字段定义，query_spatial_element 执行通用查询。"
+    "通用查询参数放在 query 对象中，字段及运算符以详情为准，不编造；结果为 GeoJSON，"
+    "不会自动发送地图动作。断面历史观测、聚合统计仍使用 database_query。"
     "这是地图选区观测站和明确站名的站点数据的唯一业务工具；用户继续询问前一轮返回的某个站点时，"
     "无论问题涉及水温、盐度、风、浪、潮位、状态、最新值还是趋势，都必须继续使用本工具，"
     "不得改用 database_query。站点查询和单站分析结果会自动清除旧站点图层并联动地图。"
@@ -60,12 +65,17 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "observation_summary",
                 "observation_trend",
                 "observation_range",
+                "list_spatial_elements",
+                "get_spatial_element_detail",
+                "query_spatial_element",
             ],
             "description": (
                 "要执行的观测服务操作。参数要求：search_stations 需要 query_type "
                 "及对应几何参数；station_status 需要 tznos；station_detail 和 "
                 "observation_summary 需要 tzno；observation_trend 需要 tzno、element；"
                 "observation_range 需要 tzno、data_type、start_time、end_time。"
+                "get_spatial_element_detail 需要 dataKey；query_spatial_element 需要 query；"
+                "list_spatial_elements 不需要其他参数。"
             ),
         },
         "query_type": {
@@ -75,6 +85,15 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "search_stations 使用的空间查询类型：bbox 为外接矩形，circle 为圆形，"
                 "polygon 为多边形。"
             ),
+        },
+        "dataKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "get_spatial_element_detail 必填的目录要素标识，如 dm_duanmian。",
+        },
+        "query": {
+            **{key: value for key, value in QUERY_PARAMETERS.items() if key != "$defs"},
+            "description": "query_spatial_element 必填；对应 v2 /query 请求体，勿混用旧站点查询参数。",
         },
         "bbox": {
             "type": "array",
@@ -220,7 +239,22 @@ TOOL_PARAMETERS: dict[str, Any] = {
         },
     },
     "required": ["operation"],
+    "$defs": QUERY_PARAMETERS["$defs"],
     "allOf": [
+        {
+            "if": {
+                "properties": {"operation": {"const": "get_spatial_element_detail"}},
+                "required": ["operation"],
+            },
+            "then": {"required": ["dataKey"]},
+        },
+        {
+            "if": {
+                "properties": {"operation": {"const": "query_spatial_element"}},
+                "required": ["operation"],
+            },
+            "then": {"required": ["query"]},
+        },
         {
             "if": {
                 "properties": {"operation": {"const": "search_stations"}},
@@ -328,6 +362,27 @@ class ObservationServiceTool:
 
     async def execute(self, operation: str, **arguments: Any) -> ToolOutput:
         client_events: tuple[dict[str, Any], ...] = ()
+        if operation in {
+            "list_spatial_elements", "get_spatial_element_detail", "query_spatial_element",
+        }:
+            allowed = {
+                "list_spatial_elements": set(),
+                "get_spatial_element_detail": {"dataKey"},
+                "query_spatial_element": {"query"},
+            }[operation]
+            if arguments.keys() - allowed:
+                raise ValueError(f"{operation} 仅接受参数：{', '.join(sorted(allowed)) or '无'}")
+            if operation == "list_spatial_elements":
+                data = {"elements": await self.client.list_spatial_elements()}
+            elif operation == "get_spatial_element_detail":
+                data_key = self._required_text(arguments.get("dataKey"), "dataKey")
+                data = await self.client.get_spatial_element_detail(data_key)
+            else:
+                query = SpatialElementQuery.model_validate(arguments.get("query"))
+                payload = query.model_dump(exclude_unset=True, exclude_none=True)
+                json.dumps(payload, allow_nan=False)
+                data = await self.client.query_spatial_element(payload)
+            return ToolOutput(content={**data, "operation": operation})
         if operation == "list_station_types":
             data = await self.client.list_station_types()
         elif operation == "search_stations":
