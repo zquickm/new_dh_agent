@@ -392,10 +392,6 @@ class ChatService:
             answer = "".join(answer_parts)
             if not answer.strip():
                 raise RuntimeError("AgentLoop 未生成有效回答")
-            database_footer = CitationService.database_footer(registered_sources)
-            if database_footer:
-                answer += database_footer
-                await event_queue.put({"event": "token", "data": {"content": database_footer}})
             answer, cited_sources = CitationService.finalize(
                 answer, registered_sources
             )

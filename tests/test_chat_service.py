@@ -657,7 +657,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         )]
         done = events[-1]["data"]
         self.assertEqual(events[-1]["event"], "done")
-        self.assertEqual(done["answer"], "平均水温为20.5℃。\n\n数据来源：断面数据库[[cite:1]]")
+        self.assertEqual(done["answer"], "平均水温为20.5℃。")
         self.assertEqual("".join(event["data"]["content"] for event in events
                                  if event["event"] == "token"), done["answer"])
         self.assertEqual(done["sources"][0]["source_type"], "database")
