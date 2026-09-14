@@ -21,14 +21,6 @@ def _article_identity(source: dict[str, Any]) -> tuple[str, str]:
 
 class CitationService:
     @staticmethod
-    def database_footer(sources: list[dict[str, Any]]) -> str:
-        markers = "".join(
-            f"[[cite:{source['citation_id']}]]"
-            for source in sources if source.get("source_type") == "database"
-        )
-        return f"\n\n数据来源：断面数据库{markers}" if markers else ""
-
-    @staticmethod
     def finalize(
         answer: str,
         sources: list[dict[str, Any]],
@@ -67,4 +59,5 @@ class CitationService:
             source
             for source in sources
             if int(source["citation_id"]) in cited_ids
+            or source.get("source_type") == "database"
         ]

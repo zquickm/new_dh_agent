@@ -30,9 +30,8 @@ class CitationRegistryTest(unittest.TestCase):
         self.assertEqual([item["citation_id"] for item in sources], [1, 2])
         self.assertIn("第二批", sources[0]["preview"])
         answer = registry.transform_answer("正文<<SRC_2>>")
-        answer += CitationService.database_footer(sources)
         answer, cited = CitationService.finalize(answer, sources)
-        self.assertEqual(answer, "正文[[cite:2]]\n\n数据来源：断面数据库[[cite:1]]")
+        self.assertEqual(answer, "正文[[cite:2]]")
         self.assertEqual(len(cited), 2)
         self.assertEqual(CitationRegistry().sources(), [])
 
@@ -363,7 +362,7 @@ class CitationServiceTest(unittest.TestCase):
         ):
             with self.subTest(answer=answer):
                 _, selected = CitationService.finalize(answer, sources)
-                self.assertEqual(selected, [])
+                self.assertEqual(selected, [sources[2]])
 
     def test_finalize_removes_invalid_markers_and_unused_sources(self):
         sources = [
