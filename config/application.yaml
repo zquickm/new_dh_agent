@@ -7,6 +7,9 @@ internal_request:
   token: "dh-internal-token-change-in-production"
 
 llm:
+  diagnostics_enabled: true # 临时排查模型工具调用；定位后可关闭
+  diagnostics_max_chars: 16384 # 每轮、每层的文本/工具日志分别限额
+  diagnostics_max_events: 100
   model: "dsv4"
   base_url: "http://71.10.60.31:8900/v1"
   api_key: "${NEW_DH_LLM__API_KEY:}"

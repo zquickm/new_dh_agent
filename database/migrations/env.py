@@ -94,6 +94,11 @@ async def run_migrations_online() -> None:
         if acquired != 1:
             raise RuntimeError("could not acquire MySQL schema migration lock")
         try:
+            # GET_LOCK starts SQLAlchemy autobegin. End that transaction before
+            # Alembic inspects the connection, otherwise it treats migration work
+            # as externally managed and never commits the version-table update.
+            # MySQL advisory locks are connection-scoped and survive COMMIT.
+            await connection.commit()
             await connection.run_sync(do_run_migrations)
         finally:
             await connection.execute(

@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import inspect
 from collections.abc import AsyncIterator
 from time import perf_counter
 from typing import Any, Optional
 
 from agents.citations import CitationRegistry
+from agents.llm_diagnostics import observation_log_summary
 from agents.events import AgentEvent
 from agents.llm_client import HelloAgentsLLM
 from agents.skills import SkillCatalog
@@ -132,10 +134,9 @@ class AgentLoop:
         has_streamed_content = False
         tool_sequence = 0
         logger.info(
-            "agent_started run_id=%s question=%r history=%r",
+            "agent_started run_id=%s history_count=%d",
             run_id,
-            question,
-            history,
+            len(history),
         )
 
         for round_number in range(1, self.max_rounds + 1):
@@ -160,19 +161,23 @@ class AgentLoop:
                 is_forced_final_round=is_forced_final_round,
             )
             logger.info(
-                "llm_round_started run_id=%s round=%s messages=%r tools=%r",
+                "llm_round_started run_id=%s round=%s message_sizes=%r tools=%r",
                 run_id,
                 round_number,
-                round_messages,
+                [(m.get("role"), len(str(m.get("content") or ""))) for m in round_messages],
                 [
                     item.get("function", {}).get("name")
                     for item in available_tools or []
                 ],
             )
 
+            stream_kwargs = {}
+            if "run_id" in inspect.signature(self.llm.stream).parameters:
+                stream_kwargs = {"run_id": run_id, "round_number": round_number}
             async for content, calls in self.llm.stream(
                 round_messages,
                 available_tools,
+                **stream_kwargs,
             ):
                 if content:
                     has_answer_content = has_answer_content or bool(content.strip())
@@ -250,19 +255,19 @@ class AgentLoop:
             )
             logger.info(
                 "llm_round_completed run_id=%s round=%s duration_ms=%.1f "
-                "content=%r tool_calls=%r",
+                "content_chars=%d tool_names=%r",
                 run_id,
                 round_number,
                 (perf_counter() - round_started_at) * 1000,
-                content,
-                normalized_calls,
+                len(content),
+                [call["name"] for call in normalized_calls],
             )
 
             if not normalized_calls:
                 if not has_answer_content:
                     raise RuntimeError("模型未生成有效回答")
                 logger.info(
-                    "agent_completed run_id=%s round=%s reason=stop",
+                    "agent_completed run_id=%s round=%s reason=no_tool_calls",
                     run_id,
                     round_number,
                 )
@@ -431,14 +436,15 @@ class AgentLoop:
                 if success:
                     logger.info(
                         "tool_completed run_id=%s round=%s tool=%s call_id=%s "
-                        "duration_ms=%.1f result=%r client_events=%r",
+                        "duration_ms=%.1f result_chars=%d client_event_count=%d summary=%r",
                         run_id,
                         round_number,
                         name,
                         tool_call["id"],
                         duration_ms,
-                        observation,
-                        client_events,
+                        len(observation),
+                        len(client_events),
+                        observation_log_summary(observation),
                     )
 
                 if retrieval_data is not None:

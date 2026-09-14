@@ -104,6 +104,9 @@ class InternalRequestSettings(BaseModel):
 
 
 class LLMSettings(BaseModel):
+    diagnostics_enabled: bool = False
+    diagnostics_max_chars: int = Field(default=16384, ge=256, le=1048576)
+    diagnostics_max_events: int = Field(default=100, ge=1, le=10000)
     model: str
     base_url: str
     api_key: SecretStr = SecretStr("")
