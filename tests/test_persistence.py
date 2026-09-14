@@ -11,6 +11,7 @@ from database.models import (
     ConversationMessageModel,
     ConversationModel,
     ConversationRunModel,
+    MessageFeedbackModel,
     ToolCallAuditModel,
 )
 from database.runtime import build_database_url
@@ -32,6 +33,7 @@ class PersistenceSchemaTest(unittest.TestCase):
         message = Base.metadata.tables["agent_conversation_message"]
         run = Base.metadata.tables["agent_conversation_run"]
         tool_call = Base.metadata.tables["agent_tool_call_audit"]
+        feedback = Base.metadata.tables["agent_message_feedback"]
 
         self.assertIn("user_id", conversation.c)
         self.assertIn("map_context", conversation.c)
@@ -59,6 +61,15 @@ class PersistenceSchemaTest(unittest.TestCase):
             )
         )
         self.assertEqual(ConversationRunModel.__tablename__, "agent_conversation_run")
+        self.assertEqual(MessageFeedbackModel.__tablename__, "agent_message_feedback")
+        self.assertIn("message_id", feedback.c)
+        self.assertIn("username_snapshot", feedback.c)
+        self.assertTrue(
+            any(
+                constraint.name == "fk_agent_feedback_message"
+                for constraint in feedback.foreign_key_constraints
+            )
+        )
         self.assertIn("heartbeat_at", run.c)
         self.assertIn("duration_ms", run.c)
         self.assertIn("error_message", run.c)
@@ -93,6 +104,7 @@ class PersistenceSchemaTest(unittest.TestCase):
         self.assertIn("CREATE TABLE IF NOT EXISTS `agent_conversation_run`", sql)
         self.assertIn("INSERT INTO `agent_conversation_run`", sql)
         self.assertIn("CREATE TABLE IF NOT EXISTS `agent_tool_call_audit`", sql)
+        self.assertIn("CREATE TABLE IF NOT EXISTS `agent_message_feedback`", sql)
         self.assertIn("alembic_version", sql)
 
     def test_stream_state_migration_resumes_after_partial_mysql_ddl(self):

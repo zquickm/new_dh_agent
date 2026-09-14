@@ -11,6 +11,8 @@ from config.settings import get_settings
 from controller.agent_controller import router as agent_router
 from controller.conversation_controller import router as conversation_router
 from controller.health_controller import router as health_router
+from controller.feedback_controller import admin_router as admin_feedback_router
+from controller.feedback_controller import user_router as user_feedback_router
 from controller.recommend_controller import router as recommend_router
 from controller.system_prompt_controller import router as system_prompt_router
 from database.runtime import database_runtime
@@ -52,9 +54,11 @@ app.add_middleware(
 )
 app.include_router(health_router)
 app.include_router(conversation_router)
+app.include_router(user_feedback_router)
 app.include_router(recommend_router)
 app.include_router(agent_router)
 app.include_router(system_prompt_router)
+app.include_router(admin_feedback_router)
 
 
 @app.exception_handler(HTTPException)

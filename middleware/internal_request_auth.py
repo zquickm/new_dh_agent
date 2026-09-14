@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 from hmac import compare_digest
+from urllib.parse import unquote
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -24,6 +26,29 @@ def get_current_user_id(request: Request) -> str:
         raise HTTPException(status_code=401, detail="缺少或无效的网关用户身份")
     # Stable primary key, not the editable username or per-login token id.
     return user_ids[0]
+
+
+class GatewayIdentity(NamedTuple):
+    user_id: str
+    username: str
+
+
+def get_current_user_identity(request: Request) -> GatewayIdentity:
+    user_id = get_current_user_id(request)
+    usernames = request.headers.getlist("x-username")
+    if len(usernames) != 1:
+        raise HTTPException(status_code=401, detail="缺少或无效的网关用户名")
+    try:
+        username = unquote(usernames[0], encoding="utf-8", errors="strict").strip()
+    except UnicodeError as exc:
+        raise HTTPException(status_code=401, detail="缺少或无效的网关用户名") from exc
+    if (
+        not username
+        or len(username) > 64
+        or any(ord(character) < 32 for character in username)
+    ):
+        raise HTTPException(status_code=401, detail="缺少或无效的网关用户名")
+    return GatewayIdentity(user_id=user_id, username=username)
 
 
 def get_current_admin_id(request: Request) -> int:

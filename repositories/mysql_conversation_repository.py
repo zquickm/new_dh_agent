@@ -10,6 +10,7 @@ from database.models import (
     ConversationMessageModel,
     ConversationModel,
     ConversationRunModel,
+    MessageFeedbackModel,
     ToolCallAuditModel,
 )
 from database.runtime import DatabaseRuntime
@@ -21,6 +22,7 @@ from schemas.conversation import (
     ConversationSummary,
     ToolCallAudit,
 )
+from schemas.feedback import MessageFeedback
 
 
 def _now() -> datetime:
@@ -41,7 +43,10 @@ def _duration_ms(started_at: datetime, finished_at: datetime) -> int:
     return max(0, int((finished_at - started_at).total_seconds() * 1000))
 
 
-def _message_schema(item: ConversationMessageModel) -> ConversationMessage:
+def _message_schema(
+    item: ConversationMessageModel,
+    feedback: Optional[MessageFeedbackModel] = None,
+) -> ConversationMessage:
     return ConversationMessage(
         id=item.id,
         role=item.role,
@@ -54,6 +59,18 @@ def _message_schema(item: ConversationMessageModel) -> ConversationMessage:
         status=item.status,
         error_code=item.error_code,
         updated_at=_iso(item.updated_at),
+        feedback=(
+            MessageFeedback(
+                id=feedback.id,
+                feedback_type=feedback.feedback_type,
+                comment=feedback.comment,
+                status=feedback.status,
+                created_at=_iso(feedback.created_at),
+                updated_at=_iso(feedback.updated_at),
+            )
+            if feedback is not None
+            else None
+        ),
     )
 
 
@@ -167,12 +184,29 @@ class MySQLConversationRepository:
                     .order_by(ConversationMessageModel.sequence_no)
                 )
             ).scalars().all()
+            feedback_by_message = {}
+            message_ids = [message.id for message in messages]
+            if message_ids:
+                feedback_items = (
+                    await session.execute(
+                        select(MessageFeedbackModel).where(
+                            MessageFeedbackModel.message_id.in_(message_ids),
+                            MessageFeedbackModel.status == "ACTIVE",
+                        )
+                    )
+                ).scalars().all()
+                feedback_by_message = {
+                    feedback.message_id: feedback for feedback in feedback_items
+                }
             return ConversationDetail(
                 **_summary_schema(item).model_dump(),
                 context_enabled=item.context_enabled,
                 context_message_limit=item.context_message_limit,
                 context_token_limit=item.context_token_limit,
-                messages=[_message_schema(message) for message in messages],
+                messages=[
+                    _message_schema(message, feedback_by_message.get(message.id))
+                    for message in messages
+                ],
             )
 
     async def list(self, limit: int, *, user_id: str) -> list[ConversationSummary]:
