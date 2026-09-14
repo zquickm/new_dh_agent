@@ -86,6 +86,42 @@ class ConversationMessageModel(Base):
     updated_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
 
 
+class MessageFeedbackModel(Base):
+    __tablename__ = "agent_message_feedback"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    message_id: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+    )
+    feedback_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    comment: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'ACTIVE'")
+    )
+    username_snapshot: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["message_id"],
+            ["agent_conversation_message.id"],
+            name="fk_agent_feedback_message",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("message_id", name="uq_agent_feedback_message"),
+        Index("ix_agent_feedback_status_updated", "status", "updated_at", "id"),
+        Index(
+            "ix_agent_feedback_type_updated",
+            "feedback_type",
+            "updated_at",
+            "id",
+        ),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+
 class ConversationRunModel(Base):
     __tablename__ = "agent_conversation_run"
     __table_args__ = (

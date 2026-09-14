@@ -1,5 +1,7 @@
 from database.runtime import database_runtime
 from repositories.mysql_conversation_repository import MySQLConversationRepository
+from repositories.mysql_feedback_repository import MySQLFeedbackRepository
 
 
 conversation_repository = MySQLConversationRepository(database_runtime)
+feedback_repository = MySQLFeedbackRepository(database_runtime)

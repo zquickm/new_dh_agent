@@ -2,6 +2,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from schemas.feedback import MessageFeedback
+
 
 class CreateConversationRequest(BaseModel):
     title: str = "新会话"
@@ -19,6 +21,7 @@ class ConversationMessage(BaseModel):
     sources: list[dict] = Field(default_factory=list)
     images: list[dict] = Field(default_factory=list)
     recommend_questions: list[dict] = Field(default_factory=list)
+    feedback: Optional[MessageFeedback] = None
 
 
 class ConversationSummary(BaseModel):

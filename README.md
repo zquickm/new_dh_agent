@@ -62,6 +62,11 @@ Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
   调用的状态、耗时、脱敏参数、结果摘要和失败原因。
 - `GET /conversations/{id}/runs/{run_id}/tool-calls/{tool_call_id}`：查询单次工具
   调用审计详情。
+- `PUT /conversations/{id}/messages/{message_id}/feedback`：为本人会话中的已结束
+  助手回复提交或更新点赞、点踩及可选评论；请求体使用 `feedbackType` 和
+  `comment`。
+- `DELETE /conversations/{id}/messages/{message_id}/feedback`：软撤回本人对该
+  回复的反馈，重复撤回保持幂等。
 - `POST /agent/chat/stream`：只允许续写自己的会话；未传 `conversation_id` 时，
   自动为当前用户创建会话，通过首个 `conversation` SSE 事件返回 ID。
 - 历史消息、引用来源、消息写入和当前地图选区均按用户与会话 ID 隔离；选区只临时注入本轮模型输入，不写入消息正文。
@@ -173,6 +178,11 @@ Skill 索引、前端地图上下文、用户问题和每轮约束仍由代码�
 
 管理接口只接受 Gateway 注入的 `ADMIN` 身份；外部地址由 Gateway 的
 `/agent-api/admin/**` 路由映射至本服务的 `/admin/**`。
+
+管理员反馈接口同样位于该路由下：`GET /admin/feedback` 支持按评价类型、状态、
+用户、关键字和时间分页筛选；`GET /admin/feedback/{id}` 返回反馈所在问答的有限
+上下文、运行摘要及工具调用摘要。两个接口都通过 `get_current_admin_id` 执行下游
+`ADMIN` 二次校验。
 
 ## Skill 按需加载
 
