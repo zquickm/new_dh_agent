@@ -15,13 +15,18 @@ llm:
   api_key: "${NEW_DH_LLM__API_KEY:}"
   temperature: 0.6
   timeout: 120
+  reasoning_effort: none
+  context_window_tokens: 131072
+  max_output_tokens: 8192
+  token_safety_margin: 2048
+  tokenizer_path: resources/tokenizers/deepseek-v4/deepseek_v4_tokenizer/tokenizer.json
 
 react:
   max_rounds: 5
   force_answer_on_last_round: true
 
 conversation:
-  max_history_messages: 20
+  max_history_messages: 1000
   run_heartbeat_seconds: 10
   run_lease_seconds: 60
   run_recovery_interval_seconds: 15

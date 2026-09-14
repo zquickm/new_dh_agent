@@ -20,6 +20,7 @@ from schemas.conversation import (
     ConversationMessage,
     ConversationRun,
     ConversationSummary,
+    ContextUsage,
     ToolCallAudit,
 )
 from schemas.feedback import MessageFeedback
@@ -95,6 +96,20 @@ def _run_schema(item: ConversationRunModel) -> ConversationRun:
         system_prompt_version_id=item.system_prompt_version_id,
         system_prompt_version_no=item.system_prompt_version_no,
         system_prompt_sha256=item.system_prompt_sha256,
+        context_window_tokens=item.context_window_tokens,
+        input_budget_tokens=item.input_budget_tokens,
+        estimated_input_tokens=item.estimated_input_tokens,
+        last_prompt_tokens=item.last_prompt_tokens,
+        last_completion_tokens=item.last_completion_tokens,
+        prompt_tokens=item.prompt_tokens or 0,
+        completion_tokens=item.completion_tokens or 0,
+        total_tokens=item.total_tokens or 0,
+        history_messages_included=item.history_messages_included or 0,
+        history_messages_dropped=item.history_messages_dropped or 0,
+        tool_results_truncated=item.tool_results_truncated or 0,
+        tokenizer_name=item.tokenizer_name,
+        token_usage_source=item.token_usage_source,
+        token_round_number=item.token_round_number or 0,
         started_at=_iso(item.started_at),
         finished_at=_optional_iso(item.finished_at),
         duration_ms=item.duration_ms,
@@ -104,6 +119,32 @@ def _run_schema(item: ConversationRunModel) -> ConversationRun:
         error_message=item.error_message,
         created_at=_iso(item.created_at),
         updated_at=_iso(item.updated_at),
+    )
+
+
+def _context_usage_schema(item: Optional[ConversationRunModel]) -> ContextUsage:
+    if item is None or item.context_window_tokens is None:
+        return ContextUsage()
+    input_tokens = item.last_prompt_tokens or item.estimated_input_tokens or 0
+    output_tokens = item.last_completion_tokens or 0
+    used_tokens = input_tokens + output_tokens
+    return ContextUsage(
+        context_window_tokens=item.context_window_tokens,
+        input_budget_tokens=item.input_budget_tokens or 0,
+        estimated_input_tokens=item.estimated_input_tokens or 0,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        used_tokens=used_tokens,
+        usage_percent=round(used_tokens * 100 / item.context_window_tokens, 2),
+        history_messages_included=item.history_messages_included or 0,
+        history_messages_dropped=item.history_messages_dropped or 0,
+        tool_results_truncated=item.tool_results_truncated or 0,
+        tokenizer=item.tokenizer_name or "deepseek-v4-official",
+        round_number=item.token_round_number or 0,
+        source=item.token_usage_source or "estimated",
+        cumulative_input_tokens=item.prompt_tokens or 0,
+        cumulative_output_tokens=item.completion_tokens or 0,
+        cumulative_total_tokens=item.total_tokens or 0,
     )
 
 
@@ -146,8 +187,8 @@ class MySQLConversationRepository:
             user_id=int(user_id),
             title=title.strip() or "新会话",
             context_enabled=True,
-            context_message_limit=20,
-            context_token_limit=None,
+            context_message_limit=1000,
+            context_token_limit=131072,
             map_context=None,
             message_count=0,
             version=0,
@@ -198,11 +239,23 @@ class MySQLConversationRepository:
                 feedback_by_message = {
                     feedback.message_id: feedback for feedback in feedback_items
                 }
+            latest_run = (
+                await session.execute(
+                    select(ConversationRunModel)
+                    .where(
+                        ConversationRunModel.conversation_id == conversation_id,
+                        ConversationRunModel.user_id == owner_id,
+                    )
+                    .order_by(ConversationRunModel.started_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
             return ConversationDetail(
                 **_summary_schema(item).model_dump(),
                 context_enabled=item.context_enabled,
                 context_message_limit=item.context_message_limit,
                 context_token_limit=item.context_token_limit,
+                context_usage=_context_usage_schema(latest_run),
                 messages=[
                     _message_schema(message, feedback_by_message.get(message.id))
                     for message in messages
@@ -667,6 +720,40 @@ class MySQLConversationRepository:
                 conversation.updated_at = now
                 conversation.version += 1
         return _message_schema(message)
+
+    async def update_run_token_usage(
+        self, run_id: str, usage: dict, *, user_id: str
+    ) -> None:
+        now = _now()
+        async with self._runtime.session_factory() as session:
+            async with session.begin():
+                run = (
+                    await session.execute(
+                        select(ConversationRunModel)
+                        .where(
+                            ConversationRunModel.id == run_id,
+                            ConversationRunModel.user_id == int(user_id),
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if run is None:
+                    raise KeyError(run_id)
+                run.context_window_tokens = int(usage["context_window_tokens"])
+                run.input_budget_tokens = int(usage["input_budget_tokens"])
+                run.estimated_input_tokens = int(usage["estimated_input_tokens"])
+                run.last_prompt_tokens = int(usage.get("input_tokens") or 0)
+                run.last_completion_tokens = int(usage.get("output_tokens") or 0)
+                run.prompt_tokens = int(usage.get("cumulative_input_tokens") or 0)
+                run.completion_tokens = int(usage.get("cumulative_output_tokens") or 0)
+                run.total_tokens = int(usage.get("cumulative_total_tokens") or 0)
+                run.history_messages_included = int(usage.get("history_messages_included") or 0)
+                run.history_messages_dropped = int(usage.get("history_messages_dropped") or 0)
+                run.tool_results_truncated = int(usage.get("tool_results_truncated") or 0)
+                run.tokenizer_name = str(usage.get("tokenizer") or "deepseek-v4-official")
+                run.token_usage_source = str(usage.get("source") or "estimated")
+                run.token_round_number = int(usage.get("round_number") or 0)
+                run.updated_at = now
 
     async def heartbeat_run(
         self,

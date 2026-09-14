@@ -6,7 +6,7 @@ import logging
 import inspect
 from collections.abc import AsyncIterator
 from time import perf_counter
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from agents.citations import CitationRegistry
 from agents.llm_diagnostics import observation_log_summary
@@ -19,6 +19,11 @@ from agents.tools.registry import build_skill_catalog, build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage, FrontendContext
 from services.context_service import ContextService, SYSTEM_PROMPT
+from services.token_budget_service import (
+    DeepSeekV4TokenCounter,
+    TOKENIZER_NAME,
+    TokenBudgetService,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -99,6 +104,14 @@ class AgentLoop:
         self.context_service = ContextService()
         self.max_rounds = settings.react.max_rounds
         self.force_answer = settings.react.force_answer_on_last_round
+        self.context_window_tokens = settings.llm.context_window_tokens
+        self.max_output_tokens = settings.llm.max_output_tokens
+        self.token_safety_margin = settings.llm.token_safety_margin
+        self.input_budget_tokens = settings.llm.input_budget_tokens
+        self.token_budget = TokenBudgetService(
+            DeepSeekV4TokenCounter(settings.llm.resolved_tokenizer_path()),
+            self.input_budget_tokens,
+        )
 
     @property
     def model_name(self) -> str:
@@ -116,10 +129,33 @@ class AgentLoop:
         frontend_context: FrontendContext | None = None,
         audit_recorder: ToolAuditRecorder | None = None,
         system_prompt: str = SYSTEM_PROMPT,
+        context_enabled: bool = True,
+        context_message_limit: int | None = None,
+        context_token_limit: int | None = None,
+        context_usage_callback: Callable[[dict[str, Any]], Any] | None = None,
     ) -> AsyncIterator[AgentEvent]:
-        limit = get_settings().conversation.max_history_messages
+        configured_limit = get_settings().conversation.max_history_messages
+        limit = min(context_message_limit or configured_limit, configured_limit)
+        if not context_enabled:
+            limit = 0
+        window_tokens = min(
+            context_token_limit or self.context_window_tokens,
+            self.context_window_tokens,
+        )
+        input_budget_tokens = window_tokens - self.max_output_tokens - self.token_safety_margin
+        if input_budget_tokens <= 0:
+            raise ValueError("会话上下文上限不足以容纳输出预留")
+        budget_service = (
+            self.token_budget
+            if input_budget_tokens == self.input_budget_tokens
+            else TokenBudgetService(self.token_budget.counter, input_budget_tokens)
+        )
         tool_definitions = self.tools.definitions()
         skill_summaries = self.skills.summaries() if self.skills else ()
+        all_history_groups = self.context_service.history_groups(history, len(history))
+        history_groups = self.context_service.history_groups(history, limit)
+        history_group_sizes = tuple(len(group) for group in history_groups)
+        original_history_count = sum(len(group) for group in all_history_groups)
         messages = self.context_service.build_messages(
             question=question,
             history=history,
@@ -129,6 +165,10 @@ class AgentLoop:
             system_prompt=system_prompt,
         )
         input_message_count = len(messages)
+        cumulative_input_tokens = 0
+        cumulative_output_tokens = 0
+        latest_usage: dict[str, Any] = {}
+        cumulative_tool_results_truncated = 0
         citation_registry = CitationRegistry()
         observation_map_rendered = False
         has_streamed_content = False
@@ -160,6 +200,39 @@ class AgentLoop:
                 max_rounds=self.max_rounds,
                 is_forced_final_round=is_forced_final_round,
             )
+            fitted = budget_service.fit(
+                round_messages,
+                history_group_sizes=history_group_sizes,
+                original_history_count=original_history_count,
+                tools=available_tools,
+            )
+            cumulative_tool_results_truncated += fitted.tool_results_truncated
+            history_group_sizes = fitted.history_group_sizes
+            messages = [{**messages[0]}, *fitted.messages[1:]]
+            input_message_count = 1 + fitted.history_messages_included + 1
+            round_messages = fitted.messages
+            latest_usage = {
+                "context_window_tokens": window_tokens,
+                "input_budget_tokens": input_budget_tokens,
+                "estimated_input_tokens": fitted.estimated_input_tokens,
+                "input_tokens": fitted.estimated_input_tokens,
+                "output_tokens": 0,
+                "used_tokens": fitted.estimated_input_tokens,
+                "usage_percent": round(fitted.estimated_input_tokens * 100 / window_tokens, 2),
+                "history_messages_included": fitted.history_messages_included,
+                "history_messages_dropped": fitted.history_messages_dropped,
+                "tool_results_truncated": cumulative_tool_results_truncated,
+                "tokenizer": TOKENIZER_NAME,
+                "round_number": round_number,
+                "source": "estimated",
+                "cumulative_input_tokens": cumulative_input_tokens,
+                "cumulative_output_tokens": cumulative_output_tokens,
+                "cumulative_total_tokens": cumulative_input_tokens + cumulative_output_tokens,
+            }
+            if context_usage_callback is not None:
+                callback_result = context_usage_callback(latest_usage)
+                if inspect.isawaitable(callback_result):
+                    await callback_result
             logger.info(
                 "llm_round_started run_id=%s round=%s message_sizes=%r tools=%r",
                 run_id,
@@ -172,8 +245,12 @@ class AgentLoop:
             )
 
             stream_kwargs = {}
-            if "run_id" in inspect.signature(self.llm.stream).parameters:
+            stream_parameters = inspect.signature(self.llm.stream).parameters
+            if "run_id" in stream_parameters:
                 stream_kwargs = {"run_id": run_id, "round_number": round_number}
+            upstream_usage: dict[str, int] = {}
+            if "usage_callback" in stream_parameters:
+                stream_kwargs["usage_callback"] = upstream_usage.update
             async for content, calls in self.llm.stream(
                 round_messages,
                 available_tools,
@@ -206,6 +283,53 @@ class AgentLoop:
                         )
                 if calls:
                     tool_calls.extend(calls)
+
+            if upstream_usage:
+                actual_input = int(upstream_usage.get("input_tokens") or 0)
+                actual_output = int(upstream_usage.get("output_tokens") or 0)
+                cumulative_input_tokens += actual_input
+                cumulative_output_tokens += actual_output
+                latest_usage = {
+                    **latest_usage,
+                    "input_tokens": actual_input,
+                    "output_tokens": actual_output,
+                    "used_tokens": actual_input + actual_output,
+                    "usage_percent": round((actual_input + actual_output) * 100 / window_tokens, 2),
+                    "source": "upstream",
+                    "cumulative_input_tokens": cumulative_input_tokens,
+                    "cumulative_output_tokens": cumulative_output_tokens,
+                    "cumulative_total_tokens": cumulative_input_tokens + cumulative_output_tokens,
+                }
+                if context_usage_callback is not None:
+                    callback_result = context_usage_callback(latest_usage)
+                    if inspect.isawaitable(callback_result):
+                        await callback_result
+            else:
+                estimated_output = self.token_budget.counter.count_text(
+                    "".join(content_parts)
+                )
+                cumulative_input_tokens += fitted.estimated_input_tokens
+                cumulative_output_tokens += estimated_output
+                latest_usage = {
+                    **latest_usage,
+                    "output_tokens": estimated_output,
+                    "used_tokens": fitted.estimated_input_tokens + estimated_output,
+                    "usage_percent": round(
+                        (fitted.estimated_input_tokens + estimated_output)
+                        * 100
+                        / window_tokens,
+                        2,
+                    ),
+                    "cumulative_input_tokens": cumulative_input_tokens,
+                    "cumulative_output_tokens": cumulative_output_tokens,
+                    "cumulative_total_tokens": (
+                        cumulative_input_tokens + cumulative_output_tokens
+                    ),
+                }
+                if context_usage_callback is not None:
+                    callback_result = context_usage_callback(latest_usage)
+                    if inspect.isawaitable(callback_result):
+                        await callback_result
 
             if citation_registry.has_sources:
                 tail, citation_buffer = citation_registry.transform_stream_buffer(
@@ -478,6 +602,11 @@ class AgentLoop:
                             frontend_context=FrontendContext(),
                             skills=skill_summaries,
                             max_history_messages=limit,
+                            system_prompt=system_prompt,
+                        )
+                        history_group_sizes = tuple(
+                            len(group)
+                            for group in self.context_service.history_groups(history, limit)
                         )
                 yield AgentEvent(
                     type="tool_finished",

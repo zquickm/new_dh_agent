@@ -11,6 +11,7 @@ from schemas.conversation import (
     ConversationMessage,
     ConversationRun,
     ConversationSummary,
+    ContextUsage,
     ToolCallAudit,
 )
 
@@ -403,6 +404,47 @@ class MemoryConversationRepository:
                                     )
                         return updated.model_copy(deep=True)
         raise KeyError(message_id)
+
+    async def update_run_token_usage(
+        self, run_id: str, usage: dict, *, user_id: str
+    ) -> None:
+        async with self._lock:
+            key = (user_id, run_id)
+            run = self._runs.get(key)
+            if run is None:
+                raise KeyError(run_id)
+            self._runs[key] = run.model_copy(
+                update={
+                    "context_window_tokens": usage.get("context_window_tokens"),
+                    "input_budget_tokens": usage.get("input_budget_tokens"),
+                    "estimated_input_tokens": usage.get("estimated_input_tokens"),
+                    "last_prompt_tokens": usage.get("input_tokens"),
+                    "last_completion_tokens": usage.get("output_tokens"),
+                    "prompt_tokens": usage.get("cumulative_input_tokens", 0),
+                    "completion_tokens": usage.get("cumulative_output_tokens", 0),
+                    "total_tokens": usage.get("cumulative_total_tokens", 0),
+                    "history_messages_included": usage.get("history_messages_included", 0),
+                    "history_messages_dropped": usage.get("history_messages_dropped", 0),
+                    "tool_results_truncated": usage.get("tool_results_truncated", 0),
+                    "tokenizer_name": usage.get("tokenizer"),
+                    "token_usage_source": usage.get("source"),
+                    "token_round_number": usage.get("round_number", 0),
+                    "updated_at": _now(),
+                },
+                deep=True,
+            )
+            conversation = self._items.get((user_id, run.conversation_id))
+            if conversation is not None:
+                input_tokens = int(usage.get("input_tokens") or 0)
+                output_tokens = int(usage.get("output_tokens") or 0)
+                conversation.context_usage = ContextUsage(
+                    **{
+                        key: value
+                        for key, value in usage.items()
+                        if key in ContextUsage.model_fields and key != "used_tokens"
+                    },
+                    used_tokens=input_tokens + output_tokens,
+                )
 
     async def heartbeat_run(
         self,

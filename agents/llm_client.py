@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Callable
 
 from agents.llm_diagnostics import DiagnosticChatOpenAI as ChatOpenAI
 from agents.llm_diagnostics import StreamDiagnostics, _active
@@ -22,6 +22,7 @@ class HelloAgentsLLM:
         self.diagnostics_max_events = settings.diagnostics_max_events
         self.model = settings.model
         self.temperature = settings.temperature
+        self.max_output_tokens = settings.max_output_tokens
         self.client = ChatOpenAI(
             model=settings.model,
             # The OpenAI SDK requires a non-empty value even when the compatible
@@ -30,6 +31,9 @@ class HelloAgentsLLM:
             base_url=settings.base_url,
             timeout=settings.timeout,
             temperature=settings.temperature,
+            max_tokens=settings.max_output_tokens,
+            stream_usage=True,
+            reasoning_effort=settings.reasoning_effort,
         )
 
     @staticmethod
@@ -67,6 +71,7 @@ class HelloAgentsLLM:
         temperature: float = 0,
         run_id: str = "-",
         round_number: int = 0,
+        usage_callback: Callable[[dict[str, int]], None] | None = None,
     ) -> AsyncIterator[tuple[str, list[dict[str, Any]]]]:
         diagnostic = (
             StreamDiagnostics(
@@ -92,6 +97,15 @@ class HelloAgentsLLM:
                     _active.reset(token)
                 if diagnostic is not None:
                     diagnostic.parsed(chunk)
+                usage = getattr(chunk, "usage_metadata", None)
+                if usage and usage_callback is not None:
+                    usage_callback(
+                        {
+                            "input_tokens": int(usage.get("input_tokens") or 0),
+                            "output_tokens": int(usage.get("output_tokens") or 0),
+                            "total_tokens": int(usage.get("total_tokens") or 0),
+                        }
+                    )
                 has_tool_delta = bool(
                     getattr(chunk, "tool_call_chunks", None)
                     or getattr(chunk, "tool_calls", None)

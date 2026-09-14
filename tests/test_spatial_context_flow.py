@@ -52,6 +52,7 @@ class SpatialContextFlowTest(unittest.IsolatedAsyncioTestCase):
         events = [event async for event in self.service.stream_chat(request, user_id="101")]
         self.assertEqual(events[-1]["event"], "done")
         self.assertTrue(all(event["event"] in {
+            "context_usage",
             "conversation", "process", "retrieval", "map_action", "token", "done",
         } for event in events))
         return events

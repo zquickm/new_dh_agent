@@ -79,6 +79,8 @@ class ContextService:
         agent_question = enrich_question_with_frontend_context(
             expanded_question, frontend_context
         )
+        history_groups = self.history_groups(history, max_history_messages)
+        selected_history = [item for group in history_groups for item in group]
         return [
             {
                 "role": "system",
@@ -89,10 +91,39 @@ class ContextService:
                     "role": item.role,
                     "content": strip_citation_markers(item.content),
                 }
-                for item in history[-max_history_messages:]
+                for item in selected_history
             ],
             {"role": "user", "content": strip_citation_markers(agent_question)},
         ]
+
+    @staticmethod
+    def history_groups(
+        history: list[ChatMessage], max_history_messages: int
+    ) -> tuple[tuple[ChatMessage, ...], ...]:
+        """Return newest complete user/assistant exchanges within the message cap."""
+        groups: list[tuple[ChatMessage, ...]] = []
+        pending_user: ChatMessage | None = None
+        for item in history:
+            if item.role == "user":
+                if pending_user is not None:
+                    groups.append((pending_user,))
+                pending_user = item
+            elif item.role == "assistant" and pending_user is not None:
+                groups.append((pending_user, item))
+                pending_user = None
+            elif item.role == "assistant":
+                groups.append((item,))
+        if pending_user is not None:
+            groups.append((pending_user,))
+        selected: list[tuple[ChatMessage, ...]] = []
+        selected_count = 0
+        for group in reversed(groups):
+            if selected_count + len(group) > max_history_messages:
+                break
+            selected.append(group)
+            selected_count += len(group)
+        selected.reverse()
+        return tuple(selected)
 
     def build_round_messages(
         self,

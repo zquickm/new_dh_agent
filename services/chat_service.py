@@ -228,6 +228,7 @@ class ChatService:
         emoji_filter = EmojiStreamFilter()
         registered_sources: list[dict] = []
         retrieval_counts: dict[str, int] = {}
+        latest_context_usage: dict = {}
         sequence = 0
         last_persisted_length = 0
         last_persisted_at = perf_counter()
@@ -263,6 +264,16 @@ class ChatService:
                 self.agent.run_stream
             ).parameters
             run_stream_kwargs = {}
+            async def publish_context_usage(usage: dict) -> None:
+                nonlocal latest_context_usage
+                latest_context_usage = dict(usage)
+                await conversation_repository.update_run_token_usage(
+                    run_id, latest_context_usage, user_id=user_id
+                )
+                await event_queue.put(
+                    {"event": "context_usage", "data": latest_context_usage}
+                )
+
             if "run_id" in run_stream_parameters:
                 run_stream_kwargs["run_id"] = run_id
             if "frontend_context" in run_stream_parameters:
@@ -274,6 +285,14 @@ class ChatService:
                 )
             if "system_prompt" in run_stream_parameters:
                 run_stream_kwargs["system_prompt"] = prompt_snapshot.content
+            if "context_enabled" in run_stream_parameters:
+                run_stream_kwargs["context_enabled"] = conversation.context_enabled
+            if "context_message_limit" in run_stream_parameters:
+                run_stream_kwargs["context_message_limit"] = conversation.context_message_limit
+            if "context_token_limit" in run_stream_parameters:
+                run_stream_kwargs["context_token_limit"] = conversation.context_token_limit
+            if "context_usage_callback" in run_stream_parameters:
+                run_stream_kwargs["context_usage_callback"] = publish_context_usage
             async for event in self.agent.run_stream(
                 request.question,
                 history,
@@ -423,6 +442,7 @@ class ChatService:
                     "sources": cited_sources,
                     "images": [],
                     "assistant_message_id": message.id,
+                    "context_usage": latest_context_usage,
                 },
             })
         except asyncio.CancelledError:

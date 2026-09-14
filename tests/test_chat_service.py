@@ -837,11 +837,16 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             service.stream_chat(AgentRequest(question="测试流式引用"), user_id=TEST_USER_ID)
         )
 
-        initial_blocks = [
-            await asyncio.wait_for(stream.__anext__(), timeout=1) for _ in range(4)
-        ]
+        initial_blocks = []
+        first_token = ""
+        while not first_token.startswith("event: token\n"):
+            block = await asyncio.wait_for(stream.__anext__(), timeout=1)
+            if block.startswith("event: token\n"):
+                first_token = block
+            else:
+                initial_blocks.append(block)
         self.assertTrue(initial_blocks[0].startswith("event: conversation\n"))
-        first_token = await asyncio.wait_for(stream.__anext__(), timeout=1)
+        self.assertTrue(any(block.startswith("event: context_usage\n") for block in initial_blocks))
         self.assertFalse(llm.release.is_set())
         self.assertTrue(first_token.startswith("event: token\n"))
         first_payload = json.loads(first_token.split("data: ", 1)[1])

@@ -112,6 +112,27 @@ class LLMSettings(BaseModel):
     api_key: SecretStr = SecretStr("")
     temperature: float = Field(default=0.6, ge=0, le=2)
     timeout: float = Field(default=60, gt=0)
+    reasoning_effort: str = "none"
+    context_window_tokens: int = Field(default=131072, ge=16384)
+    max_output_tokens: int = Field(default=8192, ge=1)
+    token_safety_margin: int = Field(default=2048, ge=0)
+    tokenizer_path: str = "resources/tokenizers/deepseek-v4/deepseek_v4_tokenizer/tokenizer.json"
+
+    @model_validator(mode="after")
+    def validate_token_budget(self):
+        if self.reasoning_effort not in {"none", "minimal", "low", "medium", "high", "max"}:
+            raise ValueError("unsupported LLM reasoning effort")
+        if self.max_output_tokens + self.token_safety_margin >= self.context_window_tokens:
+            raise ValueError("LLM output reserve and safety margin must be smaller than context window")
+        return self
+
+    def resolved_tokenizer_path(self) -> Path:
+        path = Path(self.tokenizer_path)
+        return path if path.is_absolute() else PROJECT_DIR / path
+
+    @property
+    def input_budget_tokens(self) -> int:
+        return self.context_window_tokens - self.max_output_tokens - self.token_safety_margin
 
 
 class ReactSettings(BaseModel):
@@ -120,7 +141,7 @@ class ReactSettings(BaseModel):
 
 
 class ConversationSettings(BaseModel):
-    max_history_messages: int = Field(default=20, ge=1, le=100)
+    max_history_messages: int = Field(default=1000, ge=1, le=10000)
     run_heartbeat_seconds: float = Field(default=10, ge=1, le=300)
     run_lease_seconds: float = Field(default=60, ge=5, le=3600)
     run_recovery_interval_seconds: float = Field(default=15, ge=1, le=300)

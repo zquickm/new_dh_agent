@@ -32,10 +32,30 @@ class ConversationSummary(BaseModel):
     message_count: int = 0
 
 
+class ContextUsage(BaseModel):
+    context_window_tokens: int = 131072
+    input_budget_tokens: int = 120832
+    estimated_input_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    used_tokens: int = 0
+    usage_percent: float = 0
+    history_messages_included: int = 0
+    history_messages_dropped: int = 0
+    tool_results_truncated: int = 0
+    tokenizer: str = "deepseek-v4-official"
+    round_number: int = 0
+    source: Literal["estimated", "upstream"] = "estimated"
+    cumulative_input_tokens: int = 0
+    cumulative_output_tokens: int = 0
+    cumulative_total_tokens: int = 0
+
+
 class ConversationDetail(ConversationSummary):
     context_enabled: bool = True
-    context_message_limit: int = 20
-    context_token_limit: Optional[int] = None
+    context_message_limit: int = 1000
+    context_token_limit: Optional[int] = 131072
+    context_usage: ContextUsage = Field(default_factory=ContextUsage)
     messages: list[ConversationMessage] = Field(default_factory=list)
 
 
@@ -55,6 +75,20 @@ class ConversationRun(BaseModel):
     system_prompt_version_id: Optional[int] = None
     system_prompt_version_no: Optional[int] = None
     system_prompt_sha256: Optional[str] = None
+    context_window_tokens: Optional[int] = None
+    input_budget_tokens: Optional[int] = None
+    estimated_input_tokens: Optional[int] = None
+    last_prompt_tokens: Optional[int] = None
+    last_completion_tokens: Optional[int] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    history_messages_included: int = 0
+    history_messages_dropped: int = 0
+    tool_results_truncated: int = 0
+    tokenizer_name: Optional[str] = None
+    token_usage_source: Optional[Literal["estimated", "upstream"]] = None
+    token_round_number: int = 0
     started_at: str
     finished_at: Optional[str] = None
     duration_ms: Optional[int] = None

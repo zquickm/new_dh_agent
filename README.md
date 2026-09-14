@@ -2,6 +2,18 @@
 
 精简的 FastAPI + AgentLoop 流式对话后端，接口兼容现有 `dh-frontend`。
 
+## 上下文 Token 预算
+
+主模型使用 DeepSeek 官方 V4 tokenizer 在本地计算每轮输入。默认上下文窗口为
+`131072`，预留最大输出 `8192` 和安全余量 `2048`，实际输入预算为 `120832`。
+历史按完整问答轮裁剪，工具结果导致后续轮次超限时会受控截断；持久化的会话消息不删除。
+
+相关配置位于 `llm.context_window_tokens`、`llm.max_output_tokens`、
+`llm.token_safety_margin`、`llm.reasoning_effort` 和 `llm.tokenizer_path`。
+当前 dsv4 Flash 默认显式使用非思考模式 `none`。流式接口新增
+`event: context_usage`，`done.data.context_usage` 与会话详情的
+`context_usage` 返回最终占用；Run 查询返回累计 Token 字段。
+
 ## 配置
 
 - `config/application.yaml`：公共配置
@@ -519,6 +531,11 @@ python -m pip download `
 ### 导出 Linux ARM64 wheelhouse
 
 以下命令面向 CPython 3.9、Linux ARM64/aarch64，并优先选择兼容性较广的 manylinux wheel：
+
+项目将 `huggingface-hub` 固定为 `0.27.1`。上下文 Token 计数只使用本地
+`tokenizer.json`，不需要 `hf-xet`；请勿额外加入 `hf-xet==1.1.10`，该版本的
+ARM64 wheel 仅兼容 `manylinux_2_28_aarch64`，会导致下面面向
+`manylinux2014_aarch64` 的导出命令解析失败。
 
 ```powershell
 python -m pip download `

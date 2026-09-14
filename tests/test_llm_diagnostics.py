@@ -12,13 +12,31 @@ from agents.llm_diagnostics import (
 
 
 class DiagnosticsTest(unittest.IsolatedAsyncioTestCase):
-    async def replay(self, delta, finish_reason, run_id="run-test", enabled=True):
+    async def replay(
+        self,
+        delta,
+        finish_reason,
+        run_id="run-test",
+        enabled=True,
+        usage_callback=None,
+        usage=None,
+    ):
         chunks = [
             {"id": "test", "object": "chat.completion.chunk", "model": "test",
              "choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
             {"id": "test", "object": "chat.completion.chunk", "model": "test",
              "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]},
         ]
+        if usage is not None:
+            chunks.append(
+                {
+                    "id": "test",
+                    "object": "chat.completion.chunk",
+                    "model": "test",
+                    "choices": [],
+                    "usage": usage,
+                }
+            )
         body = "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) + "data: [DONE]\n\n"
 
         async def respond(request):
@@ -38,7 +56,22 @@ class DiagnosticsTest(unittest.IsolatedAsyncioTestCase):
                 [{"type": "function", "function": {"name": "lookup",
                   "parameters": {"type": "object", "properties": {}}}}],
                 run_id=run_id, round_number=2,
+                usage_callback=usage_callback,
             )]
+
+    async def test_upstream_usage_is_structured_for_run_persistence(self):
+        captured = {}
+        await self.replay(
+            {"content": "回答"},
+            "stop",
+            enabled=False,
+            usage_callback=captured.update,
+            usage={"prompt_tokens": 123, "completion_tokens": 7, "total_tokens": 130},
+        )
+        self.assertEqual(
+            captured,
+            {"input_tokens": 123, "output_tokens": 7, "total_tokens": 130},
+        )
 
     async def test_sdk_langchain_and_application_layers_with_valid_tool_call(self):
         delta = {"tool_calls": [{"index": 0, "id": "call-1", "type": "function",
