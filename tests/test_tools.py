@@ -207,8 +207,8 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rag_result["chunks"][0]["page_index"], 1)
         self.assertEqual(rag_result["chunks"][0]["page"], 2)
         self.assertEqual(
-            rag_tool.backend.arguments,
-            ("赤潮", get_settings().tools.rag.top_n, {"tags": ["赤潮"]}),
+            rag_tool._backend.arguments,
+            ("赤潮", sum(item.top_n for item in get_settings().tools.rag.libraries.values()), {"tags": ["赤潮"]}),
         )
         self.assertEqual(database_result["question"], "E2 平均盐度")
         self.assertEqual(
@@ -225,7 +225,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         rag_tool = RagSearchTool(FakeRagBackend())
         result = await rag_tool.execute("请分析7月DO的达标率")
 
-        self.assertEqual(rag_tool.backend.query, "请分析7月DO（溶解氧）的达标率")
+        self.assertEqual(rag_tool._backend.query, "请分析7月DO（溶解氧）的达标率")
         self.assertEqual(result["query"], "请分析7月DO（溶解氧）的达标率")
         self.assertEqual(
             expand_query_synonyms("DO（溶解氧）和pH值"),
@@ -239,27 +239,6 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(schema["properties"]), {"query", "tags"})
         self.assertEqual(schema["required"], ["query"])
         self.assertFalse(schema["additionalProperties"])
-
-        for enabled in (False, True):
-            with self.subTest(rerank_enabled=enabled):
-                settings = get_settings().tools.rag.model_copy(deep=True)
-                settings.top_n = 25
-                settings.rerank.enabled = enabled
-                settings.rerank.candidate_top_n = 60
-                with patch(
-                    "agents.tools.rag_search.get_settings",
-                    return_value=SimpleNamespace(tools=SimpleNamespace(rag=settings)),
-                ), patch("agents.tools.rag_search.RagSearchBackend") as factory:
-                    factory.return_value.search = AsyncMock(return_value=[])
-                    tool = RagSearchTool()
-                    await tool.execute("赤潮")
-                    factory.return_value.search.assert_awaited_once_with(
-                        "赤潮", 25, {"tags": []}
-                    )
-                    arguments = factory.call_args.kwargs
-                    self.assertEqual(arguments["candidate_top_n"], 60 if enabled else 25)
-                    self.assertEqual(arguments["knowledge_ids"], tuple(settings.knowledge_ids))
-                    self.assertEqual(arguments["dept_ids"], tuple(settings.dept_ids))
 
         tool = RagSearchTool()
         for arguments in ({"top_k": 1}, {"filters": {"knowledge_ids": ["other"]}}):

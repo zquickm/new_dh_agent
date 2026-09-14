@@ -63,17 +63,17 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
                 "Always query the observation service before drawing the map.",
             )
 
-    def test_project_transect_database_skill_contains_domain_routing(self):
+    def test_project_transect_business_skill_contains_domain_routing(self):
         project_root = Path(__file__).resolve().parents[1]
         catalog = SkillCatalog(project_root / "skills")
 
-        skill = catalog.load("断面数据库查询")
+        skill = catalog.load("断面业务")
 
         self.assertIn("E1", skill.description)
         self.assertIn("仅按年月询问各类要素对比", skill.description)
         self.assertIn("database_query", skill.instructions)
         self.assertIn("observation_service", skill.instructions)
-        self.assertIn("rag_search", skill.instructions)
+        self.assertIn("dm_duanmian_analysis", skill.instructions)
         self.assertIn("E1、E2、E3", skill.instructions)
         self.assertIn("E1、E2、E3、EL、EK", skill.instructions)
         self.assertIn("E1001", skill.instructions)
@@ -109,6 +109,15 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["name"], "观测站分析")
             self.assertIn("observation service", result["instructions"])
             await executor.close()
+
+    async def test_project_business_skill_loads_through_registered_tool(self):
+        catalog = SkillCatalog(Path(__file__).resolve().parents[1] / "skills")
+        executor = build_tool_executor(catalog)
+        self.addAsyncCleanup(executor.close)
+        result = json.loads(await executor.execute("load_skill", {"name": "断面业务"}))
+        self.assertEqual(result["name"], "断面业务")
+        self.assertEqual(result["instructions"], catalog.load("断面业务").instructions)
+        self.assertIn("断面业务", {skill.name for skill in catalog.summaries()})
 
     async def test_agent_context_contains_skill_index_without_tool_duplication(self):
         with tempfile.TemporaryDirectory() as directory:

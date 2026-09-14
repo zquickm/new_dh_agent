@@ -85,12 +85,19 @@ tools:
     recall_url: ""
     api_token: "${RAG_API_TOKEN:}"
     tenant_id: "c3d03091-026c-413a-974e-081a4bbfe8c0"
-    knowledge_ids:
-      - "KLB_6729221e7b9047d290726f527b02ebed"
+    libraries:
+      政策法规与标准规范:
+        top_n: 4 # n1
+        api_token: "${RAG_POLICY_API_TOKEN:}"
+      核心业务:
+        top_n: 4 # n2
+        api_token: "${RAG_BUSINESS_API_TOKEN:}"
+      海洋图书与文献:
+        top_n: 4 # n3
+        api_token: "${RAG_LITERATURE_API_TOKEN:}"
     dept_ids:
       - "c3d03091-026c-413a-974e-081a4bbfe8c0"
-    score: 0.6
-    top_n: 12 # 最终返回片段上限；关闭重排时也作为召回上限
+    score: 0.6 # 固定阈值，不动态下调
     faq_score: 0.8
     search_method: 3
     search_scope: "knowledge"
@@ -106,7 +113,6 @@ tools:
       path: "/maas-712f5806/v1/rerank"
       url: ""
       model: "Qwen3-Reranker-4B"
-      candidate_top_n: 100
       timeout: 15
       connect_timeout: 5
       max_retries: 1

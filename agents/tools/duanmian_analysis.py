@@ -10,11 +10,19 @@ from agents.tools.executor import ToolOutput
 TOOL_NAME = "dm_duanmian_analysis"
 TOOL_DESCRIPTION = (
     "打开前端断面专题分析浮层，由前端按参数查询并出图。"
-    "使用前加载“断面数据库查询” Skill；analysis 必填，可选参数不猜测。"
+    "使用前加载“断面业务” Skill；analysis 必填，可选参数不猜测。"
     "仅返回动作回执，不返回实测数据或分析结论。voyage 缺省时仅打开浮层。"
 )
 ANALYSIS_TYPES = (
     "depth-curve", "temp-section", "ts-scatter", "nutrient", "do-profile", "surface",
+)
+CHEMISTRY_ELEMENTS = (
+    "溶解氧", "盐度 S", "温度 T", "活性磷酸盐 PO4-P", "活性硅酸盐 SiO3-N",
+    "亚硝酸盐 NO2-N", "硝酸盐 NO3-N", "氨氮 NH4-N", "酸碱度 pH", "碱度 A",
+)
+HYDROMET_ELEMENTS = (
+    "气温", "风速", "气压", "相对湿度", "能见度", "最大波高", "有效波高",
+    "有效波周期", "总云量", "低云量", "透明度", "风向",
 )
 TOOL_PARAMETERS: dict[str, Any] = {
     "type": "object",
@@ -36,17 +44,24 @@ TOOL_PARAMETERS: dict[str, Any] = {
         },
         "voyage": {
             "type": "string",
-            "pattern": r"^\d{4}-\d{2}(-\d{2})?$",
-            "description": "可选航次，格式 yyyy-MM 或 yyyy-MM-dd；缺省不自动查询，不猜测航次。",
+            "pattern": r"^[0-9]{4}-(0[1-9]|1[0-2])$",
+            "description": "可选航次年月，接受 yyyy-MM，例如 2025-11；无指代时省略，不猜测航次。",
         },
         "elementType": {
             "type": "string",
             "enum": ["chemistry", "hydromet"],
-            "description": "可选要素类型：chemistry=海水化学，hydromet=水文气象；temp-section 固定 chemistry。",
+            "description": "可选要素类型：chemistry=海水化学，hydromet=水文气象；仅 depth-curve 和 surface 需要选择，其他分析类型省略。",
         },
         "element": {
             "type": "string",
-            "description": "可选要素物理列名或中文短名，例如 temperature_c 或 温度；保留原名称。",
+            "enum": list(CHEMISTRY_ELEMENTS + HYDROMET_ELEMENTS),
+            "description": (
+                "depth-curve 和 surface 仅在指定 elementType 时填写；"
+                "temp-section 可直接选择 chemistry 下的要素；其他分析类型省略。"
+                f"chemistry 可选：{'、'.join(CHEMISTRY_ELEMENTS)}（温度 T 指水温）；"
+                f"hydromet 可选：{'、'.join(HYDROMET_ELEMENTS)}。"
+                "用户未指定且上下文不明确时省略。"
+            ),
         },
     },
     "required": ["analysis"],
@@ -83,12 +98,12 @@ def execute_duanmian_analysis(
 
     if "voyage" in payload:
         value = payload["voyage"]
-        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}(-[0-9]{2})?", value):
-            raise ValueError("voyage 必须为 yyyy-MM 或 yyyy-MM-dd")
+        if not re.fullmatch(TOOL_PARAMETERS["properties"]["voyage"]["pattern"], value):
+            raise ValueError("voyage 必须为 yyyy-MM")
         try:
-            date.fromisoformat(value + "-01" if len(value) == 7 else value)
+            date.fromisoformat(value + "-01")
         except ValueError as exc:
-            raise ValueError("voyage 必须为有效的年月或日期") from exc
+            raise ValueError("voyage 必须为有效的年月") from exc
 
     if payload["analysis"] == "ts-scatter":
         payload.pop("section", None)

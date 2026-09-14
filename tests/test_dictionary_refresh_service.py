@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from agents.tools.rag_search import RagSearchTool
-from config.settings import DictionaryRefreshSettings
+from config.settings import DictionaryRefreshSettings, get_settings
 from services.dictionary_refresh_service import (
     DictionaryRefreshService,
     DictionaryRuntimeUpdateError,
@@ -55,10 +55,13 @@ class DictionaryRefreshServiceTest(unittest.IsolatedAsyncioTestCase):
                 await service.refresh_once()
             expanded = expand_query_synonyms("DO")
             self.assertEqual(expanded, "DO（溶解氧浓度）")
-            await rag.execute(expanded)
-            backend.search.assert_awaited_with(expanded, 20, {})
-            await rag.execute("DO")
-            backend.search.assert_awaited_with(expanded, 20, {})
+            for question in (expanded, "DO"):
+                await rag.execute(question)
+                backend.search.assert_awaited_with(
+                    expanded,
+                    sum(item.top_n for item in get_settings().tools.rag.libraries.values()),
+                    {"tags": []},
+                )
 
     def service(self, store, synonyms, sensitive, *, enabled=False):
         return DictionaryRefreshService(
