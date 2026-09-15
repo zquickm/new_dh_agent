@@ -239,10 +239,16 @@ class ChatService:
         try:
             # The authenticated conversation is the sole source of history.
             # Ignore client history (including stale history after account switches).
-            history = [
-                ChatMessage(role=message.role, content=message.content)
-                for message in conversation.messages
-            ]
+            history = []
+            for message in conversation.messages:
+                if message.role == "assistant" and message.model_messages:
+                    history.extend(
+                        ChatMessage.model_validate(item) for item in message.model_messages
+                    )
+                    if message.status == "failed":
+                        history.append(ChatMessage(role="assistant", content=message.content))
+                elif message.content:
+                    history.append(ChatMessage(role=message.role, content=message.content))
             if "context" in request.model_fields_set:
                 active_context = request.context or FrontendContext()
                 await conversation_repository.save_map_context(
@@ -264,6 +270,17 @@ class ChatService:
                 self.agent.run_stream
             ).parameters
             run_stream_kwargs = {}
+
+            async def save_model_messages(messages: list[dict]) -> None:
+                await conversation_repository.update_assistant_message(
+                    assistant_message_id,
+                    "".join(answer_parts),
+                    [],
+                    status="streaming",
+                    user_id=user_id,
+                    model_messages=messages,
+                )
+
             async def publish_context_usage(usage: dict) -> None:
                 nonlocal latest_context_usage
                 latest_context_usage = dict(usage)
@@ -293,6 +310,8 @@ class ChatService:
                 run_stream_kwargs["context_token_limit"] = conversation.context_token_limit
             if "context_usage_callback" in run_stream_parameters:
                 run_stream_kwargs["context_usage_callback"] = publish_context_usage
+            if "model_messages_callback" in run_stream_parameters:
+                run_stream_kwargs["model_messages_callback"] = save_model_messages
             async for event in self.agent.run_stream(
                 request.question,
                 history,

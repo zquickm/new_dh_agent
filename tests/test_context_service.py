@@ -12,6 +12,32 @@ from tests.test_agent_loop import FakeLlm
 
 
 class ContextServiceTest(unittest.IsolatedAsyncioTestCase):
+    def test_tool_history_is_atomic_under_message_and_token_limits(self):
+        from services.token_budget_service import TokenBudgetService
+        from tests.test_token_budget_service import TOKENIZER_FILE, DeepSeekV4TokenCounter
+
+        history = [ChatMessage.model_validate(item) for item in [
+            {"role": "user", "content": "旧问题"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call-1", "name": "load_skill", "args": {"name": "断面业务"}},
+            ]},
+            {"role": "tool", "tool_call_id": "call-1", "name": "load_skill", "content": "业务说明" * 500},
+            {"role": "assistant", "content": "回答<<SRC_1>>[[cite:1]]"},
+        ]]
+        messages = self.service.build_messages(
+            question="追问", history=history, frontend_context=None,
+            skills=(), max_history_messages=2,
+        )
+        self.assertEqual(len(messages), 6)
+        self.assertEqual(messages[-2]["content"], "回答")
+        counter = DeepSeekV4TokenCounter(TOKENIZER_FILE)
+        budget = counter.count_request([messages[0], messages[-1]]) + 10
+        fitted = TokenBudgetService(counter, budget).fit(
+            messages, history_group_sizes=(4,), original_history_count=4, tools=None,
+        )
+        self.assertEqual([m["role"] for m in fitted.messages], ["system", "user"])
+        self.assertEqual(fitted.history_messages_dropped, 4)
+
     def setUp(self):
         matcher = build_synonym_matcher([
             {"standardTerm": "溶解氧", "terms": [{"term": "DO"}]},

@@ -39,6 +39,7 @@ class PersistenceSchemaTest(unittest.TestCase):
         self.assertIn("map_context", conversation.c)
         self.assertIn("message_count", conversation.c)
         self.assertIn("run_id", message.c)
+        self.assertIn("model_messages", message.c)
         self.assertIn("status", message.c)
         self.assertIn("error_code", message.c)
         self.assertIn("updated_at", message.c)
@@ -96,6 +97,7 @@ class PersistenceSchemaTest(unittest.TestCase):
         command.upgrade(config, "head", sql=True)
 
         sql = output.getvalue()
+        self.assertIn("ADD COLUMN model_messages JSON", sql)
         self.assertIn("CREATE TABLE agent_conversation", sql)
         self.assertIn("CREATE TABLE agent_conversation_message", sql)
         self.assertEqual(sql.count("ALTER TABLE `agent_conversation_message`"), 1)

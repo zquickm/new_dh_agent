@@ -13,6 +13,7 @@ class ConversationMessage(BaseModel):
     id: str
     role: Literal["system", "user", "assistant"]
     content: str
+    model_messages: Optional[list[dict]] = Field(default=None, exclude=True)
     created_at: str
     updated_at: Optional[str] = None
     run_id: Optional[str] = None

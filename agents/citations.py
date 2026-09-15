@@ -13,7 +13,7 @@ _RAW_CITATION_OPENER = "[[cite:"
 
 def strip_citation_markers(text: str) -> str:
     """Remove turn-local citation markers before reusing conversation history."""
-    return _CITATION_PATTERN.sub("", text)
+    return _SOURCE_TOKEN_PATTERN.sub("", _CITATION_PATTERN.sub("", text))
 
 
 def _score(value: Any) -> float:

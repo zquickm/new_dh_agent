@@ -337,6 +337,7 @@ class MemoryConversationRepository:
         model: Optional[str] = None,
         error_type: Optional[str] = None,
         error_message: Optional[str] = None,
+        model_messages: Optional[list[dict]] = None,
     ) -> ConversationMessage:
         now = _now()
         async with self._lock:
@@ -348,6 +349,7 @@ class MemoryConversationRepository:
                         updated = message.model_copy(
                             update={
                                 "content": content,
+                                "model_messages": model_messages if model_messages is not None else message.model_messages,
                                 "sources": sources,
                                 "status": status,
                                 "error_code": error_code,

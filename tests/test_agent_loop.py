@@ -29,6 +29,35 @@ class FakeLlm:
 
 
 class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
+    async def test_interrupted_tool_batch_does_not_persist_orphan_calls(self):
+        saved = []
+        tools = ToolExecutor()
+        tools.register("load_skill", "加载", lambda: "完整 Skill 说明")
+
+        async def interrupted():
+            raise asyncio.CancelledError()
+
+        tools.register("interrupted", "中断", interrupted)
+        llm = FakeLlm([
+            ([], [{"id": "complete", "name": "load_skill", "args": {}}]),
+            ([], [
+                {"id": "partial", "name": "load_skill", "args": {}},
+                {"id": "cancelled", "name": "interrupted", "args": {}},
+            ]),
+        ])
+        agent = AgentLoop(llm, tools)
+        try:
+            with self.assertRaises(asyncio.CancelledError):
+                _ = [event async for event in agent.run_stream(
+                    "问题", [], model_messages_callback=saved.append,
+                )]
+            self.assertEqual(len(saved), 1)
+            self.assertEqual([message["role"] for message in saved[0]], ["assistant", "tool"])
+            self.assertEqual(saved[0][0]["tool_calls"][0]["id"], "complete")
+            self.assertEqual(saved[0][1]["tool_call_id"], "complete")
+        finally:
+            await agent.close()
+
     def setUp(self):
         synonym_patch = patch(
             "services.synonym_service._active_synonym_matcher",

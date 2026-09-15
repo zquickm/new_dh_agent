@@ -74,6 +74,7 @@ class ConversationMessageModel(Base):
     sequence_no: Mapped[int] = mapped_column(mysql.INTEGER(unsigned=True), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(mysql.LONGTEXT(), nullable=False)
+    model_messages: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(JSON, nullable=True)
     sources: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     images: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     recommend_questions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)

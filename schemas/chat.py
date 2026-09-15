@@ -14,8 +14,11 @@ from pydantic import (
 
 
 class ChatMessage(BaseModel):
-    role: Literal["system", "user", "assistant"]
-    content: str = Field(..., min_length=1)
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str
+    tool_calls: Optional[list[dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
+    name: Optional[str] = None
 
 
 class PolygonGeometry(BaseModel):

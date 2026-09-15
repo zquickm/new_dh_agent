@@ -52,6 +52,7 @@ def _message_schema(
         id=item.id,
         role=item.role,
         content=item.content,
+        model_messages=item.model_messages,
         created_at=_iso(item.created_at),
         sources=list(item.sources or []),
         images=list(item.images or []),
@@ -649,6 +650,7 @@ class MySQLConversationRepository:
         model: Optional[str] = None,
         error_type: Optional[str] = None,
         error_message: Optional[str] = None,
+        model_messages: Optional[list[dict]] = None,
     ) -> ConversationMessage:
         now = _now()
         async with self._runtime.session_factory() as session:
@@ -667,6 +669,8 @@ class MySQLConversationRepository:
                 if message is None:
                     raise KeyError(message_id)
                 message.content = content
+                if model_messages is not None:
+                    message.model_messages = model_messages
                 message.sources = sources
                 message.status = status
                 message.error_code = error_code

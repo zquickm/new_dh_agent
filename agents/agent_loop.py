@@ -5,6 +5,7 @@ import json
 import logging
 import inspect
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from time import perf_counter
 from typing import Any, Callable, Optional
 
@@ -133,6 +134,7 @@ class AgentLoop:
         context_message_limit: int | None = None,
         context_token_limit: int | None = None,
         context_usage_callback: Callable[[dict[str, Any]], Any] | None = None,
+        model_messages_callback: Callable[[list[dict[str, Any]]], Any] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         configured_limit = get_settings().conversation.max_history_messages
         limit = min(context_message_limit or configured_limit, configured_limit)
@@ -173,6 +175,16 @@ class AgentLoop:
         observation_map_rendered = False
         has_streamed_content = False
         tool_sequence = 0
+        model_messages: list[dict[str, Any]] = []
+
+        async def save_model_messages(batch: list[dict[str, Any]]) -> None:
+            # Save only complete batches; interruption cannot leave orphan calls.
+            model_messages.extend(deepcopy(batch))
+            if model_messages_callback is not None:
+                result = model_messages_callback(deepcopy(model_messages))
+                if inspect.isawaitable(result):
+                    await result
+
         logger.info(
             "agent_started run_id=%s history_count=%d",
             run_id,
@@ -390,6 +402,7 @@ class AgentLoop:
             if not normalized_calls:
                 if not has_answer_content:
                     raise RuntimeError("模型未生成有效回答")
+                await save_model_messages([{"role": "assistant", "content": content}])
                 logger.info(
                     "agent_completed run_id=%s round=%s reason=no_tool_calls",
                     run_id,
@@ -400,6 +413,8 @@ class AgentLoop:
             if round_number == self.max_rounds:
                 if not has_answer_content:
                     raise RuntimeError("AgentLoop 达到最大轮数但未生成回答")
+                # These calls will not execute, so retain only the answer text.
+                await save_model_messages([{"role": "assistant", "content": content}])
                 logger.info(
                     "agent_completed run_id=%s round=%s reason=max_rounds",
                     run_id,
@@ -407,6 +422,7 @@ class AgentLoop:
                 )
                 return
 
+            round_messages_to_save = [deepcopy(messages[-1])]
             for tool_call in normalized_calls:
                 name = tool_call["name"]
                 tool_sequence += 1
@@ -625,6 +641,8 @@ class AgentLoop:
                         "content": observation,
                     }
                 )
+                round_messages_to_save.append(deepcopy(messages[-1]))
+            await save_model_messages(round_messages_to_save)
 
 
 def build_agent_loop() -> AgentLoop:

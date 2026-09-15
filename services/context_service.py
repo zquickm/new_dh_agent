@@ -88,7 +88,7 @@ class ContextService:
             },
             *[
                 {
-                    "role": item.role,
+                    **item.model_dump(exclude_none=True),
                     "content": strip_citation_markers(item.content),
                 }
                 for item in selected_history
@@ -100,28 +100,30 @@ class ContextService:
     def history_groups(
         history: list[ChatMessage], max_history_messages: int
     ) -> tuple[tuple[ChatMessage, ...], ...]:
-        """Return newest complete user/assistant exchanges within the message cap."""
+        """Keep each user exchange, including its tool rounds, indivisible."""
         groups: list[tuple[ChatMessage, ...]] = []
-        pending_user: ChatMessage | None = None
+        pending: list[ChatMessage] = []
         for item in history:
             if item.role == "user":
-                if pending_user is not None:
-                    groups.append((pending_user,))
-                pending_user = item
-            elif item.role == "assistant" and pending_user is not None:
-                groups.append((pending_user, item))
-                pending_user = None
-            elif item.role == "assistant":
-                groups.append((item,))
-        if pending_user is not None:
-            groups.append((pending_user,))
+                if pending:
+                    groups.append(tuple(pending))
+                pending = [item]
+            elif item.role in {"assistant", "tool"}:
+                pending.append(item)
+        if pending:
+            groups.append(tuple(pending))
         selected: list[tuple[ChatMessage, ...]] = []
         selected_count = 0
         for group in reversed(groups):
-            if selected_count + len(group) > max_history_messages:
+            # The conversation setting counts displayed user/assistant messages;
+            # internal tool rounds must not consume that message allowance.
+            displayed_count = sum(item.role == "user" for item in group) + int(
+                any(item.role == "assistant" for item in group)
+            )
+            if selected_count + displayed_count > max_history_messages:
                 break
             selected.append(group)
-            selected_count += len(group)
+            selected_count += displayed_count
         selected.reverse()
         return tuple(selected)
 

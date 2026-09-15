@@ -75,6 +75,57 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_follow_up_replays_persisted_skill_and_parallel_tool_results(self):
+        from tests.test_agent_loop import FakeLlm
+        from langchain_core.messages import convert_to_messages
+
+        tools = ToolExecutor()
+        instructions = "盐度属于海水化学；使用断面专题分析出图。"
+        tools.register("load_skill", "加载能力", lambda name: instructions)
+
+        def failing_query():
+            raise ValueError("查询失败")
+
+        tools.register("query", "查询", failing_query)
+        calls = [
+            {"id": "skill-1", "name": "load_skill", "args": {"name": "断面业务"}},
+            {"id": "query-1", "name": "query", "args": {}},
+        ]
+        llm = FakeLlm([([], calls), (["请重试查询"], [])])
+        first = ChatService()
+        first._agent = AgentLoop(llm, tools)
+        events = [event async for event in first.stream_chat(
+            AgentRequest(question="查看盐度"), user_id=TEST_USER_ID,
+        )]
+        self.assertEqual(events[-1]["event"], "done")
+        conversation_id = events[-1]["data"]["conversation_id"]
+        await first.close()
+
+        # A new service instance must recover history from storage, not memory.
+        follow_up = ChatService()
+        follow_llm = FakeLlm([(["继续处理"], [])])
+        follow_up._agent = AgentLoop(follow_llm, ToolExecutor())
+        try:
+            events = [event async for event in follow_up.stream_chat(
+                AgentRequest(question="继续出图", conversation_id=conversation_id),
+                user_id=TEST_USER_ID,
+            )]
+            self.assertEqual(events[-1]["event"], "done")
+            messages = follow_llm.calls[0][0]
+            self.assertEqual([m["role"] for m in messages],
+                             ["system", "user", "assistant", "tool", "tool", "assistant", "user"])
+            self.assertEqual(messages[2]["tool_calls"][0]["args"], {"name": "断面业务"})
+            self.assertEqual(messages[3]["content"], instructions)
+            self.assertEqual(messages[4]["content"], "工具执行失败")
+            self.assertEqual([m["tool_call_id"] for m in messages[3:5]], ["skill-1", "query-1"])
+            converted = convert_to_messages(messages)
+            self.assertEqual(converted[2].tool_calls[0]["id"], converted[3].tool_call_id)
+            saved = await conversation_repository.get(conversation_id, user_id=TEST_USER_ID)
+            self.assertIsNotNone(saved.messages[1].model_messages)
+            self.assertNotIn("model_messages", saved.model_dump()["messages"][1])
+        finally:
+            await follow_up.close()
+
     def setUp(self):
         repository_patch = patch(
             "services.chat_service.conversation_repository", conversation_repository
