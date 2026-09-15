@@ -11,7 +11,8 @@ description: 指导东海 E1、E2、E3、EL、EK 断面及辅助点的业务、�
 
 - 调查断面及其站位、辅助点的历史数据、跨期统计和描述性评价，使用 `database_query`。
 - 要求专题出图或打开分析浮层时使用 `dm_duanmian_analysis`，不为出图额外查询数据库或调用 `map_action`。
-- 若用户询问或数据库查询了断面专题分析工具可展示的相关分析类型、参数或图例，使用 `dm_duanmian_analysis`结合展示数据。
+- 除非明确和`dm_duanmian_analysis`可展示要素无关，都一同使用 `database_query`和`dm_duanmian_analysis`结合展示数据。例：
+  - 用户询问“2022年E1断面盐度情况”，应先用 `database_query` 查询数据，再用 `dm_duanmian_analysis` 出`temp-section`图。
 - 地图选区中的业务观测站，以及明确站名的状态、详情、最新观测、趋势或时间区间数据，使用 `observation_service`。
 - 断面业务信息、报告、制度和其他非结构化资料，使用 `rag_search`，使用标签：`断面`优先查询相关文档。
 - 用户同时要求断面实测数据和非结构化信息依据时，分别调用 `database_query` 与 `rag_search` 后综合回答。
@@ -20,7 +21,7 @@ description: 指导东海 E1、E2、E3、EL、EK 断面及辅助点的业务、�
 
 - 工具参数 `analysis` 必填，类型和参数格式以工具 Schema 为准；分析类型不明确时先询问。
 - 可选参数只传用户指定或上下文明确的值，否则省略参数。
-- 未指定航次时仅打开浮层
+- 航次时间为一季度一次分别在一年的2月、5月、8月、11月。
 - 成功回执只表示指令已发送，不代表已出图或提供分析结论。
 
 ## 断面与数据范围
