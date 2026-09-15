@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
 from typing import Any, Optional
 
 from config.settings import get_settings
@@ -49,37 +47,41 @@ class RagSearchTool:
 
     def __init__(self, backend: Optional[RagSearchBackend] = None) -> None:
         self._backend = backend
-        self._backends: dict[str, RagSearchBackend] = {}
 
-    def _build_backend(self, top_n: int, knowledge_id: str) -> RagSearchBackend:
-        settings = get_settings().tools.rag
-        rerank = settings.rerank
-        return RagSearchBackend(
-            recall_url=settings.resolved_recall_url(),
-            api_token=settings.api_token.get_secret_value().strip(),
-            tenant_id=settings.tenant_id,
-            knowledge_ids=(knowledge_id,),
-            dept_ids=tuple(settings.dept_ids),
-            score=settings.score,
-            candidate_top_n=top_n,
-            faq_score=settings.faq_score,
-            search_method=settings.search_method,
-            search_scope=settings.search_scope,
-            timeout=settings.timeout,
-            connect_timeout=settings.connect_timeout,
-            connection_limit=settings.connection_limit,
-            verify_ssl=settings.verify_ssl,
-            max_retries=settings.max_retries,
-            retry_backoff=settings.retry_backoff,
-            rerank_enabled=rerank.enabled,
-            rerank_url=settings.resolved_rerank_url(),
-            rerank_model=rerank.model,
-            rerank_timeout=rerank.timeout,
-            rerank_connect_timeout=rerank.connect_timeout,
-            rerank_max_retries=rerank.max_retries,
-            rerank_retry_backoff=rerank.retry_backoff,
-            rerank_verify_ssl=rerank.verify_ssl,
-        )
+    @property
+    def backend(self) -> RagSearchBackend:
+        if self._backend is None:
+            settings = get_settings().tools.rag
+            rerank = settings.rerank
+            self._backend = RagSearchBackend(
+                recall_url=settings.resolved_recall_url(),
+                api_token=settings.api_token.get_secret_value(),
+                tenant_id=settings.tenant_id,
+                knowledge_ids=tuple(settings.knowledge_ids),
+                dept_ids=tuple(settings.dept_ids),
+                score=settings.score,
+                candidate_top_n=(
+                    rerank.candidate_top_n if rerank.enabled else settings.top_n
+                ),
+                faq_score=settings.faq_score,
+                search_method=settings.search_method,
+                search_scope=settings.search_scope,
+                timeout=settings.timeout,
+                connect_timeout=settings.connect_timeout,
+                connection_limit=settings.connection_limit,
+                verify_ssl=settings.verify_ssl,
+                max_retries=settings.max_retries,
+                retry_backoff=settings.retry_backoff,
+                rerank_enabled=rerank.enabled,
+                rerank_url=settings.resolved_rerank_url(),
+                rerank_model=rerank.model,
+                rerank_timeout=rerank.timeout,
+                rerank_connect_timeout=rerank.connect_timeout,
+                rerank_max_retries=rerank.max_retries,
+                rerank_retry_backoff=rerank.retry_backoff,
+                rerank_verify_ssl=rerank.verify_ssl,
+            )
+        return self._backend
 
     async def execute(
         self,
@@ -96,35 +98,9 @@ class RagSearchTool:
         ):
             raise ValueError("tags 必须是不超过 50 项的字符串数组")
         query = expand_query_synonyms(query)
-        settings = get_settings().tools.rag
-        if self._backend is not None:
-            chunks = await self._backend.search(
-                query, sum(item.top_n for item in settings.libraries.values()), {"tags": tags or []}
-            )
-        else:
-            libraries = settings.libraries
-            if len(libraries) != 3 or any(
-                not item.knowledge_id.strip() for item in libraries.values()
-            ):
-                raise ValueError("RAG 必须配置三个知识库及各自的 knowledge_id")
-            if len({item.knowledge_id.strip() for item in libraries.values()}) != 3:
-                raise ValueError("RAG 三个知识库的 knowledge_id 不得重复")
-            if not settings.api_token.get_secret_value().strip():
-                raise ValueError("RAG_API_TOKEN 不能为空")
-            if not self._backends:
-                self._backends = {
-                    name: self._build_backend(item.top_n, item.knowledge_id.strip())
-                    for name, item in libraries.items()
-                }
-            results = await asyncio.gather(*(
-                self._backends[name].search(query, item.top_n, {"tags": tags or []})
-                for name, item in libraries.items()
-            ), return_exceptions=True)
-            # A failed library must not be silently presented as an empty result.
-            failures = [name for name, result in zip(libraries, results) if isinstance(result, BaseException)]
-            if failures:
-                raise RuntimeError("知识库检索失败：" + "、".join(failures))
-            chunks = [chunk for result in results for chunk in result]
+        chunks = await self.backend.search(
+            query, get_settings().tools.rag.top_n, {"tags": tags or []}
+        )
         return {
             "query": query,
             "count": len(chunks),
@@ -147,11 +123,6 @@ class RagSearchTool:
         }
 
     async def close(self) -> None:
-        backends = list(self._backends.values())
         if self._backend is not None:
-            backends.append(self._backend)
-        try:
-            await asyncio.gather(*(backend.close() for backend in backends))
-        finally:
-            self._backends = {}
+            await self._backend.close()
             self._backend = None

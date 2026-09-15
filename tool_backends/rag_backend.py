@@ -88,9 +88,9 @@ class RagSearchBackend:
         rerank_verify_ssl: bool,
         reranker: Optional[DocumentReranker] = None,
     ) -> None:
-        if not recall_url or not api_token or not tenant_id:
+        if not recall_url or not api_token or not tenant_id or not knowledge_ids:
             raise RagToolError(
-                "RAG_RECALL_URL/RAG_API_TOKEN/RAG_TENANT_ID "
+                "RAG_RECALL_URL/RAG_API_TOKEN/RAG_TENANT_ID/RAG_KNOWLEDGE_IDS "
                 "are required"
             )
         self.recall_url = recall_url
@@ -225,22 +225,30 @@ class RagSearchBackend:
             "rerank_enable": 0,
             "search_method": self.search_method,
             "tags": tags,
+            "knowledge_ids": knowledge_ids,
             "faq_ids": [],
             "searchScope": self.search_scope,
             "dept_ids": dept_ids,
             "forceTagList": [],
         }
-        if knowledge_ids:
-            payload["knowledge_ids"] = knowledge_ids
-        body = await self._post_json(
-            self.recall_url,
-            payload,
-            self._headers(),
-            timeout=self.timeout,
-            max_retries=self.max_retries,
-            retry_backoff=self.retry_backoff,
-        )
-        chunks = self._parse_recall(body, self.candidate_top_n)
+        headers = self._headers()
+        minimum_score = round(self.score - 0.2, 2)
+        score = self.score
+
+        while True:
+            body = await self._post_json(
+                self.recall_url,
+                {**payload, "score": score},
+                headers,
+                timeout=self.timeout,
+                max_retries=self.max_retries,
+                retry_backoff=self.retry_backoff,
+            )
+            chunks = self._parse_recall(body, self.candidate_top_n)
+            sparse_threshold = (self.candidate_top_n + 1) // 2
+            if len(chunks) > sparse_threshold or score <= minimum_score:
+                break
+            score = max(minimum_score, round(score - 0.05, 2))
 
         if not chunks:
             return []

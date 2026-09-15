@@ -55,13 +55,10 @@ class DictionaryRefreshServiceTest(unittest.IsolatedAsyncioTestCase):
                 await service.refresh_once()
             expanded = expand_query_synonyms("DO")
             self.assertEqual(expanded, "DO（溶解氧浓度）")
-            for question in (expanded, "DO"):
-                await rag.execute(question)
-                backend.search.assert_awaited_with(
-                    expanded,
-                    sum(item.top_n for item in get_settings().tools.rag.libraries.values()),
-                    {"tags": []},
-                )
+            await rag.execute(expanded)
+            backend.search.assert_awaited_with(expanded, get_settings().tools.rag.top_n, {"tags": []})
+            await rag.execute("DO")
+            backend.search.assert_awaited_with(expanded, get_settings().tools.rag.top_n, {"tags": []})
 
     def service(self, store, synonyms, sensitive, *, enabled=False):
         return DictionaryRefreshService(

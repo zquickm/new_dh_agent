@@ -140,15 +140,9 @@ Agent 已注册五个业务工具（括号内为协议调用标识）：
 - 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
 
   工具仅接受必填的 `query` 和可选的 `tags`（标签名称数组）。标签用于优先检索，
-  未命中时平台会在配置的授权范围内扩大检索。每次按 `tools.rag.libraries` 并发查询
-  政策法规与标准规范、核心业务、海洋图书与文献三个库，POST 请求头共用原来的 `Authorization: Bearer <API key>`，
-  请求体通过 `knowledge_ids: [该库ID]` 选择库。各库 `top_n` 分别为 n1、n2、n3，当前配置各 4；结果按配置库顺序合并，
-  不再截取全局 Top 12，最多返回 n1+n2+n3 条。相似度阈值固定为 0.6，不再动态降低。
-  可选重排在各库内部执行；候选上限和返回上限均采用该库 `top_n`。
-  任一库请求失败时，本次工具报错，不将失败库误报为无结果。
-  在 `.env` 保留公共 `RAG_API_TOKEN`，并分别填写 `RAG_POLICY_KNOWLEDGE_ID`、
-  `RAG_BUSINESS_KNOWLEDGE_ID`、`RAG_LITERATURE_KNOWLEDGE_ID`。公共 key 或任一库 ID
-  缺失、库 ID 重复时不发送请求。
+  未命中时平台会在配置的授权范围内扩大检索。知识库、部门、检索阈值和重排等
+  参数统一由 `tools.rag` 配置决定。`top_n` 控制最终返回片段上限；开启重排时，
+  先按 `rerank.candidate_top_n` 召回候选再重排，关闭时按 `top_n` 召回。
 - 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
 - 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据，也支持通用注册空间要素查询。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
