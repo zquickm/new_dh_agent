@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 import asyncio
 from unittest.mock import patch
+from pydantic import SecretStr
 from typing import Any, Optional
 
 from agents.tools.rag_search import RagSearchTool
@@ -214,10 +215,10 @@ class VllmDocumentRerankerTest(unittest.IsolatedAsyncioTestCase):
 class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
     async def test_three_libraries_query_concurrently_with_independent_limits(self):
         settings = get_settings().model_copy(deep=True)
-        settings.tools.rag.api_token = "shared-token"
+        settings.tools.rag.api_token = SecretStr("shared-token")
         settings.tools.rag.rerank.enabled = False
         settings.tools.rag.libraries = {
-            name: RagLibrarySettings(top_n=i, api_token=f"token-{i}")
+            name: RagLibrarySettings(top_n=i, knowledge_id=f"kb-{i}")
             for i, name in enumerate(("政策法规与标准规范", "核心业务", "海洋图书与文献"), 1)
         }
         calls = []
@@ -228,7 +229,7 @@ class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
             if len(calls) == 3:
                 all_started.set()
             await asyncio.wait_for(all_started.wait(), 1)
-            library_id = "kb-" + headers["Authorization"].rsplit("-", 1)[1]
+            library_id = payload["knowledge_ids"][0]
             return {"code": 200, "data": {"records": [
                 {"chunk_text": f"{library_id}-{j}", "knowledge_id": library_id, "doc_title": "报告"}
                 for j in range(5)
@@ -245,23 +246,23 @@ class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
                                  ["kb-1", "kb-2", "kb-2", "kb-3", "kb-3", "kb-3"])
                 self.assertEqual(len(calls), 3)
                 for i, (payload, headers) in enumerate(calls, 1):
-                    self.assertNotIn("knowledge_ids", payload)
+                    self.assertEqual(payload["knowledge_ids"], [f"kb-{i}"])
                     self.assertEqual(payload["top_n"], i)
                     self.assertEqual(payload["score"], 0.6)
                     self.assertEqual(payload["tags"], ["断面"])
-                    self.assertEqual(headers["Authorization"], f"Bearer token-{i}")
+                    self.assertEqual(headers["Authorization"], "Bearer shared-token")
             finally:
                 await tool.close()
 
-    async def test_missing_library_key_fails_before_any_request(self):
+    async def test_missing_library_id_fails_before_any_request(self):
         settings = get_settings().model_copy(deep=True)
         settings.tools.rag.libraries = {
-            str(i): RagLibrarySettings(api_token=f"token-{i}" if i else "") for i in range(3)
+            str(i): RagLibrarySettings(knowledge_id=f"kb-{i}" if i else "") for i in range(3)
         }
         with patch("agents.tools.rag_search.get_settings", return_value=settings), patch(
             "agents.tools.rag_search.expand_query_synonyms", side_effect=lambda query: query,
         ), patch.object(RagSearchBackend, "_post_json") as post:
-            with self.assertRaisesRegex(ValueError, "api_token"):
+            with self.assertRaisesRegex(ValueError, "knowledge_id"):
                 await RagSearchTool().execute("断面")
             post.assert_not_called()
 

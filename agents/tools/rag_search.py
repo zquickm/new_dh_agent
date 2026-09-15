@@ -51,14 +51,14 @@ class RagSearchTool:
         self._backend = backend
         self._backends: dict[str, RagSearchBackend] = {}
 
-    def _build_backend(self, top_n: int, api_token: str) -> RagSearchBackend:
+    def _build_backend(self, top_n: int, knowledge_id: str) -> RagSearchBackend:
         settings = get_settings().tools.rag
         rerank = settings.rerank
         return RagSearchBackend(
             recall_url=settings.resolved_recall_url(),
-            api_token=api_token,
+            api_token=settings.api_token.get_secret_value().strip(),
             tenant_id=settings.tenant_id,
-            knowledge_ids=(),
+            knowledge_ids=(knowledge_id,),
             dept_ids=tuple(settings.dept_ids),
             score=settings.score,
             candidate_top_n=top_n,
@@ -104,12 +104,16 @@ class RagSearchTool:
         else:
             libraries = settings.libraries
             if len(libraries) != 3 or any(
-                not item.api_token.get_secret_value().strip() for item in libraries.values()
+                not item.knowledge_id.strip() for item in libraries.values()
             ):
-                raise ValueError("RAG 必须配置三个知识库及各自的 api_token")
+                raise ValueError("RAG 必须配置三个知识库及各自的 knowledge_id")
+            if len({item.knowledge_id.strip() for item in libraries.values()}) != 3:
+                raise ValueError("RAG 三个知识库的 knowledge_id 不得重复")
+            if not settings.api_token.get_secret_value().strip():
+                raise ValueError("RAG_API_TOKEN 不能为空")
             if not self._backends:
                 self._backends = {
-                    name: self._build_backend(item.top_n, item.api_token.get_secret_value().strip())
+                    name: self._build_backend(item.top_n, item.knowledge_id.strip())
                     for name, item in libraries.items()
                 }
             results = await asyncio.gather(*(

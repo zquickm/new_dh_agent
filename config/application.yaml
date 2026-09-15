@@ -88,13 +88,13 @@ tools:
     libraries:
       政策法规与标准规范:
         top_n: 4 # n1
-        api_token: "${RAG_POLICY_API_TOKEN:}"
+        knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:}"
       核心业务:
         top_n: 4 # n2
-        api_token: "${RAG_BUSINESS_API_TOKEN:}"
+        knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:}"
       海洋图书与文献:
         top_n: 4 # n3
-        api_token: "${RAG_LITERATURE_API_TOKEN:}"
+        knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:}"
     dept_ids:
       - "c3d03091-026c-413a-974e-081a4bbfe8c0"
     score: 0.6 # 固定阈值，不动态下调

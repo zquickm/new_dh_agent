@@ -233,7 +233,7 @@ class RerankSettings(BaseModel):
 
 class RagLibrarySettings(BaseModel):
     top_n: int = Field(default=12, ge=1)
-    api_token: SecretStr = SecretStr("")
+    knowledge_id: str = ""
 
 
 class RagToolSettings(BaseModel):
