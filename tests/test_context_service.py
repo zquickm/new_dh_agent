@@ -6,12 +6,106 @@ from agents.agent_loop import AgentLoop
 from agents.skills import SkillSummary
 from agents.tools.executor import ToolExecutor
 from schemas.chat import ChatMessage, FrontendContext
-from services.context_service import ContextService
+from services.context_service import ContextService, build_system_prompt
 from services.synonym_service import build_synonym_matcher
 from tests.test_agent_loop import FakeLlm
 
 
 class ContextServiceTest(unittest.IsolatedAsyncioTestCase):
+    def test_skill_history_filters_only_disabled_calls_without_mutation(self):
+        from langchain_core.messages import convert_to_messages
+
+        history = [ChatMessage.model_validate(item) for item in [
+            {"role": "user", "content": "断面业务和空间联动都使用过"},
+            {"role": "assistant", "content": "分别处理", "tool_calls": [
+                {"id": "disabled", "name": "load_skill", "args": {"name": "断面业务"}},
+                {"id": "enabled", "name": "load_skill", "args": {"name": "空间联动"}},
+                {"id": "business", "name": "database_query", "args": {"query": "数据"}},
+            ]},
+            {"role": "tool", "tool_call_id": "disabled", "content": "断面完整说明"},
+            {"role": "tool", "tool_call_id": "enabled", "name": "load_skill", "content": "空间完整说明"},
+            {"role": "tool", "tool_call_id": "business", "name": "database_query", "content": "业务数据"},
+            {"role": "assistant", "content": "正常历史回答保留"},
+        ]]
+        before = deepcopy(history)
+        filtered = self.service.filter_skill_history(history, frozenset({"空间联动"}))
+        self.assertEqual([call["id"] for call in filtered[1].tool_calls], ["enabled", "business"])
+        self.assertEqual([item.content for item in filtered], [
+            "断面业务和空间联动都使用过", "分别处理", "空间完整说明", "业务数据", "正常历史回答保留",
+        ])
+        convert_to_messages([item.model_dump(exclude_none=True) for item in filtered])
+        self.assertEqual(history, before)
+        filtered[1].tool_calls[0]["args"]["name"] = "修改副本"
+        self.assertEqual(history, before)
+
+    def test_skill_history_reused_ids_are_matched_in_their_own_blocks(self):
+        history = [ChatMessage.model_validate(item) for item in [
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "reused", "name": "load_skill", "args": {"name": "断面业务"}},
+            ]},
+            {"role": "tool", "tool_call_id": "reused", "content": "禁用说明"},
+            {"role": "assistant", "content": "旧回答"},
+            {"role": "user", "content": "下一任务"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "reused", "name": "load_skill", "args": {"name": "空间联动"}},
+            ]},
+            {"role": "tool", "tool_call_id": "reused", "name": "load_skill", "content": "启用说明"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "reused", "name": "database_query", "args": {}},
+            ]},
+            {"role": "tool", "tool_call_id": "reused", "content": "业务结果"},
+        ]]
+        filtered = self.service.filter_skill_history(history, frozenset({"空间联动"}))
+        self.assertEqual([item.content for item in filtered], [
+            "旧回答", "下一任务", "", "启用说明", "", "业务结果",
+        ])
+
+    def test_skill_history_normalizes_legacy_calls(self):
+        from langchain_core.messages import convert_to_messages
+
+        history = [ChatMessage.model_validate(item) for item in [
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "disabled", "type": "function", "function": {
+                    "name": "load_skill", "arguments": '{"name":"断面业务"}',
+                }},
+                {"id": "enabled", "type": "function", "function": {
+                    "name": "load_skill", "arguments": '{"name":"空间联动"}',
+                }},
+                {"id": "business", "name": "database_query", "args": '{"query":"保留"}'},
+            ]},
+            {"role": "tool", "tool_call_id": "disabled", "name": "load_skill", "content": "禁用说明"},
+            {"role": "tool", "tool_call_id": "enabled", "content": "启用说明"},
+            {"role": "tool", "tool_call_id": "business", "content": "业务结果"},
+        ]]
+        filtered = self.service.filter_skill_history(history, frozenset({"空间联动"}))
+        self.assertEqual(filtered[0].tool_calls, [
+            {"id": "enabled", "name": "load_skill", "args": {"name": "空间联动"}, "type": "tool_call"},
+            {"id": "business", "name": "database_query", "args": {"query": "保留"}, "type": "tool_call"},
+        ])
+        convert_to_messages([item.model_dump(exclude_none=True) for item in filtered])
+        self.assertEqual([item.content for item in filtered], ["", "启用说明", "业务结果"])
+
+    def test_unrecognized_and_orphan_skill_results_are_not_replayed(self):
+        for args in ({"name": "不存在"}, {}, {"name": []}, "无效参数", "[]"):
+            with self.subTest(args=args):
+                history = [
+                    ChatMessage(role="tool", name="load_skill", tool_call_id="orphan", content="孤立说明"),
+                    ChatMessage(role="assistant", content="保留正文", tool_calls=[
+                        {"id": "call", "name": "load_skill", "args": args},
+                    ]),
+                    ChatMessage(role="tool", tool_call_id="call", content="无法确认的说明"),
+                    ChatMessage(role="tool", name="database_query", tool_call_id="business", content="业务结果"),
+                ]
+                filtered = self.service.filter_skill_history(history, frozenset({"空间联动"}))
+                self.assertEqual([item.content for item in filtered], ["保留正文", "业务结果"])
+                self.assertIsNone(filtered[0].tool_calls)
+
+    def test_current_skill_list_overrides_old_loading_instructions(self):
+        prompt = build_system_prompt((), "断面业务任务必须先加载断面业务")
+        self.assertIn("当前可用能力：\n- （无）", prompt)
+        self.assertIn("仅在该 Skill 出现在本次列表中时适用", prompt)
+        self.assertTrue(prompt.endswith("仍可根据任务需要正常调用业务工具。"))
+
     def test_tool_history_is_atomic_under_message_and_token_limits(self):
         from services.token_budget_service import TokenBudgetService
         from tests.test_token_budget_service import TOKENIZER_FILE, DeepSeekV4TokenCounter

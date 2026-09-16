@@ -621,10 +621,44 @@ python -m pip install \
 
 ## 测试
 
+以下命令设置测试用模型密钥并运行后端测试。
+
 ```powershell
 $env:NEW_DH_LLM__API_KEY = "test-key"
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
+
+## Skill 独立开关
+
+管理员可在管理前端的“Skill 管理”页面独立启停 Skill，所有用户统一生效。状态保存在
+MySQL 的 `agent_skill_setting` 表中，启动迁移 `0013` 自动建表，新发现的 Skill 默认启用，
+已有设置不会被初始化覆盖，重启后保留。
+
+每次新任务（包括同一会话继续提问）读取不可变的启用名单。关闭的 Skill 不进入模型的目录摘要，
+`load_skill` 无法加载它；本次上下文副本也会移除该 Skill 的历史加载调用及返回说明，保留其他
+Skill、业务工具结果和正常问答正文，不改写数据库历史。正在执行的任务继续使用启动时的名单。
+读取配置失败会终止新任务，不回退为全部启用。开关不关闭任何业务工具，Skill 无需声明 `tools`。
+
+管理接口沿用管理员鉴权与统一响应格式，外部通过 `/agent-api` 网关入口访问：
+
+| 方法与后端路径 | 行为 |
+| --- | --- |
+| `GET /admin/skills` | 返回已发现的 Skill 名称、说明、状态、修订号和修改信息 |
+| `PUT /admin/skills/{skillKey}/enabled` | 接收 `enabled` 和 `expectedRevision`，仅更新指定 Skill |
+
+列表及更新结果使用 `skillKey`、`name`、`description`、`enabled`、`revision`、`updatedBy`、
+`updatedAt` 字段。修改冲突返回 HTTP `409`，前端刷新该项并提示重试；不存在的 Skill 返回 `404`。
+未授权或普通用户不能调用管理接口。
+
+新增 Skill 只需在配置的 Skill 目录下新增 `<名称>/SKILL.md`，沿用现有 YAML 头部的 `name`、
+`description` 和 Markdown 正文，`name` 必须与目录名一致。部署并重启后自动进入管理列表，
+无需修改页面、接口、表结构或工具注册。名称是持久化标识，重命名视为新增 Skill。
+
+`tests/test_skill_management.py` 包含自动发现、独立开关、管理员权限、修订冲突与任务快照测试；
+上下文、工具和任务测试另覆盖历史过滤、四种开关组合及并发隔离。真实 MySQL 测试默认跳过，
+仅在显式指定 `SKILL_TEST_DB_NAME` 且与测试进程数据库配置一致时运行；使用独立临时库，
+不要指向共享业务库。本地联调若外部登录或词库不可用，可使用仅监听回环地址的临时认证代理
+和测试替身，验证后停止代理并清理测试登录状态，正式登录与鉴权代码始终保留。
 
 
 ## 模型工具调用诊断日志

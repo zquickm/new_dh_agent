@@ -85,14 +85,21 @@ class ToolExecutor:
                 return name
         return None
 
-    async def execute(self, name: str, argument: Any) -> str:
-        content, _ = await self.execute_with_events(name, argument)
+    async def execute(
+        self, name: str, argument: Any, *,
+        enabled_skill_names: Optional[frozenset[str]] = None,
+    ) -> str:
+        content, _ = await self.execute_with_events(
+            name, argument, enabled_skill_names=enabled_skill_names
+        )
         return content
 
     async def execute_with_events(
         self,
         name: str,
         argument: Any,
+        *,
+        enabled_skill_names: Optional[frozenset[str]] = None,
     ) -> tuple[str, tuple[dict[str, Any], ...]]:
         tool = self.get(name)
         if tool is None:
@@ -105,6 +112,12 @@ class ToolExecutor:
                     argument = parsed
             except json.JSONDecodeError:
                 pass
+
+        # 权限由后端任务快照提供，模型参数不能覆盖；其他工具完全不受影响。
+        if name == "load_skill" and enabled_skill_names is not None:
+            skill_name = argument.get("name") if isinstance(argument, dict) else argument
+            if not isinstance(skill_name, str) or skill_name not in enabled_skill_names:
+                raise PermissionError("该 Skill 在本次任务中不可用")
 
         args: tuple[Any, ...] = () if isinstance(argument, dict) else (argument,)
         kwargs = argument if isinstance(argument, dict) else {}

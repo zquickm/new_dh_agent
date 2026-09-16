@@ -6,6 +6,7 @@ from database.models.conversation import (
     ToolCallAuditModel,
 )
 from database.models.system_prompt import SystemPromptModel, SystemPromptVersionModel
+from database.models.skill import SkillModel
 
 __all__ = [
     "ConversationModel",
@@ -15,4 +16,5 @@ __all__ = [
     "ToolCallAuditModel",
     "SystemPromptModel",
     "SystemPromptVersionModel",
+    "SkillModel",
 ]

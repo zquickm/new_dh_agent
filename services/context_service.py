@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from textwrap import dedent
 from typing import Any
 
@@ -59,12 +60,72 @@ def build_system_prompt(
     return (
         f"{system_prompt}\n\n"
         "当前可用能力：\n"
-        f"{skill_index}"
+        f"{skill_index}\n\n"
+        "Skill 加载权限以本次当前可用能力列表为准；只能加载列表中的 Skill。"
+        "此前的固定提示、工具说明或历史对话中要求先加载某个 Skill 的规则，"
+        "仅在该 Skill 出现在本次列表中时适用；未列出的 Skill 不得加载或推测其说明。"
+        "Skill 开关不限制任何业务工具，仍可根据任务需要正常调用业务工具。"
     )
 
 
 class ContextService:
     """Build model input without persistence or request-local state."""
+
+    @staticmethod
+    def filter_skill_history(
+        history: list[ChatMessage], enabled_skill_names: frozenset[str]
+    ) -> list[ChatMessage]:
+        """复制历史，仅移除当前不可用 Skill 的加载调用及其说明。"""
+        filtered: list[ChatMessage] = []
+        blocked_ids: set[str] = set()
+        allowed_skill_ids: set[str] = set()
+        for original in history:
+            item = original.model_copy(deep=True)
+            if item.role == "tool":
+                if item.tool_call_id in blocked_ids or (
+                    item.name == "load_skill"
+                    and item.tool_call_id not in allowed_skill_ids
+                ):
+                    continue
+                filtered.append(item)
+                continue
+
+            # 调用 ID 只在当前助手调用块中匹配，避免误删后续任务的同名 ID。
+            blocked_ids.clear()
+            allowed_skill_ids.clear()
+            if item.role == "assistant" and item.tool_calls:
+                calls: list[dict[str, Any]] = []
+                for call in item.tool_calls:
+                    function = call.get("function") or {}
+                    name = call.get("name") or function.get("name")
+                    args = call.get("args", function.get("arguments", {}))
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    args = args if isinstance(args, dict) else {}
+                    call_id = call.get("id")
+                    if name == "load_skill":
+                        skill_name = args.get("name")
+                        if (
+                            not isinstance(skill_name, str)
+                            or skill_name not in enabled_skill_names
+                            or not isinstance(call_id, str)
+                        ):
+                            if isinstance(call_id, str):
+                                blocked_ids.add(call_id)
+                            continue
+                        allowed_skill_ids.add(call_id)
+                    calls.append({
+                        "id": call_id, "name": name, "args": args,
+                        "type": "tool_call",
+                    })
+                item.tool_calls = calls or None
+                if not calls and not item.content.strip():
+                    continue
+            filtered.append(item)
+        return filtered
 
     def build_messages(
         self,

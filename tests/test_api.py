@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -70,6 +71,14 @@ class FakeAgent:
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
+        # Python 3.9 中，前一组异步测试可能已关闭同步测试桩所需的默认循环。
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self.addCleanup(asyncio.set_event_loop, None)
+            self.addCleanup(loop.close)
         repository = MemoryConversationRepository()
         for target in (
             "services.conversation_service.conversation_repository",
@@ -221,6 +230,8 @@ class ApiTest(unittest.TestCase):
             "main.database_runtime.start", new=AsyncMock()
         ), patch(
             "main.system_prompt_service.start", new=AsyncMock()
+        ), patch(
+            "main.skill_service.start", new=AsyncMock()
         ), patch("main.database_runtime.close", new=AsyncMock()):
             with TestClient(app) as direct_client:
                 response = direct_client.get("/health")

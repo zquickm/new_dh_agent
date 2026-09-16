@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from agents.agent_loop import AgentLoop
 from agents.events import AgentEvent
@@ -11,6 +11,7 @@ from agents.tools.executor import ToolExecutor
 from controller.streaming.sse_encoder import encode_chat_stream
 from tests.fakes.memory_conversation_repository import conversation_repository
 from schemas.chat import AgentRequest
+from schemas.skill import ActiveSkillSnapshot
 from services.chat_service import ChatService
 from services.sensitive_word_service import SensitiveWordMatcher
 
@@ -75,6 +76,104 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_next_exchange_filters_disabled_skill_but_keeps_other_results(self):
+        from tests.test_agent_loop import FakeLlm
+
+        provider = AsyncMock()
+        provider.active_snapshot.side_effect = [
+            ActiveSkillSnapshot(enabled_skill_names=frozenset({"断面业务", "空间联动"})),
+            ActiveSkillSnapshot(enabled_skill_names=frozenset({"空间联动"})),
+        ]
+        tools = ToolExecutor()
+        tools.register("load_skill", "加载说明", lambda name: f"{name}内部完整说明")
+        tools.register("database_query", "业务查询", lambda: "原业务查询结果")
+        calls = [
+            {"id": "a", "name": "load_skill", "args": {"name": "断面业务"}},
+            {"id": "b", "name": "load_skill", "args": {"name": "空间联动"}},
+            {"id": "c", "name": "database_query", "args": {}},
+        ]
+        llm = FakeLlm([([], calls), (["先前最终回答"], []), (["后续回答"], [])])
+        service = ChatService(skill_provider=provider)
+        service._agent = AgentLoop(llm, tools)
+        try:
+            first = [event async for event in service.stream_chat(
+                AgentRequest(question="初次问题"), user_id=TEST_USER_ID,
+            )]
+            conversation_id = first[-1]["data"]["conversation_id"]
+            before = await conversation_repository.get(conversation_id, user_id=TEST_USER_ID)
+            original = before.messages[1].model_messages
+            _ = [event async for event in service.stream_chat(
+                AgentRequest(question="继续提问", conversation_id=conversation_id),
+                user_id=TEST_USER_ID,
+            )]
+            messages = llm.calls[2][0]
+            self.assertNotIn("断面业务内部完整说明", str(messages))
+            self.assertIn("空间联动内部完整说明", str(messages))
+            self.assertIn("原业务查询结果", str(messages))
+            self.assertIn("先前最终回答", str(messages))
+            after = await conversation_repository.get(conversation_id, user_id=TEST_USER_ID)
+            self.assertEqual(after.messages[1].model_messages, original)
+            self.assertEqual(provider.active_snapshot.await_count, 2)
+        finally:
+            await service.close()
+
+    async def test_parallel_runs_keep_their_starting_skill_snapshot(self):
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        seen = {}
+
+        class CapturingAgent:
+            model_name = "fake-model"
+
+            async def run_stream(self, question, history, *, enabled_skill_names):
+                seen[question] = enabled_skill_names
+                if question == "第一个任务":
+                    first_started.set()
+                    await release_first.wait()
+                    seen["第一个任务结束"] = enabled_skill_names
+                yield AgentEvent(type="answer_delta", content="完成")
+
+        provider = AsyncMock()
+        provider.active_snapshot.side_effect = [
+            ActiveSkillSnapshot(enabled_skill_names=frozenset({"断面业务"})),
+            ActiveSkillSnapshot(enabled_skill_names=frozenset()),
+        ]
+        service = ChatService(skill_provider=provider)
+        service._agent = CapturingAgent()
+
+        async def consume(question):
+            return [event async for event in service.stream_chat(
+                AgentRequest(question=question), user_id=TEST_USER_ID,
+            )]
+
+        first = asyncio.create_task(consume("第一个任务"))
+        try:
+            await asyncio.wait_for(first_started.wait(), 3)
+            second = await asyncio.wait_for(consume("第二个任务"), 3)
+            self.assertEqual(second[-1]["event"], "done")
+            self.assertEqual(seen["第二个任务"], frozenset())
+            release_first.set()
+            await asyncio.wait_for(first, 3)
+            self.assertEqual(seen["第一个任务结束"], frozenset({"断面业务"}))
+        finally:
+            release_first.set()
+            await asyncio.gather(first, return_exceptions=True)
+            await service.close()
+
+    async def test_skill_database_failure_does_not_start_agent(self):
+        provider = AsyncMock()
+        provider.active_snapshot.side_effect = RuntimeError("Skill 数据库不可用")
+        service = ChatService(skill_provider=provider)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Skill 数据库不可用"):
+                _ = [event async for event in service.stream_chat(
+                    AgentRequest(question="数据库故障"), user_id=TEST_USER_ID,
+                )]
+            self.assertIsNone(service._agent)
+            self.assertFalse(service._background_tasks)
+        finally:
+            await service.close()
+
     async def test_follow_up_replays_persisted_skill_and_parallel_tool_results(self):
         from tests.test_agent_loop import FakeLlm
         from langchain_core.messages import convert_to_messages

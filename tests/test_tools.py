@@ -19,6 +19,31 @@ from tool_backends.rag_backend import RagSearchBackend
 
 
 class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_skill_gate_checks_dict_json_and_cannot_be_overridden(self):
+        loaded = []
+        executor = ToolExecutor()
+        executor.register("load_skill", "加载说明", lambda name: loaded.append(name) or name)
+        executor.register("database_query", "查询", lambda: "业务结果")
+        definitions = executor.definitions()
+        allowed = frozenset({"空间联动"})
+        for argument in (
+            {"name": "断面业务"}, '{"name":"断面业务"}', "断面业务",
+            {"name": "断面业务", "enabled_skill_names": ["断面业务"]},
+            {"name": ["空间联动"]}, {},
+        ):
+            with self.subTest(argument=argument), self.assertRaises(PermissionError):
+                await executor.execute("load_skill", argument, enabled_skill_names=allowed)
+        self.assertEqual(loaded, [])
+        for argument in ({"name": "空间联动"}, '{"name":"空间联动"}'):
+            self.assertEqual(await executor.execute(
+                "load_skill", argument, enabled_skill_names=allowed,
+            ), "空间联动")
+        result, _ = await executor.execute_with_events(
+            "database_query", {}, enabled_skill_names=frozenset(),
+        )
+        self.assertEqual(result, "业务结果")
+        self.assertEqual(executor.definitions(), definitions)
+
     def setUp(self):
         self.synonym_patcher = patch.object(
             dictionary_store,

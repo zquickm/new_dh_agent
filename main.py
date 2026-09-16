@@ -15,11 +15,13 @@ from controller.feedback_controller import admin_router as admin_feedback_router
 from controller.feedback_controller import user_router as user_feedback_router
 from controller.recommend_controller import router as recommend_router
 from controller.system_prompt_controller import router as system_prompt_router
+from controller.skill_controller import router as skill_router
 from database.runtime import database_runtime
 from middleware.internal_request_auth import InternalRequestAuthMiddleware
 from services.chat_service import chat_service
 from services.dictionary_refresh_service import dictionary_refresh_service
 from services.system_prompt_service import system_prompt_service
+from services.skill_service import skill_service
 
 
 settings = get_settings()
@@ -30,16 +32,20 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     previous_prompt_provider = chat_service._prompt_provider
+    previous_skill_provider = chat_service._skill_provider
     await database_runtime.start()
     try:
         await system_prompt_service.start()
+        await skill_service.start()
         chat_service.set_prompt_provider(system_prompt_service)
+        chat_service.set_skill_provider(skill_service)
         await chat_service.start()
         await dictionary_refresh_service.start()
         logger.info("application_started profile=%s", settings.app_profile)
         yield
     finally:
         chat_service.set_prompt_provider(previous_prompt_provider)
+        chat_service.set_skill_provider(previous_skill_provider)
         await dictionary_refresh_service.stop()
         await chat_service.close()
         await database_runtime.close()
@@ -58,6 +64,7 @@ app.include_router(user_feedback_router)
 app.include_router(recommend_router)
 app.include_router(agent_router)
 app.include_router(system_prompt_router)
+app.include_router(skill_router)
 app.include_router(admin_feedback_router)
 
 

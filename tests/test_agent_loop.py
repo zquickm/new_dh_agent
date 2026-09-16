@@ -1,10 +1,13 @@
 import asyncio
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 from copy import deepcopy
 
 from services.synonym_service import build_synonym_matcher
 from agents.agent_loop import AgentLoop
+from agents.skills import SkillCatalog
 from services.context_service import SYSTEM_PROMPT
 from agents.tools.executor import ToolExecutor, ToolOutput
 from agents.tools.registry import build_tool_executor
@@ -29,6 +32,49 @@ class FakeLlm:
 
 
 class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
+    async def test_all_skill_switch_combinations_preserve_tools(self):
+        names = ("空间联动", "断面业务")
+        with tempfile.TemporaryDirectory() as directory:
+            for name in names:
+                path = Path(directory) / name
+                path.mkdir()
+                (path / "SKILL.md").write_text(
+                    f"---\nname: {name}\ndescription: {name}独立摘要\n---\n{name}完整操作说明",
+                    encoding="utf-8",
+                )
+            catalog = SkillCatalog(Path(directory))
+            for enabled in (frozenset(), frozenset(names[:1]), frozenset(names[1:]), frozenset(names)):
+                with self.subTest(enabled=enabled):
+                    tools = build_tool_executor(catalog)
+                    tools.register("database_query", "查询", lambda: "数据库仍可用")
+                    definitions = tools.definitions()
+                    calls = [
+                        {"id": str(index), "name": "load_skill", "args": {"name": name}}
+                        for index, name in enumerate(names)
+                    ]
+                    calls.append({"id": "db", "name": "database_query", "args": {}})
+                    llm = FakeLlm([([], calls), (["完成"], [])])
+                    agent = AgentLoop(llm, tools, catalog)
+                    try:
+                        events = [event async for event in agent.run_stream(
+                            "测试能力开关", [], enabled_skill_names=enabled,
+                        )]
+                        prompt = llm.calls[0][0][0]["content"]
+                        for name in names:
+                            self.assertEqual(f"{name}独立摘要" in prompt, name in enabled)
+                            self.assertEqual(
+                                any(f"{name}完整操作说明" in message["content"]
+                                    for message in llm.calls[1][0]),
+                                name in enabled,
+                            )
+                        self.assertEqual(llm.calls[0][1], definitions)
+                        self.assertEqual(tools.definitions(), definitions)
+                        finished = [event for event in events if event.type == "tool_finished"]
+                        self.assertEqual([event.success for event in finished],
+                                         [name in enabled for name in names] + [True])
+                    finally:
+                        await agent.close()
+
     async def test_interrupted_tool_batch_does_not_persist_orphan_calls(self):
         saved = []
         tools = ToolExecutor()

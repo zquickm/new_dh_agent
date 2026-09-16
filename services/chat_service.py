@@ -15,6 +15,7 @@ from agents.agent_loop import AgentLoop, build_agent_loop
 from config.settings import get_settings
 from repositories.repository import conversation_repository
 from schemas.system_prompt import ActiveSystemPromptSnapshot
+from schemas.skill import ActiveSkillSnapshot
 from schemas.chat import AgentRequest, ChatMessage, FrontendContext
 from services.citation_service import CitationService
 from services.context_service import SYSTEM_PROMPT
@@ -43,13 +44,14 @@ _TOOL_DISPLAY_NAMES = {
 
 
 class ChatService:
-    def __init__(self, prompt_provider=None) -> None:
+    def __init__(self, prompt_provider=None, skill_provider=None) -> None:
         self._agent: Optional[AgentLoop] = None
         self._sensitive_word_matcher: Optional[SensitiveWordMatcher] = None
         self._background_tasks: set[asyncio.Task] = set()
         self._maintenance_task: Optional[asyncio.Task] = None
         self._instance_id = str(uuid4())
         self._prompt_provider = prompt_provider or _StaticPromptProvider()
+        self._skill_provider = skill_provider
 
     async def start(self) -> None:
         if self._maintenance_task is not None:
@@ -61,6 +63,9 @@ class ChatService:
 
     def set_prompt_provider(self, prompt_provider) -> None:
         self._prompt_provider = prompt_provider
+
+    def set_skill_provider(self, skill_provider) -> None:
+        self._skill_provider = skill_provider
 
     def replace_sensitive_word_matcher(self, rules: list[dict]) -> None:
         matcher = SensitiveWordMatcher(rules)
@@ -171,6 +176,11 @@ class ChatService:
             return
 
         prompt_snapshot = await self._prompt_provider.active_snapshot()
+        # 应用启动时注入数据库服务；读取失败直接终止，不回退为全部启用。
+        skill_snapshot = (
+            await self._skill_provider.active_snapshot()
+            if self._skill_provider is not None else None
+        )
         # Persist both sides before starting the model. The request/SSE connection is
         # only a subscriber after this point; closing it must not cancel generation.
         _, assistant_message = await conversation_repository.begin_exchange(
@@ -196,6 +206,7 @@ class ChatService:
                 started_at=started_at,
                 event_queue=event_queue,
                 prompt_snapshot=prompt_snapshot,
+                skill_snapshot=skill_snapshot,
             ),
             name=f"agent-chat-{run_id}",
         )
@@ -223,6 +234,7 @@ class ChatService:
         started_at: float,
         event_queue: asyncio.Queue,
         prompt_snapshot: ActiveSystemPromptSnapshot,
+        skill_snapshot: Optional[ActiveSkillSnapshot],
     ) -> None:
         answer_parts: list[str] = []
         emoji_filter = EmojiStreamFilter()
@@ -302,6 +314,8 @@ class ChatService:
                 )
             if "system_prompt" in run_stream_parameters:
                 run_stream_kwargs["system_prompt"] = prompt_snapshot.content
+            if skill_snapshot is not None and "enabled_skill_names" in run_stream_parameters:
+                run_stream_kwargs["enabled_skill_names"] = skill_snapshot.enabled_skill_names
             if "context_enabled" in run_stream_parameters:
                 run_stream_kwargs["context_enabled"] = conversation.context_enabled
             if "context_message_limit" in run_stream_parameters:

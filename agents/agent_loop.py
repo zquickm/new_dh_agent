@@ -43,6 +43,8 @@ def _classify_tool_error(
         return "TOOL_RESULT_INVALID", error_type, detail, False
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
         return "TOOL_TIMEOUT", error_type, detail, True
+    if tool_name == "load_skill" and isinstance(exc, PermissionError):
+        return "SKILL_UNAVAILABLE", error_type, detail, False
     if isinstance(exc, LookupError):
         return "TOOL_NOT_FOUND", error_type, detail, False
     if isinstance(exc, ValueError):
@@ -130,6 +132,7 @@ class AgentLoop:
         frontend_context: FrontendContext | None = None,
         audit_recorder: ToolAuditRecorder | None = None,
         system_prompt: str = SYSTEM_PROMPT,
+        enabled_skill_names: frozenset[str] | None = None,
         context_enabled: bool = True,
         context_message_limit: int | None = None,
         context_token_limit: int | None = None,
@@ -154,6 +157,12 @@ class AgentLoop:
         )
         tool_definitions = self.tools.definitions()
         skill_summaries = self.skills.summaries() if self.skills else ()
+        if enabled_skill_names is not None:
+            enabled_skill_names = frozenset(enabled_skill_names)
+            skill_summaries = tuple(
+                skill for skill in skill_summaries if skill.name in enabled_skill_names
+            )
+            history = self.context_service.filter_skill_history(history, enabled_skill_names)
         all_history_groups = self.context_service.history_groups(history, len(history))
         history_groups = self.context_service.history_groups(history, limit)
         history_group_sizes = tuple(len(group) for group in history_groups)
@@ -457,7 +466,7 @@ class AgentLoop:
                 retryable = False
                 try:
                     observation, client_events = await self.tools.execute_with_events(
-                        name, tool_call["args"]
+                        name, tool_call["args"], enabled_skill_names=enabled_skill_names
                     )
                     failure_stage = "result_processing"
                     tool_arguments = tool_call["args"]
@@ -523,7 +532,9 @@ class AgentLoop:
                         tool_call["args"],
                         type(exc).__name__,
                     )
-                    if name == "observation_service" and isinstance(
+                    if name == "load_skill" and isinstance(exc, PermissionError):
+                        observation = "该 Skill 在本次任务中不可用，请使用当前可用列表中的 Skill；业务工具仍可正常使用。"
+                    elif name == "observation_service" and isinstance(
                         exc, ValueError
                     ):
                         observation = (
