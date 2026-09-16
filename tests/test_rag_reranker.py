@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+import asyncio
 from typing import Any, Optional
 
+from aiohttp import web
 from tool_backends.rag_backend import RagSearchBackend
 from tool_backends.rag_models import RagChunk, RagToolError
 from tool_backends.rerank_backend import (
@@ -208,6 +210,63 @@ class VllmDocumentRerankerTest(unittest.IsolatedAsyncioTestCase):
 
 
 class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
+    async def test_three_http_requests_share_token_and_select_distinct_libraries(self):
+        calls = []
+        all_started = asyncio.Event()
+
+        async def recall(request):
+            payload = await request.json()
+            calls.append((request.method, request.headers["Authorization"], payload))
+            if len(calls) == 3:
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(), 2)
+            knowledge_id = payload["knowledge_ids"][0]
+            count = {"policy": 6, "business": 2, "literature": 0}[knowledge_id]
+            return web.json_response({"code": 200, "data": {"records": [
+                {"chunk_text": f"{knowledge_id}-{i}", "knowledge_id": knowledge_id,
+                 "doc_id": f"doc-{i}", "chunk_id": f"chunk-{i}", "doc_title": "报告", "score": 0.8}
+                for i in range(count)
+            ]}})
+
+        app = web.Application()
+        app.router.add_post("/recall", recall)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        self.addAsyncCleanup(runner.cleanup)
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        backend = make_backend(FakeSession(), FakeReranker())
+        backend._session = None
+        backend.reranker = None
+        backend.recall_url = f"http://127.0.0.1:{runner.addresses[0][1]}/recall"
+        backend.knowledge_ids = ("policy", "business", "literature")
+        backend.candidate_top_n = 4
+        self.addAsyncCleanup(backend.close)
+
+        result = await backend.search_all("断面调查", 4, {"tags": ["断面"]})
+
+        self.assertEqual([chunk.knowledge_id for chunk in result], ["policy"] * 4 + ["business"] * 2)
+        self.assertEqual(len(calls), 3)  # Empty/sparse results do not trigger more requests.
+        self.assertEqual({tuple(payload["knowledge_ids"]) for _, _, payload in calls},
+                         {("policy",), ("business",), ("literature",)})
+        for method, authorization, payload in calls:
+            self.assertEqual(method, "POST")
+            self.assertEqual(authorization, "Bearer test-token")
+            self.assertEqual(payload["query"], ["断面调查"])
+            self.assertEqual(payload["tags"], ["断面"])
+            self.assertEqual(payload["score"], 0.6)
+            self.assertEqual(payload["top_n"], 4)
+
+    async def test_invalid_library_configuration_does_not_send_requests(self):
+        for ids in (("one",), ("one", "two", ""), ("one", "two", "one")):
+            with self.subTest(ids=ids):
+                session = FakeSession()
+                backend = make_backend(session, FakeReranker())
+                backend.knowledge_ids = ids
+                with self.assertRaises(RagToolError):
+                    await backend.search_all("断面", 4)
+                self.assertEqual(session.calls, [])
+
     async def test_recall_candidates_are_reranked_before_final_limit(self) -> None:
         records = [
             {"chunk_text": chunk.text, "fileName": chunk.source, "chunk_id": chunk.chunk_id}

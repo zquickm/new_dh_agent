@@ -43,7 +43,7 @@ class DictionaryRefreshServiceTest(unittest.IsolatedAsyncioTestCase):
         store = FakeDictionaryStore()
         service = self.service(store, replace_synonym_matcher, lambda _rules: None)
         backend = AsyncMock()
-        backend.search.return_value = []
+        backend.search_all.return_value = []
         rag = RagSearchTool(backend)
         with patch("services.synonym_service._active_synonym_matcher", None):
             await service.refresh_once()
@@ -56,9 +56,9 @@ class DictionaryRefreshServiceTest(unittest.IsolatedAsyncioTestCase):
             expanded = expand_query_synonyms("DO")
             self.assertEqual(expanded, "DO（溶解氧浓度）")
             await rag.execute(expanded)
-            backend.search.assert_awaited_with(expanded, get_settings().tools.rag.top_n, {"tags": []})
+            backend.search_all.assert_awaited_with(expanded, get_settings().tools.rag.top_n, {"tags": []})
             await rag.execute("DO")
-            backend.search.assert_awaited_with(expanded, get_settings().tools.rag.top_n, {"tags": []})
+            backend.search_all.assert_awaited_with(expanded, get_settings().tools.rag.top_n, {"tags": []})
 
     def service(self, store, synonyms, sensitive, *, enabled=False):
         return DictionaryRefreshService(

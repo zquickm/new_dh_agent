@@ -168,7 +168,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_rag_and_database_adapters_serialize_backend_results(self):
         class FakeRagBackend:
-            async def search(self, query, top_k, filters):
+            async def search_all(self, query, top_k, filters):
                 self.arguments = (query, top_k, filters)
                 return [
                     SimpleNamespace(
@@ -218,7 +218,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_rag_expands_synonyms_before_search(self):
         class FakeRagBackend:
-            async def search(self, query, top_k, filters):
+            async def search_all(self, query, top_k, filters):
                 self.query = query
                 return []
 
@@ -245,19 +245,18 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                 settings = get_settings().tools.rag.model_copy(deep=True)
                 settings.top_n = 25
                 settings.rerank.enabled = enabled
-                settings.rerank.candidate_top_n = 60
                 with patch(
                     "agents.tools.rag_search.get_settings",
                     return_value=SimpleNamespace(tools=SimpleNamespace(rag=settings)),
                 ), patch("agents.tools.rag_search.RagSearchBackend") as factory:
-                    factory.return_value.search = AsyncMock(return_value=[])
+                    factory.return_value.search_all = AsyncMock(return_value=[])
                     tool = RagSearchTool()
                     await tool.execute("赤潮")
-                    factory.return_value.search.assert_awaited_once_with(
+                    factory.return_value.search_all.assert_awaited_once_with(
                         "赤潮", 25, {"tags": []}
                     )
                     arguments = factory.call_args.kwargs
-                    self.assertEqual(arguments["candidate_top_n"], 60 if enabled else 25)
+                    self.assertEqual(arguments["candidate_top_n"], 25)
                     self.assertEqual(arguments["knowledge_ids"], tuple(settings.knowledge_ids))
                     self.assertEqual(arguments["dept_ids"], tuple(settings.dept_ids))
 

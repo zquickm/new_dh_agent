@@ -231,24 +231,15 @@ class RagSearchBackend:
             "dept_ids": dept_ids,
             "forceTagList": [],
         }
-        headers = self._headers()
-        minimum_score = round(self.score - 0.2, 2)
-        score = self.score
-
-        while True:
-            body = await self._post_json(
-                self.recall_url,
-                {**payload, "score": score},
-                headers,
-                timeout=self.timeout,
-                max_retries=self.max_retries,
-                retry_backoff=self.retry_backoff,
-            )
-            chunks = self._parse_recall(body, self.candidate_top_n)
-            sparse_threshold = (self.candidate_top_n + 1) // 2
-            if len(chunks) > sparse_threshold or score <= minimum_score:
-                break
-            score = max(minimum_score, round(score - 0.05, 2))
+        body = await self._post_json(
+            self.recall_url,
+            payload,
+            self._headers(),
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+            retry_backoff=self.retry_backoff,
+        )
+        chunks = self._parse_recall(body, self.candidate_top_n)
 
         if not chunks:
             return []
@@ -267,6 +258,22 @@ class RagSearchBackend:
                 )
                 return chunks[:top_k]
         return chunks[:top_k]
+
+    async def search_all(
+        self, query: str, top_k: int, filters: Optional[dict[str, Any]] = None,
+    ) -> list[RagChunk]:
+        if len(self.knowledge_ids) != 3 or any(not value for value in self.knowledge_ids):
+            raise RagToolError("请配置三个知识库的 knowledge_ids")
+        if len(set(self.knowledge_ids)) != 3:
+            raise RagToolError("三个知识库的 knowledge_ids 不得重复")
+        results = await asyncio.gather(*(
+            self.search(query, top_k, {**(filters or {}), "knowledge_ids": [knowledge_id]})
+            for knowledge_id in self.knowledge_ids
+        ), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise RagToolError("知识库检索失败") from result
+        return [chunk for chunks in results for chunk in chunks]
 
     async def close(self) -> None:
         try:

@@ -224,7 +224,6 @@ class RerankSettings(BaseModel):
     path: str = "/v1/rerank"
     url: str = ""
     model: str = "Qwen3-Reranker-4B"
-    candidate_top_n: int = Field(default=100, ge=1)
     timeout: float = Field(default=15, gt=0)
     connect_timeout: float = Field(default=5, gt=0)
     max_retries: int = Field(default=1, ge=0)
@@ -241,7 +240,7 @@ class RagToolSettings(BaseModel):
     knowledge_ids: list[str] = Field(default_factory=list)
     dept_ids: list[str] = Field(default_factory=list)
     score: float = Field(default=0.6, ge=0, le=1)
-    top_n: int = Field(default=20, ge=1)
+    top_n: int = Field(default=4, ge=1)
     faq_score: float = Field(default=0.8, ge=0, le=1)
     search_method: int = 3
     search_scope: str = "knowledge"
