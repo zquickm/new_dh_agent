@@ -149,6 +149,26 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(run_response.status_code, 200)
         self.assertEqual(run_response.json()["data"]["status"], "completed")
         self.assertEqual(run_response.json()["data"]["model"], "fake-model")
+        with self.client.stream(
+            "GET",
+            f"/conversations/{conversation_id}/runs/{run_id}/events?after=1",
+            headers={"Last-Event-ID": "2"},
+        ) as replay_response:
+            replay_body = "".join(replay_response.iter_text())
+        self.assertEqual(replay_response.status_code, 200)
+        replay_blocks = [
+            {
+                key.strip(): value.strip()
+                for line in block.splitlines()
+                if ":" in line
+                for key, value in [line.split(":", 1)]
+            }
+            for block in replay_body.strip().split("\n\n")
+        ]
+        self.assertEqual(
+            [block["event"] for block in replay_blocks], ["token", "done"]
+        )
+        self.assertEqual([int(block["id"]) for block in replay_blocks], [3, 4])
         tool_calls_response = self.client.get(
             f"/conversations/{conversation_id}/runs/{run_id}/tool-calls"
         )
@@ -172,16 +192,24 @@ class ApiTest(unittest.TestCase):
         frames = []
         for block in body.strip().split("\n\n"):
             lines = block.splitlines()
+            fields = {
+                key.strip(): value.strip()
+                for line in lines
+                if ":" in line
+                for key, value in [line.split(":", 1)]
+            }
             frames.append(
                 {
-                    "event": lines[0].removeprefix("event: "),
-                    "payload": json.loads(lines[1].removeprefix("data: ")),
+                    "event": fields["event"],
+                    "id": int(fields["id"]),
+                    "payload": json.loads(fields["data"]),
                 }
             )
         self.assertEqual(
             [frame["event"] for frame in frames],
             ["conversation", "token", "done"],
         )
+        self.assertEqual([frame["id"] for frame in frames], [1, 2, 3])
         conversation = frames[0]["payload"]["data"]
         self.assertEqual(
             frames[1]["payload"]["data"],
@@ -220,6 +248,35 @@ class ApiTest(unittest.TestCase):
         ).json()["data"]
         self.assertEqual(run["status"], "rejected")
         self.assertEqual(run["error_code"], "SENSITIVE_INPUT_REJECTED")
+
+    def test_run_event_replay_is_user_isolated(self):
+        with self.client.stream(
+            "POST", "/agent/chat/stream", json={"question": "你好"}
+        ) as response:
+            body = "".join(response.iter_text())
+        conversation_frame = next(
+            block for block in body.split("\n\n") if block.startswith("event: conversation")
+        )
+        data_line = next(
+            line for line in conversation_frame.splitlines() if line.startswith("data:")
+        )
+        conversation = json.loads(data_line.removeprefix("data: "))["data"]
+
+        self.client.headers["X-User-Id"] = "202"
+        replay = self.client.get(
+            f"/conversations/{conversation['conversation_id']}/runs/"
+            f"{conversation['run_id']}/events"
+        )
+        self.assertEqual(replay.status_code, 404)
+
+    def test_run_event_replay_rejects_invalid_cursor(self):
+        for value in ("invalid", "-1"):
+            with self.subTest(value=value):
+                response = self.client.get(
+                    "/conversations/missing/runs/missing/events",
+                    headers={"Last-Event-ID": value},
+                )
+                self.assertEqual(response.status_code, 400)
 
     def test_rejects_request_without_gateway_internal_header(self):
         with patch(

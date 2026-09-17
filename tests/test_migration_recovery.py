@@ -37,6 +37,46 @@ class PromptVersionMigrationTest(unittest.TestCase):
                     self.assertIn("ADD INDEX", sql)
 
 
+class RunEventReplayMigrationTest(unittest.TestCase):
+    def test_partial_schema_only_creates_missing_parts(self):
+        migration = importlib.import_module(
+            "database.migrations.versions.0014_add_run_event_replay"
+        )
+        inspector = MagicMock()
+        inspector.get_table_names.return_value = []
+        inspector.get_columns.side_effect = (
+            [{"name": "last_event_sequence"}],
+            [],
+        )
+        with patch.object(migration.context, "is_offline_mode", return_value=False), \
+             patch.object(migration.op, "get_bind"), \
+             patch.object(migration.sa, "inspect", return_value=inspector), \
+             patch.object(migration.op, "execute") as execute:
+            migration.upgrade()
+
+        sql = "\n".join(str(call.args[0]) for call in execute.call_args_list)
+        self.assertNotIn("ADD COLUMN `last_event_sequence`", sql)
+        self.assertIn("ADD COLUMN `stream_event_sequence`", sql)
+        self.assertIn("CREATE TABLE IF NOT EXISTS `agent_run_event`", sql)
+
+    def test_complete_schema_is_noop(self):
+        migration = importlib.import_module(
+            "database.migrations.versions.0014_add_run_event_replay"
+        )
+        inspector = MagicMock()
+        inspector.get_table_names.return_value = ["agent_run_event"]
+        inspector.get_columns.side_effect = (
+            [{"name": "last_event_sequence"}],
+            [{"name": "stream_event_sequence"}],
+        )
+        with patch.object(migration.context, "is_offline_mode", return_value=False), \
+             patch.object(migration.op, "get_bind"), \
+             patch.object(migration.sa, "inspect", return_value=inspector), \
+             patch.object(migration.op, "execute") as execute:
+            migration.upgrade()
+        execute.assert_not_called()
+
+
 class MigrationTransactionTest(unittest.IsolatedAsyncioTestCase):
     async def test_lock_autobegin_does_not_rollback_revision_on_disconnect(self):
         config = Config(str(PROJECT_DIR / "alembic.ini"))

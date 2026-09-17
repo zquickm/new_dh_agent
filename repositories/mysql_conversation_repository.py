@@ -11,6 +11,7 @@ from database.models import (
     ConversationModel,
     ConversationRunModel,
     MessageFeedbackModel,
+    RunEventModel,
     ToolCallAuditModel,
 )
 from database.runtime import DatabaseRuntime
@@ -21,6 +22,7 @@ from schemas.conversation import (
     ConversationRun,
     ConversationSummary,
     ContextUsage,
+    RunStreamEvent,
     ToolCallAudit,
 )
 from schemas.feedback import MessageFeedback
@@ -59,6 +61,7 @@ def _message_schema(
         recommend_questions=list(item.recommend_questions or []),
         run_id=item.run_id,
         status=item.status,
+        stream_event_id=item.stream_event_sequence or 0,
         error_code=item.error_code,
         updated_at=_iso(item.updated_at),
         feedback=(
@@ -111,6 +114,7 @@ def _run_schema(item: ConversationRunModel) -> ConversationRun:
         tokenizer_name=item.tokenizer_name,
         token_usage_source=item.token_usage_source,
         token_round_number=item.token_round_number or 0,
+        last_event_id=item.last_event_sequence or 0,
         started_at=_iso(item.started_at),
         finished_at=_optional_iso(item.finished_at),
         duration_ms=item.duration_ms,
@@ -174,6 +178,14 @@ def _tool_call_schema(item: ToolCallAuditModel) -> ToolCallAudit:
         retryable=item.retryable,
         created_at=_iso(item.created_at),
         updated_at=_iso(item.updated_at),
+    )
+
+
+def _run_event_schema(item: RunEventModel) -> RunStreamEvent:
+    return RunStreamEvent(
+        id=item.sequence_no,
+        event=item.event_type,
+        data=dict(item.payload or {}),
     )
 
 
@@ -292,6 +304,75 @@ class MySQLConversationRepository:
                 )
             ).scalar_one_or_none()
             return _run_schema(item) if item is not None else None
+
+    async def append_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        data: dict,
+        *,
+        user_id: str,
+    ) -> RunStreamEvent:
+        now = _now()
+        async with self._runtime.session_factory() as session:
+            async with session.begin():
+                run = (
+                    await session.execute(
+                        select(ConversationRunModel)
+                        .where(
+                            ConversationRunModel.id == run_id,
+                            ConversationRunModel.user_id == int(user_id),
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if run is None:
+                    raise KeyError(run_id)
+                run.last_event_sequence = (run.last_event_sequence or 0) + 1
+                run.updated_at = now
+                item = RunEventModel(
+                    run_id=run_id,
+                    sequence_no=run.last_event_sequence,
+                    event_type=event_type,
+                    payload=data,
+                    created_at=now,
+                )
+                session.add(item)
+        return _run_event_schema(item)
+
+    async def list_run_events(
+        self,
+        conversation_id: str,
+        run_id: str,
+        *,
+        after: int,
+        user_id: str,
+        limit: int = 200,
+    ) -> tuple[list[RunStreamEvent], Optional[str]]:
+        async with self._runtime.session_factory() as session:
+            run = (
+                await session.execute(
+                    select(ConversationRunModel).where(
+                        ConversationRunModel.id == run_id,
+                        ConversationRunModel.conversation_id == conversation_id,
+                        ConversationRunModel.user_id == int(user_id),
+                    )
+                )
+            ).scalar_one_or_none()
+            if run is None:
+                return [], None
+            items = (
+                await session.execute(
+                    select(RunEventModel)
+                    .where(
+                        RunEventModel.run_id == run_id,
+                        RunEventModel.sequence_no > after,
+                    )
+                    .order_by(RunEventModel.sequence_no)
+                    .limit(limit)
+                )
+            ).scalars().all()
+            return [_run_event_schema(item) for item in items], run.status
 
     async def list_tool_calls(
         self,
@@ -651,6 +732,7 @@ class MySQLConversationRepository:
         error_type: Optional[str] = None,
         error_message: Optional[str] = None,
         model_messages: Optional[list[dict]] = None,
+        stream_event_sequence: Optional[int] = None,
     ) -> ConversationMessage:
         now = _now()
         async with self._runtime.session_factory() as session:
@@ -671,6 +753,8 @@ class MySQLConversationRepository:
                 message.content = content
                 if model_messages is not None:
                     message.model_messages = model_messages
+                if stream_event_sequence is not None:
+                    message.stream_event_sequence = stream_event_sequence
                 message.sources = sources
                 message.status = status
                 message.error_code = error_code

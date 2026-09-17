@@ -18,6 +18,7 @@ class ConversationMessage(BaseModel):
     updated_at: Optional[str] = None
     run_id: Optional[str] = None
     status: Literal["streaming", "completed", "failed"] = "completed"
+    stream_event_id: int = 0
     error_code: Optional[str] = None
     sources: list[dict] = Field(default_factory=list)
     images: list[dict] = Field(default_factory=list)
@@ -90,6 +91,7 @@ class ConversationRun(BaseModel):
     tokenizer_name: Optional[str] = None
     token_usage_source: Optional[Literal["estimated", "upstream"]] = None
     token_round_number: int = 0
+    last_event_id: int = 0
     started_at: str
     finished_at: Optional[str] = None
     duration_ms: Optional[int] = None
@@ -99,6 +101,12 @@ class ConversationRun(BaseModel):
     error_message: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class RunStreamEvent(BaseModel):
+    id: int
+    event: str
+    data: dict = Field(default_factory=dict)
 
 
 class ToolCallAudit(BaseModel):

@@ -21,6 +21,23 @@ class ConversationService:
             conversation_id, run_id, user_id=user_id
         )
 
+    async def list_run_events(
+        self,
+        conversation_id: str,
+        run_id: str,
+        *,
+        after: int,
+        user_id: str,
+        limit: int = 200,
+    ):
+        return await conversation_repository.list_run_events(
+            conversation_id,
+            run_id,
+            after=after,
+            user_id=user_id,
+            limit=limit,
+        )
+
     async def list_tool_calls(
         self,
         conversation_id: str,

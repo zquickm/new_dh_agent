@@ -12,6 +12,7 @@ from database.models import (
     ConversationModel,
     ConversationRunModel,
     MessageFeedbackModel,
+    RunEventModel,
     ToolCallAuditModel,
 )
 from database.runtime import build_database_url
@@ -34,6 +35,7 @@ class PersistenceSchemaTest(unittest.TestCase):
         run = Base.metadata.tables["agent_conversation_run"]
         tool_call = Base.metadata.tables["agent_tool_call_audit"]
         feedback = Base.metadata.tables["agent_message_feedback"]
+        run_event = Base.metadata.tables["agent_run_event"]
 
         self.assertIn("user_id", conversation.c)
         self.assertIn("map_context", conversation.c)
@@ -72,6 +74,17 @@ class PersistenceSchemaTest(unittest.TestCase):
             )
         )
         self.assertIn("heartbeat_at", run.c)
+        self.assertIn("last_event_sequence", run.c)
+        self.assertIn("stream_event_sequence", message.c)
+        self.assertEqual(RunEventModel.__tablename__, "agent_run_event")
+        self.assertIn("sequence_no", run_event.c)
+        self.assertIn("payload", run_event.c)
+        self.assertTrue(
+            any(
+                constraint.name == "fk_agent_run_event_run"
+                for constraint in run_event.foreign_key_constraints
+            )
+        )
         self.assertIn("duration_ms", run.c)
         self.assertIn("error_message", run.c)
         self.assertTrue(
@@ -100,13 +113,16 @@ class PersistenceSchemaTest(unittest.TestCase):
         self.assertIn("ADD COLUMN model_messages JSON", sql)
         self.assertIn("CREATE TABLE agent_conversation", sql)
         self.assertIn("CREATE TABLE agent_conversation_message", sql)
-        self.assertEqual(sql.count("ALTER TABLE `agent_conversation_message`"), 1)
+        self.assertEqual(sql.count("ALTER TABLE `agent_conversation_message`"), 2)
         self.assertIn("ADD COLUMN `run_id`", sql)
         self.assertIn("ADD INDEX `ix_agent_message_run`", sql)
         self.assertIn("CREATE TABLE IF NOT EXISTS `agent_conversation_run`", sql)
         self.assertIn("INSERT INTO `agent_conversation_run`", sql)
         self.assertIn("CREATE TABLE IF NOT EXISTS `agent_tool_call_audit`", sql)
         self.assertIn("CREATE TABLE IF NOT EXISTS `agent_message_feedback`", sql)
+        self.assertIn("CREATE TABLE IF NOT EXISTS `agent_run_event`", sql)
+        self.assertIn("ADD COLUMN `last_event_sequence`", sql)
+        self.assertIn("ADD COLUMN `stream_event_sequence`", sql)
         self.assertIn("alembic_version", sql)
 
     def test_stream_state_migration_resumes_after_partial_mysql_ddl(self):

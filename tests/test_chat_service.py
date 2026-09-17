@@ -354,6 +354,16 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(persisted.messages[-1].content, "断线后完成")
         self.assertEqual(persisted.messages[-1].status, "completed")
+        run_id = first_event["data"]["run_id"]
+        replayed, status = await conversation_repository.list_run_events(
+            conversation.id,
+            run_id,
+            after=first_event["id"],
+            user_id=TEST_USER_ID,
+        )
+        self.assertEqual(status, "completed")
+        self.assertEqual([event.event for event in replayed], ["token", "done"])
+        self.assertEqual([event.id for event in replayed], [2, 3])
         await service.close()
 
     async def test_agent_failure_persists_run_error_details(self):

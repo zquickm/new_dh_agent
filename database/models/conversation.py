@@ -82,6 +82,9 @@ class ConversationMessageModel(Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'completed'")
     )
+    stream_event_sequence: Mapped[int] = mapped_column(
+        mysql.BIGINT(unsigned=True), nullable=False, server_default=text("0")
+    )
     error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
@@ -174,6 +177,9 @@ class ConversationRunModel(Base):
     token_usage_source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     token_round_number: Mapped[int] = mapped_column(mysql.SMALLINT(unsigned=True), nullable=False, server_default=text("0"))
     owner_instance_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    last_event_sequence: Mapped[int] = mapped_column(
+        mysql.BIGINT(unsigned=True), nullable=False, server_default=text("0")
+    )
     started_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
     finished_at: Mapped[Optional[datetime]] = mapped_column(
         mysql.DATETIME(fsp=6), nullable=True
@@ -187,6 +193,28 @@ class ConversationRunModel(Base):
     error_message: Mapped[Optional[str]] = mapped_column(mysql.LONGTEXT(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+
+
+class RunEventModel(Base):
+    __tablename__ = "agent_run_event"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["run_id"],
+            ["agent_conversation_run.id"],
+            name="fk_agent_run_event_run",
+            ondelete="CASCADE",
+        ),
+        Index("ix_agent_run_event_created", "created_at"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    sequence_no: Mapped[int] = mapped_column(
+        mysql.BIGINT(unsigned=True), primary_key=True
+    )
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
 
 
 class ToolCallAuditModel(Base):

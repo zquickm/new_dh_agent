@@ -12,6 +12,7 @@ from schemas.conversation import (
     ConversationRun,
     ConversationSummary,
     ContextUsage,
+    RunStreamEvent,
     ToolCallAudit,
 )
 
@@ -28,6 +29,7 @@ class MemoryConversationRepository:
         self._map_contexts: dict[tuple[str, str], FrontendContext] = {}
         self._runs: dict[tuple[str, str], ConversationRun] = {}
         self._tool_calls: dict[tuple[str, str], ToolCallAudit] = {}
+        self._run_events: dict[tuple[str, str], list[RunStreamEvent]] = {}
         self._lock = asyncio.Lock()
 
     async def create(self, title: str, *, user_id: str) -> ConversationDetail:
@@ -66,6 +68,49 @@ class MemoryConversationRepository:
             if run is None or run.conversation_id != conversation_id:
                 return None
             return run.model_copy(deep=True)
+
+    async def append_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        data: dict,
+        *,
+        user_id: str,
+    ) -> RunStreamEvent:
+        async with self._lock:
+            key = (user_id, run_id)
+            run = self._runs.get(key)
+            if run is None:
+                raise KeyError(run_id)
+            sequence = run.last_event_id + 1
+            event = RunStreamEvent(id=sequence, event=event_type, data=data)
+            self._run_events.setdefault(key, []).append(event)
+            self._runs[key] = run.model_copy(
+                update={"last_event_id": sequence, "updated_at": _now()},
+                deep=True,
+            )
+            return event.model_copy(deep=True)
+
+    async def list_run_events(
+        self,
+        conversation_id: str,
+        run_id: str,
+        *,
+        after: int,
+        user_id: str,
+        limit: int = 200,
+    ) -> tuple[list[RunStreamEvent], Optional[str]]:
+        async with self._lock:
+            key = (user_id, run_id)
+            run = self._runs.get(key)
+            if run is None or run.conversation_id != conversation_id:
+                return [], None
+            events = [
+                event.model_copy(deep=True)
+                for event in self._run_events.get(key, [])
+                if event.id > after
+            ][:limit]
+            return events, run.status
 
     async def list_tool_calls(
         self,
@@ -338,6 +383,7 @@ class MemoryConversationRepository:
         error_type: Optional[str] = None,
         error_message: Optional[str] = None,
         model_messages: Optional[list[dict]] = None,
+        stream_event_sequence: Optional[int] = None,
     ) -> ConversationMessage:
         now = _now()
         async with self._lock:
@@ -352,6 +398,11 @@ class MemoryConversationRepository:
                                 "model_messages": model_messages if model_messages is not None else message.model_messages,
                                 "sources": sources,
                                 "status": status,
+                                "stream_event_id": (
+                                    stream_event_sequence
+                                    if stream_event_sequence is not None
+                                    else message.stream_event_id
+                                ),
                                 "error_code": error_code,
                                 "updated_at": now,
                             },

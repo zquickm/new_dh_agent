@@ -43,6 +43,48 @@ _TOOL_DISPLAY_NAMES = {
 }
 
 
+class _LiveEventSink:
+    """Best-effort delivery to the initial HTTP subscriber.
+
+    Durable events are the source of truth. Closing or overflowing this queue only
+    ends the live connection; it must never stop the background generation task.
+    """
+
+    def __init__(self) -> None:
+        self.queue: asyncio.Queue[Optional[dict]] = asyncio.Queue(maxsize=512)
+        self.closed = False
+
+    def publish(self, event: dict) -> None:
+        if self.closed:
+            return
+        try:
+            self.queue.put_nowait(event)
+        except asyncio.QueueFull:
+            self.close()
+
+    def finish(self) -> None:
+        if self.closed:
+            return
+        try:
+            self.queue.put_nowait(None)
+        except asyncio.QueueFull:
+            self.close()
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        try:
+            self.queue.put_nowait(None)
+        except asyncio.QueueFull:
+            pass
+
+
 class ChatService:
     def __init__(self, prompt_provider=None, skill_provider=None) -> None:
         self._agent: Optional[AgentLoop] = None
@@ -148,20 +190,22 @@ class ChatService:
                 error_type="SensitiveInputRejected",
                 error_message="用户输入命中敏感词规则",
             )
-            yield {
+            conversation_event = await self._persist_event(run_id, user_id, {
                 "event": "conversation",
                 "data": {"conversation_id": conversation_id, "run_id": run_id},
-            }
+            })
+            yield conversation_event
             logger.warning(
                 "chat_rejected run_id=%s conversation_id=%s reason=sensitive_input",
                 run_id,
                 conversation_id,
             )
-            yield {
+            token_event = await self._persist_event(run_id, user_id, {
                 "event": "token",
                 "data": {"content": SENSITIVE_INPUT_MESSAGE},
-            }
-            yield {
+            })
+            yield token_event
+            done_event = await self._persist_event(run_id, user_id, {
                 "event": "done",
                 "data": {
                     "conversation_id": conversation_id,
@@ -172,7 +216,8 @@ class ChatService:
                     "images": [],
                     "assistant_message_id": assistant_message.id,
                 },
-            }
+            })
+            yield done_event
             return
 
         prompt_snapshot = await self._prompt_provider.active_snapshot()
@@ -194,7 +239,11 @@ class ChatService:
             system_prompt_sha256=prompt_snapshot.content_sha256,
             owner_instance_id=self._instance_id,
         )
-        event_queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
+        event_sink = _LiveEventSink()
+        conversation_event = await self._persist_event(run_id, user_id, {
+            "event": "conversation",
+            "data": {"conversation_id": conversation_id, "run_id": run_id},
+        })
         task = asyncio.create_task(
             self._run_chat(
                 request,
@@ -204,7 +253,7 @@ class ChatService:
                 run_id=run_id,
                 assistant_message_id=assistant_message.id,
                 started_at=started_at,
-                event_queue=event_queue,
+                event_sink=event_sink,
                 prompt_snapshot=prompt_snapshot,
                 skill_snapshot=skill_snapshot,
             ),
@@ -212,15 +261,15 @@ class ChatService:
         )
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
-        yield {
-            "event": "conversation",
-            "data": {"conversation_id": conversation_id, "run_id": run_id},
-        }
-        while True:
-            event = await event_queue.get()
-            if event is None:
-                return
-            yield event
+        yield conversation_event
+        try:
+            while True:
+                event = await event_sink.queue.get()
+                if event is None:
+                    return
+                yield event
+        finally:
+            event_sink.close()
 
     async def _run_chat(
         self,
@@ -232,7 +281,7 @@ class ChatService:
         run_id: str,
         assistant_message_id: str,
         started_at: float,
-        event_queue: asyncio.Queue,
+        event_sink: _LiveEventSink,
         prompt_snapshot: ActiveSystemPromptSnapshot,
         skill_snapshot: Optional[ActiveSkillSnapshot],
     ) -> None:
@@ -242,12 +291,19 @@ class ChatService:
         retrieval_counts: dict[str, int] = {}
         latest_context_usage: dict = {}
         sequence = 0
+        latest_token_event_sequence = 0
         last_persisted_length = 0
         last_persisted_at = perf_counter()
         heartbeat_task = asyncio.create_task(
             self._heartbeat_loop(run_id, user_id),
             name=f"agent-heartbeat-{run_id}",
         )
+
+        async def emit(event: dict) -> int:
+            stored = await self._persist_event(run_id, user_id, event)
+            event_sink.publish(stored)
+            return int(stored["id"])
+
         try:
             # The authenticated conversation is the sole source of history.
             # Ignore client history (including stale history after account switches).
@@ -291,6 +347,7 @@ class ChatService:
                     status="streaming",
                     user_id=user_id,
                     model_messages=messages,
+                    stream_event_sequence=latest_token_event_sequence,
                 )
 
             async def publish_context_usage(usage: dict) -> None:
@@ -299,9 +356,7 @@ class ChatService:
                 await conversation_repository.update_run_token_usage(
                     run_id, latest_context_usage, user_id=user_id
                 )
-                await event_queue.put(
-                    {"event": "context_usage", "data": latest_context_usage}
-                )
+                await emit({"event": "context_usage", "data": latest_context_usage})
 
             if "run_id" in run_stream_parameters:
                 run_stream_kwargs["run_id"] = run_id
@@ -337,7 +392,7 @@ class ChatService:
                 if event.type == "tool_started":
                     if get_settings().stream.include_process:
                         tool_display_name = self._tool_display_name(event.tool_name)
-                        await event_queue.put({
+                        await emit({
                             "event": "process",
                             "data": self._process_data(
                                 event.round_number,
@@ -360,7 +415,7 @@ class ChatService:
                         result_count, bool
                     ):
                         retrieval_counts[event.tool_call_id] = result_count
-                    await event_queue.put({"event": "retrieval", "data": data})
+                    await emit({"event": "retrieval", "data": data})
                 elif event.type == "map_action":
                     data = event.data or {}
                     if (
@@ -372,7 +427,7 @@ class ChatService:
                             conversation_id, FrontendContext(), user_id=user_id, run_id=run_id,
                         )
                     action_sequence = int(data.get("seq") or 1)
-                    await event_queue.put({
+                    await emit({
                         "event": "map_action",
                         "data": {
                             "version": "1.0",
@@ -394,7 +449,7 @@ class ChatService:
                             or get_settings().stream.include_tool_result
                             else f"{tool_display_name}执行{'完成' if event.success else '失败'}"
                         )
-                        await event_queue.put({
+                        await emit({
                             "event": "process",
                             "data": self._process_data(
                                 event.round_number,
@@ -419,9 +474,10 @@ class ChatService:
                     if not content:
                         continue
                     answer_parts.append(content)
-                    await event_queue.put(
+                    event_sequence = await emit(
                         {"event": "token", "data": {"content": content}}
                     )
+                    latest_token_event_sequence = event_sequence
                     draft = "".join(answer_parts)
                     now = perf_counter()
                     if (
@@ -434,13 +490,16 @@ class ChatService:
                             [],
                             status="streaming",
                             user_id=user_id,
+                            stream_event_sequence=event_sequence,
                         )
                         last_persisted_length = len(draft)
                         last_persisted_at = now
             tail = emoji_filter.feed("", final=True)
             if tail:
                 answer_parts.append(tail)
-                await event_queue.put({"event": "token", "data": {"content": tail}})
+                latest_token_event_sequence = await emit(
+                    {"event": "token", "data": {"content": tail}}
+                )
             answer = "".join(answer_parts)
             if not answer.strip():
                 raise RuntimeError("AgentLoop 未生成有效回答")
@@ -465,7 +524,7 @@ class ChatService:
                 len(answer),
                 len(cited_sources),
             )
-            await event_queue.put({
+            await emit({
                 "event": "done",
                 "data": {
                     "conversation_id": conversation_id,
@@ -514,7 +573,7 @@ class ChatService:
                 error_type=type(exc).__name__,
                 error_message=self._safe_error_message(exc),
             )
-            await event_queue.put({
+            await emit({
                 "event": "error",
                 "data": {
                     "message": "对话生成失败，请稍后重试",
@@ -525,7 +584,16 @@ class ChatService:
         finally:
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
-            await event_queue.put(None)
+            event_sink.finish()
+
+    async def _persist_event(self, run_id: str, user_id: str, event: dict) -> dict:
+        stored = await conversation_repository.append_run_event(
+            run_id,
+            str(event["event"]),
+            dict(event.get("data") or {}),
+            user_id=user_id,
+        )
+        return {"id": stored.id, "event": stored.event, "data": stored.data}
 
     async def _heartbeat_loop(self, run_id: str, user_id: str) -> None:
         interval = get_settings().conversation.run_heartbeat_seconds

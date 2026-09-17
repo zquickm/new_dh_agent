@@ -3,6 +3,7 @@ from database.models.conversation import (
     ConversationModel,
     ConversationRunModel,
     MessageFeedbackModel,
+    RunEventModel,
     ToolCallAuditModel,
 )
 from database.models.system_prompt import SystemPromptModel, SystemPromptVersionModel
@@ -13,6 +14,7 @@ __all__ = [
     "ConversationMessageModel",
     "ConversationRunModel",
     "MessageFeedbackModel",
+    "RunEventModel",
     "ToolCallAuditModel",
     "SystemPromptModel",
     "SystemPromptVersionModel",

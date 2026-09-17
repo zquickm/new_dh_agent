@@ -32,10 +32,15 @@ class DuanmianAnalysisStreamTest(unittest.IsolatedAsyncioTestCase):
             ))]
         events = []
         for frame in frames:
-            event_line, data_line = frame.strip().split("\n")
-            envelope = json.loads(data_line.removeprefix("data: "))
+            fields = {
+                key.strip(): value.strip()
+                for line in frame.strip().splitlines()
+                if ":" in line
+                for key, value in [line.split(":", 1)]
+            }
+            envelope = json.loads(fields["data"])
             self.assertEqual(envelope["code"], 200)
-            events.append((event_line.removeprefix("event: "), envelope["data"]))
+            events.append((fields["event"], envelope["data"]))
         conversation = events[0][1]
         actions = [data for name, data in events if name == "map_action"]
         self.assertEqual(actions, [{
