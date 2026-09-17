@@ -70,6 +70,11 @@ def enrich_question_with_frontend_context(
             "center": geometry.center,
             "radius": geometry.radius,
             "crs": geometry.crs,
+            "spatial": {
+                "relation": "dwithin",
+                "point": {"lon": geometry.center[0], "lat": geometry.center[1]},
+                "distance": geometry.radius,
+            },
         }
     else:
         selected_area = {
@@ -77,6 +82,10 @@ def enrich_question_with_frontend_context(
             "polygon": geometry.coordinates[0],
             "bbox": geometry.bbox,
             "crs": geometry.crs,
+            "spatial": {
+                "relation": "intersects",
+                "geometry": {"type": "Polygon", "coordinates": geometry.coordinates},
+            },
         }
     serialized = json.dumps(
         {"selected_area": selected_area},
@@ -91,6 +100,9 @@ def enrich_question_with_frontend_context(
         "无关问题忽略选区，不主动提及选区及其历史查询结果。"
         "用户明确要求查询框选区域，或尚未切换到其他地点的观测站点、空间分布、区域类型筛选问题，"
         "都默认限定在 selected_area。"
+        "有选区且没有限定要素类型时，‘有哪些’指该区域的各类已注册空间要素，"
+        "先用 observation_service.list_spatial_elements 发现目录，再逐类 query_spatial_element，"
+        "每类使用 mode=spatial 并完整复用 selected_area.spatial；不得仅查询观测站。"
         "若用户明确指定了单个站点或地点，则该对象优先；未明确要求使用框选范围时，忽略 selected_area，"
         "不得把问题改成查询或展示区域内全部站点。为解析明确站名的站号时必须传入 "
         "station_name；任何只用于查找候选的 search_stations 都必须设置 render_map=false。"
@@ -105,6 +117,7 @@ def enrich_question_with_frontend_context(
         "不得根据旧选区解释本轮查询结果。"
         "直接回答本轮问题；除非用户明确询问或比较选区，不要复述框选范围、坐标。"
         "切换地点时不要先查询或展示旧选区。"
-        "执行选区内查询时必须完整使用 selected_area 中的 query_type 及其对应几何参数，"
+        "执行选区内 search_stations 时必须完整使用 selected_area 中的 query_type 及其对应几何参数；"
+        "执行通用 query_spatial_element 时使用 selected_area.spatial，不传旧站点几何参数，"
         "不得遗漏、估算、扩大或改写坐标。"
     )

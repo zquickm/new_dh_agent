@@ -4,6 +4,23 @@ from agents.tools.map_action import TOOL_DESCRIPTION, TOOL_PARAMETERS, execute_m
 
 
 class MapActionToolTest(unittest.TestCase):
+    def test_geojson_action_preserves_geometry_and_validates_envelope(self):
+        geojson = {"type": "FeatureCollection", "features": [
+            {"type": "Feature", "id": 1, "properties": {"name": "航线"},
+             "geometry": {"type": "MultiLineString", "coordinates": [[[122, 30], [123, 31]]]}},
+        ]}
+        payload = {"layer_id": "routes", "geojson": geojson, "replace": False, "fit_bounds": False}
+        output = execute_map_action("GEOJSON_ADD", payload)
+        self.assertEqual(output.client_events, ({"action_type": "GEOJSON_ADD", "payload": payload},))
+        self.assertIn("GEOJSON_ADD", TOOL_PARAMETERS["properties"]["action_type"]["enum"])
+        for invalid in (
+            {"layer_id": ""}, {"group_id": 1}, {"replace": "false"}, {"fit_bounds": 1},
+            {"geojson": []}, {"geojson": {"type": "FeatureCollection", "features": [1]}},
+            {"geojson": {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "bad"}}]}},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                execute_map_action("GEOJSON_ADD", {**payload, **invalid})
+
     def test_description_forbids_duplicate_station_rendering(self):
         self.assertIn("查询、输出或显示观测站点时禁止调用本工具", TOOL_DESCRIPTION)
         self.assertIn("observation_service 的站点查询和单站分析", TOOL_DESCRIPTION)

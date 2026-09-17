@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from agents.tools.executor import ToolOutput
@@ -15,6 +16,9 @@ TOOL_DESCRIPTION = (
     "除清除失效选区外，单纯查询、输出或显示观测站点时禁止调用本工具，必须调用 observation_service；"
     "observation_service 的站点查询和单站分析会自动发送 CLEAR 和 MARKER_ADD 地图事件，"
     "不得再调用本工具重复清图、标点、定位或适配站点视野。"
+    "observation_service 的通用空间查询默认自动发送 GEOJSON_ADD，不重复绘制。"
+    "GEOJSON_ADD 用于展示已有的 GeoJSON FeatureCollection，支持点、线、面及多部件几何；"
+    "必填 layer_id、geojson，可选 replace（默认 true）、group_id、fit_bounds（默认 false）。"
     "空间联动对话中，用户转而询问另一个明确地点的信息时，若已有该地点的可信坐标，"
     "应调用 FLY_TO 将视角移到该地点；观测服务已自动定位时不重复调用，不编造坐标。"
     "其他情况下，只有用户明确要求额外执行独立的定位、飞行、绘图、清除图层、展示弹窗/表格、"
@@ -31,6 +35,7 @@ TOOL_DESCRIPTION = (
 MAP_ACTION_TYPES = (
     "LOCATE",
     "MARKER_ADD",
+    "GEOJSON_ADD",
     "MARKER_REMOVE",
     "POLYGON_DRAW",
     "CIRCLE_DRAW",
@@ -70,6 +75,23 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "其余动作使用工具描述列出的必填字段。"
             ),
             "properties": {
+                "geojson": {
+                    "type": "object",
+                    "description": "GEOJSON_ADD 必填的 GeoJSON FeatureCollection，保留完整 geometry 和 properties。",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["FeatureCollection"]},
+                        "features": {"type": "array", "items": {"type": "object"}},
+                    },
+                    "required": ["type", "features"],
+                },
+                "replace": {
+                    "type": "boolean", "default": True,
+                    "description": "GEOJSON_ADD 是否替换目标图层；false 为追加分页结果。",
+                },
+                "group_id": {
+                    "type": "string",
+                    "description": "GEOJSON_ADD 可选图层组；同一 run_id 首次使用该组时清除该组旧结果，后续类别共存。",
+                },
                 "points": {
                     "type": "array",
                     "items": {
@@ -229,7 +251,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 },
                 "layer_id": {
                     "type": "string",
-                    "description": "MARKER_ADD 可选的目标图层 ID。",
+                    "description": "MARKER_ADD 可选、GEOJSON_ADD 必填的目标图层 ID。",
                 },
                 "layer_ids": {
                     "type": "array",
@@ -244,7 +266,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "fit_bounds": {
                     "type": "boolean",
                     "description": (
-                        "MARKER_ADD 是否根据全部标记自动调整地图视野。"
+                        "MARKER_ADD 或 GEOJSON_ADD 是否根据图层内容调整地图视野；通用选区查询保持 false。"
                     ),
                 },
             },
@@ -257,6 +279,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
 _REQUIRED_PAYLOAD_FIELDS: dict[str, tuple[str, ...]] = {
     "LOCATE": ("points",),
     "MARKER_ADD": ("markers",),
+    "GEOJSON_ADD": ("layer_id", "geojson"),
     "MARKER_REMOVE": ("marker_ids",),
     "POLYGON_DRAW": ("coordinates",),
     "CIRCLE_DRAW": ("center", "radius"),
@@ -313,6 +336,15 @@ def execute_map_action(
             f"{normalized_type} 缺少必填参数：{', '.join(missing)}"
         )
 
+    if normalized_type == "GEOJSON_ADD":
+        for field in ("layer_id", "group_id"):
+            if field in payload and (not isinstance(payload[field], str) or not payload[field].strip()):
+                raise ValueError(f"GEOJSON_ADD {field} 必须为非空字符串")
+        for field in ("replace", "fit_bounds"):
+            if field in payload and not isinstance(payload[field], bool):
+                raise ValueError(f"GEOJSON_ADD {field} 必须为布尔值")
+        validate_feature_collection(payload["geojson"])
+
     event = {"action_type": normalized_type, "payload": normalized_payload}
     if clear_selection:
         # Consumed by the answer loop and ChatService, never serialized to SSE.
@@ -362,3 +394,20 @@ def _point(value: Any, name: str) -> list[float]:
     if any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in value):
         raise ValueError(f"FLY_TO {name} 必须包含两个数值")
     return [float(value[0]), float(value[1])]
+
+
+def validate_feature_collection(value: Any) -> None:
+    """Validate the envelope here; geometry topology is validated by the spatial service."""
+    from agents.tools.spatial_query import SpatialCondition
+
+    if not isinstance(value, dict) or value.get("type") != "FeatureCollection" or not isinstance(value.get("features"), list):
+        raise ValueError("geojson 必须为 FeatureCollection")
+    for feature in value["features"]:
+        if not isinstance(feature, dict) or feature.get("type") != "Feature":
+            raise ValueError("geojson.features 必须为 Feature 数组")
+        if not isinstance(feature.get("properties"), (dict, type(None))):
+            raise ValueError("Feature.properties 必须为对象或 null")
+        geometry = feature.get("geometry")
+        if geometry is not None:
+            SpatialCondition(relation="intersects", geometry=geometry)
+    json.dumps(value, allow_nan=False)
