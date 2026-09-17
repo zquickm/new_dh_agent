@@ -38,7 +38,8 @@ _STATION_TYPE_ALIASES = {
 TOOL_NAME = "observation_service"
 TOOL_DESCRIPTION = (
     "查询海洋观测站的空间分布、类型、详情、在线状态、最新观测、要素趋势或指定时间区间观测数据。"
-    "也查询已注册空间要素的位置和属性：list_spatial_elements 发现目录，"
+    "也查询已注册空间要素的位置和属性（不含断面）：list_spatial_elements 发现目录，"
+    "断面及其测点统一使用 database_query，不调用本工具的 dm_duanmian 查询，也不回退为属性查询。"
     "get_spatial_element_detail 获取字段定义，query_spatial_element 执行通用查询。"
     "有有效 selected_area 时，用户泛问‘有哪些’或‘这个区域有哪些要素’，"
     "先发现目录，再对每个 dataKey 使用同一 selected_area.spatial 做 mode=spatial 查询，"
@@ -47,7 +48,7 @@ TOOL_DESCRIPTION = (
     "纯区域查询可直接使用默认字段。按要素中文名、total 和 features 汇总，"
     "returned 小于 total 时说明仅展示部分，查询失败不等于该类要素不存在。"
     "通用查询参数放在 query 对象中，字段及运算符以详情为准，不编造；结果为 GeoJSON，"
-    "mode=spatial 默认自动分页取全并发送 GEOJSON_ADD 地图事件，勿重复调用 map_action；"
+    "mode=spatial 默认自动分页取全，点要素发送 MARKER_ADD，线面发送 GEOJSON_ADD，勿重复调用 map_action；"
     "属性查询默认只返回数据，可设顶层 render_map=true 展示。render_map=false 仅查询一页。"
     "这是地图选区观测站和明确站名的业务观测站数据的唯一业务工具；用户继续询问前一轮返回的某个业务观测站时，"
     "无论问题涉及水温、盐度、风、浪、潮位、状态、最新值还是趋势，都必须继续使用本工具，"
@@ -388,12 +389,19 @@ class ObservationServiceTool:
             if arguments.keys() - allowed:
                 raise ValueError(f"{operation} 仅接受参数：{', '.join(sorted(allowed)) or '无'}")
             if operation == "list_spatial_elements":
-                data = {"elements": await self.client.list_spatial_elements()}
+                data = {"elements": [
+                    item for item in await self.client.list_spatial_elements()
+                    if item.get("dataKey") != "dm_duanmian"
+                ]}
             elif operation == "get_spatial_element_detail":
                 data_key = self._required_text(arguments.get("dataKey"), "dataKey")
+                if data_key == "dm_duanmian":
+                    raise ValueError("断面及其测点请使用 database_query，不使用通用空间查询")
                 data = await self.client.get_spatial_element_detail(data_key)
             else:
                 query = SpatialElementQuery.model_validate(arguments.get("query"))
+                if query.element == "dm_duanmian":
+                    raise ValueError("断面及其测点请使用 database_query，不使用通用空间查询")
                 payload = query.model_dump(exclude_unset=True, exclude_none=True)
                 json.dumps(payload, allow_nan=False)
                 render_map = self._optional_bool(arguments.get("render_map"), "render_map", default=query.mode == "spatial")
@@ -502,14 +510,20 @@ class ObservationServiceTool:
         max_limit = detail.get("maxQueryLimit")
         if type(max_limit) is int and max_limit > 0:
             payload["limit"] = min(payload.get("limit", 20), max_limit)
-        if not payload.get("orderBy") and detail.get("idColumn"):
-            payload["orderBy"] = detail["idColumn"]
+        public_fields = {field.get("name") for field in detail.get("fields", []) if isinstance(field, dict)}
+        id_column = detail.get("idColumn")
+        if not payload.get("orderBy") and id_column and id_column in public_fields:
+            payload["orderBy"] = id_column
         offset = 0
         first_page = None
         total = None
         mapped = 0
         seen_ids: set[str] = set()
         events: list[dict[str, Any]] = []
+        markers: list[dict[str, Any]] = []
+        is_station = payload["element"] == "obs_station"
+        layer_id = "observation-stations" if is_station else f"spatial-element:{payload['element']}"
+        geometry_layer_id = f"spatial-element:{payload['element']}:shapes"
         while True:
             page = await self.client.query_spatial_element({**payload, "offset": offset})
             validate_feature_collection(page)
@@ -529,24 +543,66 @@ class ObservationServiceTool:
                     seen_ids.add(feature_id)
             drawable = [feature for feature in features if feature.get("geometry") is not None]
             mapped += len(drawable)
-            events.extend(execute_map_action("GEOJSON_ADD", {
-                "group_id": "spatial-query-results",
-                "layer_id": f"spatial-element:{payload['element']}",
-                "geojson": {"type": "FeatureCollection", "features": drawable},
-                "replace": offset == 0,
-                "fit_bounds": False,
-            }).client_events)
+            shapes = []
+            for index, feature in enumerate(drawable):
+                geometry = feature["geometry"]
+                if geometry["type"] not in ("Point", "MultiPoint"):
+                    shapes.append(feature)
+                    continue
+                properties = feature.get("properties") or {}
+                feature_id = properties.get("tzno") if is_station else None
+                if feature_id is None:
+                    feature_id = feature.get("id")
+                if feature_id is None:
+                    feature_id = properties.get(detail.get("idColumn"))
+                if feature_id is None:
+                    feature_id = f"{payload['element']}:{offset + index}"
+                coordinates = ([geometry["coordinates"]] if geometry["type"] == "Point"
+                               else geometry["coordinates"])
+                for point_index, point in enumerate(coordinates):
+                    marker = {
+                        "id": str(feature_id) if geometry["type"] == "Point" else f"{feature_id}:{point_index}",
+                        "name": str(properties.get("name") or properties.get("code") or feature_id),
+                        "coordinates": point[:2],
+                        "popup_content": {
+                            "title": str(properties.get("name") or properties.get("code") or feature_id),
+                            "fields": [{"label": key, "value": self._popup_value(value)}
+                                       for key, value in properties.items() if value is not None],
+                        },
+                    }
+                    for key in ("type", "status"):
+                        value = properties.get(key) or (properties.get("station_type") if key == "type" else None)
+                        if value is not None:
+                            marker[key] = str(value)
+                    markers.append(marker)
+            if shapes:
+                events.extend(execute_map_action("GEOJSON_ADD", {
+                    "group_id": "spatial-query-results",
+                    "layer_id": geometry_layer_id,
+                    "geojson": {"type": "FeatureCollection", "features": shapes},
+                    "replace": not events,
+                    "fit_bounds": False,
+                }).client_events)
             offset += returned
             if offset >= total:
                 break
+        # Clear only this category once; submit all point pages together so none are overwritten.
+        point_events = [{
+            "action_type": "CLEAR", "payload": {"layer_ids": [layer_id, geometry_layer_id]},
+        }]
+        if markers:
+            point_events.extend(execute_map_action("MARKER_ADD", {
+                "layer_id": layer_id, "markers": markers, "fit_bounds": False,
+            }).client_events)
         return ToolOutput(content={
             **first_page, "operation": "query_spatial_element",
             "map_result": {
-                "layer_id": f"spatial-element:{payload['element']}",
+                "layer_id": layer_id,
+                "geometry_layer_id": geometry_layer_id,
                 "fetched": offset, "mapped": mapped, "missing_geometry": offset - mapped,
                 "complete": mapped == total, "status": "actions_sent",
             },
-        }, client_events=tuple(events))
+        }, client_events=tuple(point_events + events))
 
     async def close(self) -> None:
         if self._client is not None:

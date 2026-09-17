@@ -1,6 +1,6 @@
 ---
 name: 断面业务
-description: 指导东海 E1、E2、E3、EL、EK 断面及辅助点的业务、数据库查询和专题分析图；也适用于未写明断面编号、仅按年月询问各类要素对比。不用于其他业务观测站查询。
+description: 指导东海 E1、E2、E3、EL、EK 断面及辅助点的业务、数据库查询和专题分析图；也适用于未写明断面编号、仅按年月询问各类要素对比。包括断面测点位置与属性查询；不用于其他业务观测站查询。
 ---
 
 # 断面业务
@@ -9,7 +9,7 @@ description: 指导东海 E1、E2、E3、EL、EK 断面及辅助点的业务、�
 
 ## 路由边界
 
-- 调查断面及其站位、辅助点的历史数据、跨期统计和描述性评价，使用 `database_query`。
+- 调查断面及其站位、辅助点的位置、属性、历史数据、跨期统计和描述性评价，统一使用 `database_query`，不调用 `observation_service` 的 `dm_duanmian` 详情或查询操作。
 - 要求专题出图或打开分析浮层时使用 `dm_duanmian_analysis`，不为出图额外查询数据库或调用 `map_action`。
 - 除非明确和`dm_duanmian_analysis`可展示要素无关，都一同使用 `database_query`和`dm_duanmian_analysis`结合展示数据。例：
   - 用户询问“2022年E1断面盐度情况”，应先用 `database_query` 查询数据，再用 `dm_duanmian_analysis` 出`temp-section`图。
