@@ -103,6 +103,7 @@ def enrich_question_with_frontend_context(
         "有选区且没有限定要素类型时，‘有哪些’指该区域的各类已注册空间要素，"
         "先用 observation_service.list_spatial_elements 发现目录，再逐类 query_spatial_element，"
         "每类使用 mode=spatial 并完整复用 selected_area.spatial；不得仅查询观测站。"
+        "断面及其测点不纳入通用空间查询；明确询问断面时使用 database_query。"
         "若用户明确指定了单个站点或地点，则该对象优先；未明确要求使用框选范围时，忽略 selected_area，"
         "不得把问题改成查询或展示区域内全部站点。为解析明确站名的站号时必须传入 "
         "station_name；任何只用于查找候选的 search_stations 都必须设置 render_map=false。"
