@@ -62,6 +62,10 @@ Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
 | `X-User-Id` | 当前登录用户的正整数 ID，范围为 Java Long 正数范围，不能重复传入 |
 | `X-Auth-Source` | 必须为 `dh-gateway`，不能重复传入 |
 
+创建会话和发起新对话时还会读取 Gateway 注入的姓名、单位、部门、业务角色和
+`X-Profile-Version`，并把创建时的组织归属快照写入 `agent_conversation`。这些字段
+当前不扩大访问范围；列表、详情、更新和续写仍严格使用 `X-User-Id` 隔离。
+
 `X-Username`、`X-Token-Id` 不作为归属依据，因此修改用户名或重新登录不会改变
 会话所属用户。请求体和查询参数中的 `user_id`、`userId` 不能覆盖网关身份。
 

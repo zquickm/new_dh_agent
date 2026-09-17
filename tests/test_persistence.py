@@ -1,6 +1,8 @@
 import io
 import importlib
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 from alembic import command
 from alembic.config import Config
@@ -166,3 +168,35 @@ class PersistenceSchemaTest(unittest.TestCase):
     def test_database_name_rejects_sql_identifiers(self):
         with self.assertRaises(ValueError):
             PersistenceSettings(name="dh_agent`; DROP DATABASE dh_auth")
+
+
+class MySQLConversationRepositoryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_begin_exchange_sets_stream_cursor_before_session_closes(self):
+        conversation = SimpleNamespace(
+            id="conversation-1",
+            user_id=101,
+            message_count=0,
+            updated_at=None,
+            version=0,
+            title="新会话",
+        )
+        session = MagicMock()
+        session.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                scalar_one_or_none=lambda: conversation,
+            )
+        )
+        runtime = MagicMock()
+        runtime.session_factory.return_value.__aenter__.return_value = session
+        repository = MySQLConversationRepository(runtime)
+
+        await repository.begin_exchange(
+            conversation.id,
+            "测试问题",
+            run_id="run-1",
+            user_id="101",
+        )
+
+        user_message, assistant_message, _ = session.add_all.call_args.args[0]
+        self.assertEqual(user_message.__dict__["stream_event_sequence"], 0)
+        self.assertEqual(assistant_message.__dict__["stream_event_sequence"], 0)

@@ -32,7 +32,7 @@ class MemoryConversationRepository:
         self._run_events: dict[tuple[str, str], list[RunStreamEvent]] = {}
         self._lock = asyncio.Lock()
 
-    async def create(self, title: str, *, user_id: str) -> ConversationDetail:
+    async def create(self, title: str, *, user_id: str, identity=None) -> ConversationDetail:
         now = _now()
         item = ConversationDetail(
             id=uuid4().hex,

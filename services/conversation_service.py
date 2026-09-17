@@ -3,8 +3,8 @@ from schemas.conversation import CreateConversationRequest, ConversationPage
 
 
 class ConversationService:
-    async def create(self, request: CreateConversationRequest, *, user_id: str):
-        return await conversation_repository.create(request.title, user_id=user_id)
+    async def create(self, request: CreateConversationRequest, *, user_id: str, identity=None):
+        return await conversation_repository.create(request.title, user_id=user_id, identity=identity)
 
     async def get(self, conversation_id: str, *, user_id: str):
         return await conversation_repository.get(conversation_id, user_id=user_id)

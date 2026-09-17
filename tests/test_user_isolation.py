@@ -17,6 +17,7 @@ def identity(user_id="101"):
     return {
         "X-DH-Internal-Token": "dh-internal-token-change-in-production",
         "X-User-Id": user_id,
+        "X-Username": f"user-{user_id}",
         "X-Auth-Source": "dh-gateway",
     }
 

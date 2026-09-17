@@ -136,7 +136,7 @@ class ChatService:
             self._agent = None
 
     async def stream_chat(
-        self, request: AgentRequest, *, user_id: str
+        self, request: AgentRequest, *, user_id: str, identity=None
     ) -> AsyncIterator[dict]:
         started_at = perf_counter()
         run_id = str(uuid4())
@@ -146,7 +146,7 @@ class ChatService:
         )
         conversation_id = request.conversation_id
         if not conversation_id:
-            conversation = await conversation_repository.create("新会话", user_id=user_id)
+            conversation = await conversation_repository.create("新会话", user_id=user_id, identity=identity)
             conversation_id = conversation.id
         else:
             conversation = await conversation_repository.get(conversation_id, user_id=user_id)

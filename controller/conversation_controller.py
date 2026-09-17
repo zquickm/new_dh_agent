@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from common.json_result import JsonResult
-from middleware.internal_request_auth import get_current_user_id
+from middleware.internal_request_auth import GatewayIdentity, get_current_user_id, get_current_user_identity
 from schemas.conversation import CreateConversationRequest
 from services.conversation_service import conversation_service
 from controller.streaming.sse_encoder import encode_sse, encode_sse_heartbeat
@@ -25,9 +25,9 @@ async def list_conversations(
 @router.post("/conversations")
 async def create_conversation(
     request: CreateConversationRequest,
-    user_id: str = Depends(get_current_user_id),
+    identity: GatewayIdentity = Depends(get_current_user_identity),
 ):
-    return JsonResult.success(await conversation_service.create(request, user_id=user_id))
+    return JsonResult.success(await conversation_service.create(request, user_id=identity.user_id, identity=identity))
 
 
 @router.get("/conversations/{conversation_id}")

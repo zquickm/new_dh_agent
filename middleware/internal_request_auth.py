@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import NamedTuple
+from dataclasses import dataclass
 from hmac import compare_digest
 from urllib.parse import unquote
 
@@ -28,9 +28,20 @@ def get_current_user_id(request: Request) -> str:
     return user_ids[0]
 
 
-class GatewayIdentity(NamedTuple):
+@dataclass(frozen=True)
+class GatewayIdentity:
     user_id: str
     username: str
+    display_name: str = ""
+    user_type: str = "USER"
+    unit_id: str = "1"
+    unit_code: str = "UNASSIGNED"
+    unit_name: str = "待分配单位"
+    department_id: str = "1"
+    department_code: str = "UNASSIGNED"
+    department_name: str = "待分配部门"
+    role_codes: tuple[str, ...] = ("GENERAL_USER",)
+    profile_version: int = 1
 
 
 def get_current_user_identity(request: Request) -> GatewayIdentity:
@@ -48,7 +59,61 @@ def get_current_user_identity(request: Request) -> GatewayIdentity:
         or any(ord(character) < 32 for character in username)
     ):
         raise HTTPException(status_code=401, detail="缺少或无效的网关用户名")
-    return GatewayIdentity(user_id=user_id, username=username)
+    return GatewayIdentity(
+        user_id=user_id,
+        username=username,
+        display_name=_decoded_header(request, "x-display-name", "", 100),
+        user_type=_token_header(request, "x-user-type", "USER", r"USER|ADMIN"),
+        unit_id=_positive_id_header(request, "x-unit-id", "1"),
+        unit_code=_token_header(request, "x-unit-code", "UNASSIGNED"),
+        unit_name=_decoded_header(request, "x-unit-name", "待分配单位", 128),
+        department_id=_positive_id_header(request, "x-department-id", "1"),
+        department_code=_token_header(request, "x-department-code", "UNASSIGNED"),
+        department_name=_decoded_header(request, "x-department-name", "待分配部门", 128),
+        role_codes=_role_codes(request),
+        profile_version=int(_positive_id_header(request, "x-profile-version", "1")),
+    )
+
+
+def _single_header(request: Request, name: str, fallback: str) -> str:
+    values = request.headers.getlist(name)
+    if not values:
+        return fallback
+    if len(values) != 1:
+        raise HTTPException(status_code=401, detail="网关组织身份无效")
+    return values[0]
+
+
+def _decoded_header(request: Request, name: str, fallback: str, maximum: int) -> str:
+    try:
+        value = unquote(_single_header(request, name, fallback), encoding="utf-8", errors="strict").strip()
+    except UnicodeError as exc:
+        raise HTTPException(status_code=401, detail="网关组织身份无效") from exc
+    if len(value) > maximum or any(ord(character) < 32 for character in value):
+        raise HTTPException(status_code=401, detail="网关组织身份无效")
+    return value
+
+
+def _positive_id_header(request: Request, name: str, fallback: str) -> str:
+    value = _single_header(request, name, fallback)
+    if re.fullmatch(r"[1-9][0-9]{0,18}", value) is None or int(value) > 9223372036854775807:
+        raise HTTPException(status_code=401, detail="网关组织身份无效")
+    return value
+
+
+def _token_header(request: Request, name: str, fallback: str, pattern: str = r"[A-Za-z0-9_.-]{2,64}") -> str:
+    value = _single_header(request, name, fallback)
+    if re.fullmatch(pattern, value) is None:
+        raise HTTPException(status_code=401, detail="网关组织身份无效")
+    return value
+
+
+def _role_codes(request: Request) -> tuple[str, ...]:
+    raw = _single_header(request, "x-role-codes", "GENERAL_USER")
+    values = tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
+    if not values or len(values) > 32 or any(re.fullmatch(r"[A-Za-z0-9_.-]{2,64}", value) is None for value in values):
+        raise HTTPException(status_code=401, detail="网关组织身份无效")
+    return values
 
 
 def get_current_admin_id(request: Request) -> int:

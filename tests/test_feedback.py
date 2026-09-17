@@ -28,6 +28,10 @@ def identity_request(username: bytes = b"%E6%B5%8B%E8%AF%95%E7%94%A8%E6%88%B7"):
             (b"x-user-id", b"101"),
             (b"x-auth-source", b"dh-gateway"),
             (b"x-username", username),
+            (b"x-unit-id", b"10"),
+            (b"x-department-id", b"23"),
+            (b"x-role-codes", b"FORECASTER,REVIEWER"),
+            (b"x-profile-version", b"3"),
         ],
     })
 
@@ -51,6 +55,10 @@ class FeedbackIdentityTest(unittest.TestCase):
         identity = get_current_user_identity(identity_request())
         self.assertEqual(identity.user_id, "101")
         self.assertEqual(identity.username, "测试用户")
+        self.assertEqual(identity.unit_id, "10")
+        self.assertEqual(identity.department_id, "23")
+        self.assertEqual(identity.role_codes, ("FORECASTER", "REVIEWER"))
+        self.assertEqual(identity.profile_version, 3)
 
     def test_rejects_missing_username(self):
         request = Request({
