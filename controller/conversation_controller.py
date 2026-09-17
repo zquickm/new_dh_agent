@@ -1,4 +1,5 @@
 import asyncio
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -59,7 +60,7 @@ async def replay_conversation_run_events(
     conversation_id: str,
     run_id: str,
     after: int = Query(default=0, ge=0),
-    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
     user_id: str = Depends(get_current_user_id),
 ):
     cursor = after
