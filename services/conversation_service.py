@@ -1,5 +1,6 @@
 from repositories.repository import conversation_repository
 from schemas.conversation import CreateConversationRequest, ConversationPage
+from services.chat_service import chat_service
 
 
 class ConversationService:
@@ -36,6 +37,13 @@ class ConversationService:
             after=after,
             user_id=user_id,
             limit=limit,
+        )
+
+    async def cancel_run(
+        self, conversation_id: str, run_id: str, *, user_id: str
+    ):
+        return await chat_service.cancel_run(
+            conversation_id, run_id, user_id=user_id
         )
 
     async def list_tool_calls(

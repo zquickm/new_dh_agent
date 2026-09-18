@@ -79,7 +79,7 @@ class AdminContextMessage(CamelModel):
     sequence_no: int
     role: Literal["system", "user", "assistant"]
     content: str
-    status: Literal["streaming", "completed", "failed"]
+    status: Literal["streaming", "completed", "failed", "cancelled"]
     error_code: Optional[str] = None
     run_id: Optional[str] = None
     sources: list[dict] = Field(default_factory=list)
@@ -90,7 +90,10 @@ class AdminContextMessage(CamelModel):
 
 class AdminRunSummary(CamelModel):
     id: str
-    status: Literal["running", "completed", "failed", "interrupted", "rejected"]
+    status: Literal[
+        "running", "cancel_requested", "completed", "failed", "interrupted",
+        "rejected", "cancelled",
+    ]
     model: Optional[str] = None
     system_prompt_version_no: Optional[int] = None
     system_prompt_sha256: Optional[str] = None

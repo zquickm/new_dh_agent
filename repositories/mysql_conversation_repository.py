@@ -119,6 +119,9 @@ def _run_schema(item: ConversationRunModel) -> ConversationRun:
         finished_at=_optional_iso(item.finished_at),
         duration_ms=item.duration_ms,
         heartbeat_at=_iso(item.heartbeat_at),
+        cancel_requested_at=_optional_iso(item.cancel_requested_at),
+        cancelled_at=_optional_iso(item.cancelled_at),
+        cancel_reason=item.cancel_reason,
         error_code=item.error_code,
         error_type=item.error_type,
         error_message=item.error_message,
@@ -309,6 +312,138 @@ class MySQLConversationRepository:
                 )
             ).scalar_one_or_none()
             return _run_schema(item) if item is not None else None
+
+    async def request_run_cancellation(
+        self, conversation_id: str, run_id: str, *, user_id: str
+    ) -> Optional[ConversationRun]:
+        now = _now()
+        async with self._runtime.session_factory() as session:
+            async with session.begin():
+                run = (
+                    await session.execute(
+                        select(ConversationRunModel)
+                        .where(
+                            ConversationRunModel.id == run_id,
+                            ConversationRunModel.conversation_id == conversation_id,
+                            ConversationRunModel.user_id == int(user_id),
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if run is None:
+                    return None
+                if run.status == "running":
+                    run.status = "cancel_requested"
+                    run.cancel_requested_at = now
+                    run.cancel_reason = "user_requested"
+                    run.updated_at = now
+            return _run_schema(run)
+
+    async def finalize_run_cancellation(
+        self,
+        run_id: str,
+        *,
+        user_id: str,
+        answer: str,
+        context_usage: dict,
+        stream_event_sequence: int,
+    ) -> Optional[tuple[ConversationMessage, RunStreamEvent]]:
+        now = _now()
+        async with self._runtime.session_factory() as session:
+            async with session.begin():
+                initial_run = (
+                    await session.execute(
+                        select(ConversationRunModel).where(
+                            ConversationRunModel.id == run_id,
+                            ConversationRunModel.user_id == int(user_id),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if initial_run is None:
+                    return None
+                message = (
+                    await session.execute(
+                        select(ConversationMessageModel)
+                        .where(
+                            ConversationMessageModel.id == initial_run.assistant_message_id,
+                            ConversationMessageModel.user_id == int(user_id),
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                run = (
+                    await session.execute(
+                        select(ConversationRunModel)
+                        .where(
+                            ConversationRunModel.id == run_id,
+                            ConversationRunModel.user_id == int(user_id),
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if run is None or message is None or run.status != "cancel_requested":
+                    return None
+
+                message.content = answer
+                message.model_messages = None
+                message.sources = []
+                message.status = "cancelled"
+                message.stream_event_sequence = max(
+                    message.stream_event_sequence or 0, stream_event_sequence
+                )
+                message.error_code = "USER_CANCELLED"
+                message.updated_at = now
+
+                run.status = "cancelled"
+                run.cancelled_at = now
+                run.finished_at = now
+                run.duration_ms = _duration_ms(run.started_at, now)
+                run.heartbeat_at = now
+                run.error_code = "USER_CANCELLED"
+                run.error_type = "UserCancelled"
+                run.error_message = "用户手动停止生成"
+                run.updated_at = now
+                await self._interrupt_running_tool_calls(
+                    session,
+                    run.id,
+                    now,
+                    error_code="USER_CANCELLED",
+                    error_type="UserCancelled",
+                    error_message="用户停止生成导致工具调用未完成",
+                    retryable=False,
+                )
+
+                conversation = (
+                    await session.execute(
+                        select(ConversationModel)
+                        .where(
+                            ConversationModel.id == run.conversation_id,
+                            ConversationModel.user_id == run.user_id,
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if conversation is not None:
+                    conversation.updated_at = now
+                    conversation.version += 1
+
+                run.last_event_sequence = (run.last_event_sequence or 0) + 1
+                event = RunEventModel(
+                    run_id=run.id,
+                    sequence_no=run.last_event_sequence,
+                    event_type="cancelled",
+                    payload={
+                        "conversation_id": run.conversation_id,
+                        "run_id": run.id,
+                        "assistant_message_id": message.id,
+                        "answer": answer,
+                        "reason": "user_requested",
+                        "context_usage": context_usage,
+                    },
+                    created_at=now,
+                )
+                session.add(event)
+            return _message_schema(message), _run_event_schema(event)
 
     async def append_run_event(
         self,
@@ -781,6 +916,10 @@ class MySQLConversationRepository:
                         effective_run_status = run_status or (
                             "running" if status == "streaming" else status
                         )
+                        if run.status != "running":
+                            raise RuntimeError(
+                                f"run {run.id} is not active: {run.status}"
+                            )
                         run.status = effective_run_status
                         run.heartbeat_at = now
                         run.updated_at = now
@@ -943,14 +1082,96 @@ class MySQLConversationRepository:
                     recovered += 1
         return recovered
 
+    async def recover_cancel_requested_runs(self, stale_before: datetime) -> int:
+        now = _now()
+        recovered = 0
+        async with self._runtime.session_factory() as session:
+            async with session.begin():
+                runs = (
+                    await session.execute(
+                        select(ConversationRunModel)
+                        .where(
+                            ConversationRunModel.status == "cancel_requested",
+                            ConversationRunModel.cancel_requested_at < stale_before,
+                        )
+                        .with_for_update()
+                    )
+                ).scalars().all()
+                for run in runs:
+                    message = (
+                        await session.execute(
+                            select(ConversationMessageModel)
+                            .where(
+                                ConversationMessageModel.id == run.assistant_message_id,
+                                ConversationMessageModel.user_id == run.user_id,
+                            )
+                            .with_for_update()
+                        )
+                    ).scalar_one_or_none()
+                    if message is None:
+                        continue
+                    message.model_messages = None
+                    message.status = "cancelled"
+                    message.error_code = "USER_CANCELLED"
+                    message.updated_at = now
+                    run.status = "cancelled"
+                    run.cancelled_at = now
+                    run.finished_at = now
+                    run.duration_ms = _duration_ms(run.started_at, now)
+                    run.error_code = "USER_CANCELLED"
+                    run.error_type = "CancelTimeoutRecovery"
+                    run.error_message = "取消请求超时后由后台任务收敛"
+                    run.updated_at = now
+                    await self._interrupt_running_tool_calls(
+                        session,
+                        run.id,
+                        now,
+                        error_code="USER_CANCELLED",
+                        error_type="CancelTimeoutRecovery",
+                        error_message="用户停止生成导致工具调用未完成",
+                        retryable=False,
+                    )
+                    run.last_event_sequence = (run.last_event_sequence or 0) + 1
+                    session.add(RunEventModel(
+                        run_id=run.id,
+                        sequence_no=run.last_event_sequence,
+                        event_type="cancelled",
+                        payload={
+                            "conversation_id": run.conversation_id,
+                            "run_id": run.id,
+                            "assistant_message_id": message.id,
+                            "answer": message.content,
+                            "reason": "user_requested",
+                            "context_usage": {},
+                        },
+                        created_at=now,
+                    ))
+                    conversation = (
+                        await session.execute(
+                            select(ConversationModel)
+                            .where(
+                                ConversationModel.id == run.conversation_id,
+                                ConversationModel.user_id == run.user_id,
+                            )
+                            .with_for_update()
+                        )
+                    ).scalar_one_or_none()
+                    if conversation is not None:
+                        conversation.updated_at = now
+                        conversation.version += 1
+                    recovered += 1
+        return recovered
+
     @staticmethod
     async def _interrupt_running_tool_calls(
         session,
         run_id: str,
         now: datetime,
         *,
+        error_code: str = "AGENT_INTERRUPTED",
         error_type: str,
         error_message: str,
+        retryable: bool = True,
     ) -> None:
         items = (
             await session.execute(
@@ -966,9 +1187,9 @@ class MySQLConversationRepository:
             item.status = "interrupted"
             item.finished_at = now
             item.duration_ms = _duration_ms(item.started_at, now)
-            item.error_code = "AGENT_INTERRUPTED"
+            item.error_code = error_code
             item.error_type = error_type
             item.error_message = error_message
             item.failure_stage = "execution"
-            item.retryable = True
+            item.retryable = retryable
             item.updated_at = now

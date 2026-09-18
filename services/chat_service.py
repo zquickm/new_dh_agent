@@ -89,7 +89,7 @@ class ChatService:
     def __init__(self, prompt_provider=None, skill_provider=None) -> None:
         self._agent: Optional[AgentLoop] = None
         self._sensitive_word_matcher: Optional[SensitiveWordMatcher] = None
-        self._background_tasks: set[asyncio.Task] = set()
+        self._background_tasks: dict[str, asyncio.Task] = {}
         self._maintenance_task: Optional[asyncio.Task] = None
         self._instance_id = str(uuid4())
         self._prompt_provider = prompt_provider or _StaticPromptProvider()
@@ -124,7 +124,7 @@ class ChatService:
             self._maintenance_task.cancel()
             await asyncio.gather(self._maintenance_task, return_exceptions=True)
             self._maintenance_task = None
-        tasks = list(self._background_tasks)
+        tasks = list(self._background_tasks.values())
         for task in tasks:
             task.cancel()
         if tasks:
@@ -134,6 +134,20 @@ class ChatService:
             if close is not None:
                 await close()
             self._agent = None
+
+    async def cancel_run(
+        self, conversation_id: str, run_id: str, *, user_id: str
+    ):
+        run = await conversation_repository.request_run_cancellation(
+            conversation_id, run_id, user_id=user_id
+        )
+        if run is None:
+            return None
+        if run.status == "cancel_requested":
+            task = self._background_tasks.get(run_id)
+            if task is not None and not task.done():
+                task.cancel("USER_CANCELLED")
+        return run
 
     async def stream_chat(
         self, request: AgentRequest, *, user_id: str, identity=None
@@ -259,8 +273,12 @@ class ChatService:
             ),
             name=f"agent-chat-{run_id}",
         )
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+        self._background_tasks[run_id] = task
+        task.add_done_callback(
+            lambda completed, active_run_id=run_id: self._discard_background_task(
+                active_run_id, completed
+            )
+        )
         yield conversation_event
         try:
             while True:
@@ -297,6 +315,12 @@ class ChatService:
         heartbeat_task = asyncio.create_task(
             self._heartbeat_loop(run_id, user_id),
             name=f"agent-heartbeat-{run_id}",
+        )
+        cancellation_task = asyncio.create_task(
+            self._cancellation_loop(
+                conversation_id, run_id, user_id, asyncio.current_task()
+            ),
+            name=f"agent-cancellation-{run_id}",
         )
 
         async def emit(event: dict) -> int:
@@ -537,21 +561,60 @@ class ChatService:
                     "context_usage": latest_context_usage,
                 },
             })
-        except asyncio.CancelledError:
-            await conversation_repository.update_assistant_message(
-                assistant_message_id,
-                "".join(answer_parts) or "服务重启导致回答中断，请重新发送。",
-                [],
-                status="failed",
-                error_code="AGENT_INTERRUPTED",
-                user_id=user_id,
-                run_status="interrupted",
-                model=self._resolved_model_name(),
-                error_type="CancelledError",
-                error_message="服务关闭导致回答任务被取消",
+        except asyncio.CancelledError as exc:
+            run = await conversation_repository.get_run(
+                conversation_id, run_id, user_id=user_id
             )
-            raise
+            user_cancelled = (
+                "USER_CANCELLED" in exc.args
+                or (run is not None and run.status == "cancel_requested")
+            )
+            if user_cancelled:
+                tail = emoji_filter.feed("", final=True)
+                if tail:
+                    answer_parts.append(tail)
+                await self._finalize_user_cancellation(
+                    run_id=run_id,
+                    user_id=user_id,
+                    answer="".join(answer_parts),
+                    context_usage=latest_context_usage,
+                    stream_event_sequence=latest_token_event_sequence,
+                    event_sink=event_sink,
+                )
+                logger.info(
+                    "chat_cancelled run_id=%s conversation_id=%s duration_ms=%.1f",
+                    run_id,
+                    conversation_id,
+                    (perf_counter() - started_at) * 1000,
+                )
+            else:
+                await conversation_repository.update_assistant_message(
+                    assistant_message_id,
+                    "".join(answer_parts) or "服务重启导致回答中断，请重新发送。",
+                    [],
+                    status="failed",
+                    error_code="AGENT_INTERRUPTED",
+                    user_id=user_id,
+                    run_status="interrupted",
+                    model=self._resolved_model_name(),
+                    error_type="CancelledError",
+                    error_message="服务关闭导致回答任务被取消",
+                )
+                raise
         except Exception as exc:
+            run = await conversation_repository.get_run(
+                conversation_id, run_id, user_id=user_id
+            )
+            if run is not None and run.status == "cancel_requested":
+                await self._finalize_user_cancellation(
+                    run_id=run_id,
+                    user_id=user_id,
+                    answer="".join(answer_parts),
+                    context_usage=latest_context_usage,
+                    stream_event_sequence=latest_token_event_sequence,
+                    event_sink=event_sink,
+                )
+                return
             logger.exception(
                 "chat_failed run_id=%s conversation_id=%s duration_ms=%.1f "
                 "question=%r exception_type=%s",
@@ -583,8 +646,37 @@ class ChatService:
             })
         finally:
             heartbeat_task.cancel()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
+            cancellation_task.cancel()
+            await asyncio.gather(
+                heartbeat_task, cancellation_task, return_exceptions=True
+            )
             event_sink.finish()
+
+    async def _finalize_user_cancellation(
+        self,
+        *,
+        run_id: str,
+        user_id: str,
+        answer: str,
+        context_usage: dict,
+        stream_event_sequence: int,
+        event_sink: _LiveEventSink,
+    ) -> None:
+        result = await conversation_repository.finalize_run_cancellation(
+            run_id,
+            user_id=user_id,
+            answer=answer,
+            context_usage=context_usage,
+            stream_event_sequence=stream_event_sequence,
+        )
+        if result is None:
+            return
+        _, stored = result
+        event_sink.publish({
+            "id": stored.id,
+            "event": stored.event,
+            "data": stored.data,
+        })
 
     async def _persist_event(self, run_id: str, user_id: str, event: dict) -> dict:
         stored = await conversation_repository.append_run_event(
@@ -607,6 +699,26 @@ class ChatService:
             if not active:
                 return
 
+    async def _cancellation_loop(
+        self,
+        conversation_id: str,
+        run_id: str,
+        user_id: str,
+        target_task: Optional[asyncio.Task],
+    ) -> None:
+        interval = get_settings().conversation.run_cancel_poll_seconds
+        while True:
+            await asyncio.sleep(interval)
+            run = await conversation_repository.get_run(
+                conversation_id, run_id, user_id=user_id
+            )
+            if run is None or run.status not in {"running", "cancel_requested"}:
+                return
+            if run.status == "cancel_requested":
+                if target_task is not None and not target_task.done():
+                    target_task.cancel("USER_CANCELLED")
+                return
+
     async def _recover_stale_runs(self) -> None:
         settings = get_settings().conversation
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
@@ -615,6 +727,14 @@ class ChatService:
         recovered = await conversation_repository.recover_stale_runs(cutoff)
         if recovered:
             logger.warning("stale_agent_runs_recovered count=%d", recovered)
+        cancel_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=settings.run_cancel_timeout_seconds
+        )
+        cancelled = await conversation_repository.recover_cancel_requested_runs(
+            cancel_cutoff
+        )
+        if cancelled:
+            logger.warning("cancel_requested_runs_recovered count=%d", cancelled)
 
     async def _recovery_loop(self) -> None:
         interval = get_settings().conversation.run_recovery_interval_seconds
@@ -629,6 +749,12 @@ class ChatService:
 
     def _resolved_model_name(self) -> str:
         return self._agent.model_name if self._agent is not None else get_settings().llm.model
+
+    def _discard_background_task(
+        self, run_id: str, task: asyncio.Task
+    ) -> None:
+        if self._background_tasks.get(run_id) is task:
+            self._background_tasks.pop(run_id, None)
 
     @staticmethod
     def _safe_error_message(exc: Exception) -> str:

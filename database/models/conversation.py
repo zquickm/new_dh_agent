@@ -194,6 +194,13 @@ class ConversationRunModel(Base):
         mysql.BIGINT(unsigned=True), nullable=True
     )
     heartbeat_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+    cancel_requested_at: Mapped[Optional[datetime]] = mapped_column(
+        mysql.DATETIME(fsp=6), nullable=True
+    )
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(
+        mysql.DATETIME(fsp=6), nullable=True
+    )
+    cancel_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     error_type: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(mysql.LONGTEXT(), nullable=True)

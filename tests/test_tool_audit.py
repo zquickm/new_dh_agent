@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -121,10 +122,40 @@ class ToolAuditAgentLoopTest(unittest.IsolatedAsyncioTestCase):
                     "test", [], audit_recorder=recorder
                 )
             ]
-
         self.assertEqual(executed, 0)
         self.assertEqual(len(recorder.started_calls), 1)
         self.assertEqual(recorder.finished_calls, [])
+
+    async def test_user_cancelled_tool_is_not_recorded_as_service_interruption(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def tool(value):
+            del value
+            started.set()
+            await release.wait()
+
+        tools = ToolExecutor()
+        tools.register("test_tool", "test", tool)
+        agent = AgentLoop(FakeLlm([([], [self._tool_call()])]), tools)
+        recorder = CapturingAuditRecorder()
+
+        async def collect():
+            return [
+                event
+                async for event in agent.run_stream(
+                    "testing", [], audit_recorder=recorder
+                )
+            ]
+
+        task = asyncio.create_task(collect())
+        await asyncio.wait_for(started.wait(), 1)
+        task.cancel("USER_CANCELLED")
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertEqual(recorder.finished_calls[0]["error_code"], "USER_CANCELLED")
+        self.assertEqual(recorder.finished_calls[0]["error_type"], "UserCancelled")
+        self.assertFalse(recorder.finished_calls[0]["retryable"])
 
     async def test_success_is_finalized_before_client_finish_event(self):
         async def tool(value):

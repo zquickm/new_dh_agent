@@ -76,6 +76,94 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_user_can_cancel_run_and_keep_partial_answer(self):
+        release = asyncio.Event()
+
+        class BlockingAgent:
+            model_name = "fake-model"
+
+            async def run_stream(self, question, history, run_id="-"):
+                del question, history, run_id
+                yield AgentEvent(type="answer_delta", content="已经生成的部分")
+                await release.wait()
+                yield AgentEvent(type="answer_delta", content="不应出现")
+
+        service = ChatService()
+        service._agent = BlockingAgent()
+        stream = service.stream_chat(
+            AgentRequest(question="请生成一个很长的回答"), user_id=TEST_USER_ID
+        )
+        try:
+            conversation_event = await asyncio.wait_for(stream.__anext__(), 1)
+            token_event = await asyncio.wait_for(stream.__anext__(), 1)
+            conversation_id = conversation_event["data"]["conversation_id"]
+            run_id = conversation_event["data"]["run_id"]
+            self.assertEqual(token_event["data"]["content"], "已经生成的部分")
+
+            requested = await service.cancel_run(
+                conversation_id, run_id, user_id=TEST_USER_ID
+            )
+            self.assertEqual(requested.status, "cancel_requested")
+            remaining = [event async for event in stream]
+
+            self.assertEqual([event["event"] for event in remaining], ["cancelled"])
+            self.assertEqual(remaining[0]["data"]["answer"], "已经生成的部分")
+            detail = await conversation_repository.get(
+                conversation_id, user_id=TEST_USER_ID
+            )
+            self.assertEqual(detail.messages[-1].status, "cancelled")
+            self.assertEqual(detail.messages[-1].content, "已经生成的部分")
+            run = await conversation_repository.get_run(
+                conversation_id, run_id, user_id=TEST_USER_ID
+            )
+            self.assertEqual(run.status, "cancelled")
+            replayed, status = await conversation_repository.list_run_events(
+                conversation_id, run_id, after=token_event["id"], user_id=TEST_USER_ID
+            )
+            self.assertEqual(status, "cancelled")
+            self.assertEqual([event.event for event in replayed], ["cancelled"])
+        finally:
+            release.set()
+            await service.close()
+
+    async def test_other_instance_cancellation_is_observed_from_repository(self):
+        release = asyncio.Event()
+
+        class BlockingAgent:
+            model_name = "fake-model"
+
+            async def run_stream(self, question, history, run_id="-"):
+                del question, history, run_id
+                yield AgentEvent(type="answer_delta", content="跨实例部分回答")
+                await release.wait()
+
+        owner = ChatService()
+        owner._agent = BlockingAgent()
+        other_instance = ChatService()
+        stream = owner.stream_chat(
+            AgentRequest(question="跨实例停止"), user_id=TEST_USER_ID
+        )
+        try:
+            conversation_event = await asyncio.wait_for(stream.__anext__(), 1)
+            await asyncio.wait_for(stream.__anext__(), 1)
+            await other_instance.cancel_run(
+                conversation_event["data"]["conversation_id"],
+                conversation_event["data"]["run_id"],
+                user_id=TEST_USER_ID,
+            )
+            remaining = await asyncio.wait_for(
+                self._collect_events(stream), timeout=2.5
+            )
+            self.assertEqual([event["event"] for event in remaining], ["cancelled"])
+        finally:
+            release.set()
+            await owner.close()
+            await other_instance.close()
+
+    @staticmethod
+    async def _collect_events(stream):
+        return [event async for event in stream]
+
     async def test_next_exchange_filters_disabled_skill_but_keeps_other_results(self):
         from tests.test_agent_loop import FakeLlm
 

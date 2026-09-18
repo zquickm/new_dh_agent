@@ -503,21 +503,34 @@ class AgentLoop:
                             retryable,
                         ) = semantic_error
                         failure_stage = "execution"
-                except asyncio.CancelledError:
+                except asyncio.CancelledError as exc:
                     duration_ms = max(
                         0, int((perf_counter() - tool_started_at) * 1000)
                     )
+                    user_cancelled = "USER_CANCELLED" in exc.args
                     if audit_recorder is not None:
                         await audit_recorder.finished(
                             tool_call_id=tool_call["id"],
                             status="interrupted",
-                            result="工具调用被取消",
+                            result=(
+                                "用户停止生成导致工具调用被取消"
+                                if user_cancelled else "工具调用被取消"
+                            ),
                             duration_ms=duration_ms,
-                            error_code="AGENT_INTERRUPTED",
-                            error_type="CancelledError",
-                            error_message="服务关闭导致工具调用被取消",
+                            error_code=(
+                                "USER_CANCELLED"
+                                if user_cancelled else "AGENT_INTERRUPTED"
+                            ),
+                            error_type=(
+                                "UserCancelled"
+                                if user_cancelled else "CancelledError"
+                            ),
+                            error_message=(
+                                "用户停止生成导致工具调用被取消"
+                                if user_cancelled else "服务关闭导致工具调用被取消"
+                            ),
                             failure_stage=failure_stage,
-                            retryable=True,
+                            retryable=not user_cancelled,
                         )
                     raise
                 except Exception as exc:

@@ -77,6 +77,35 @@ class RunEventReplayMigrationTest(unittest.TestCase):
         execute.assert_not_called()
 
 
+class RunCancellationMigrationTest(unittest.TestCase):
+    def test_partial_and_complete_schema(self):
+        migration = importlib.import_module(
+            "database.migrations.versions.0016_add_run_cancellation"
+        )
+        names = {"cancel_requested_at", "cancelled_at", "cancel_reason"}
+        for present in (set(), {"cancel_requested_at"}, names):
+            with self.subTest(present=present):
+                inspector = MagicMock()
+                inspector.get_columns.return_value = [
+                    {"name": name} for name in present
+                ]
+                with patch.object(migration.context, "is_offline_mode", return_value=False), \
+                     patch.object(migration.op, "get_bind"), \
+                     patch.object(migration.sa, "inspect", return_value=inspector), \
+                     patch.object(migration.op, "execute") as execute:
+                    migration.upgrade()
+                if present == names:
+                    execute.assert_not_called()
+                else:
+                    execute.assert_called_once()
+                    sql = str(execute.call_args.args[0])
+                    for name in names:
+                        self.assertEqual(
+                            f"ADD COLUMN `{name}`" in sql,
+                            name not in present,
+                        )
+
+
 class MigrationTransactionTest(unittest.IsolatedAsyncioTestCase):
     async def test_lock_autobegin_does_not_rollback_revision_on_disconnect(self):
         config = Config(str(PROJECT_DIR / "alembic.ini"))

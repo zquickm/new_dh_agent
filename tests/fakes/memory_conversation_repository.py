@@ -69,6 +69,96 @@ class MemoryConversationRepository:
                 return None
             return run.model_copy(deep=True)
 
+    async def request_run_cancellation(
+        self, conversation_id: str, run_id: str, *, user_id: str
+    ) -> Optional[ConversationRun]:
+        async with self._lock:
+            key = (user_id, run_id)
+            run = self._runs.get(key)
+            if run is None or run.conversation_id != conversation_id:
+                return None
+            if run.status == "running":
+                now = _now()
+                run = run.model_copy(update={
+                    "status": "cancel_requested",
+                    "cancel_requested_at": now,
+                    "cancel_reason": "user_requested",
+                    "updated_at": now,
+                }, deep=True)
+                self._runs[key] = run
+            return run.model_copy(deep=True)
+
+    async def finalize_run_cancellation(
+        self,
+        run_id: str,
+        *,
+        user_id: str,
+        answer: str,
+        context_usage: dict,
+        stream_event_sequence: int,
+    ) -> Optional[tuple[ConversationMessage, RunStreamEvent]]:
+        async with self._lock:
+            key = (user_id, run_id)
+            run = self._runs.get(key)
+            if run is None or run.status != "cancel_requested":
+                return None
+            now = _now()
+            conversation = self._items.get((user_id, run.conversation_id))
+            if conversation is None:
+                return None
+            message = next(
+                (item for item in conversation.messages if item.id == run.assistant_message_id),
+                None,
+            )
+            if message is None:
+                return None
+            updated_message = message.model_copy(update={
+                "content": answer,
+                "model_messages": None,
+                "sources": [],
+                "status": "cancelled",
+                "stream_event_id": max(message.stream_event_id, stream_event_sequence),
+                "error_code": "USER_CANCELLED",
+                "updated_at": now,
+            }, deep=True)
+            conversation.messages = [
+                updated_message if item.id == message.id else item
+                for item in conversation.messages
+            ]
+            conversation.updated_at = now
+            started_at = datetime.fromisoformat(run.started_at)
+            finished_at = datetime.fromisoformat(now)
+            sequence = run.last_event_id + 1
+            self._runs[key] = run.model_copy(update={
+                "status": "cancelled",
+                "cancelled_at": now,
+                "finished_at": now,
+                "duration_ms": max(0, int((finished_at - started_at).total_seconds() * 1000)),
+                "heartbeat_at": now,
+                "error_code": "USER_CANCELLED",
+                "error_type": "UserCancelled",
+                "error_message": "用户手动停止生成",
+                "last_event_id": sequence,
+                "updated_at": now,
+            }, deep=True)
+            self._interrupt_tool_calls(
+                run_id, now,
+                error_code="USER_CANCELLED",
+                error_type="UserCancelled",
+                error_message="用户停止生成导致工具调用未完成",
+                retryable=False,
+            )
+            event = RunStreamEvent(id=sequence, event="cancelled", data={
+                "conversation_id": run.conversation_id,
+                "run_id": run.id,
+                "assistant_message_id": message.id,
+                "answer": answer,
+                "reason": "user_requested",
+                "context_usage": context_usage,
+            })
+            self._run_events.setdefault(key, []).append(event)
+            return updated_message.model_copy(deep=True), event.model_copy(deep=True)
+
     async def append_run_event(
         self,
         run_id: str,
@@ -392,6 +482,16 @@ class MemoryConversationRepository:
                     continue
                 for index, message in enumerate(item.messages):
                     if message.id == message_id and message.role == "assistant":
+                        run = None
+                        effective_status = run_status or (
+                            "running" if status == "streaming" else status
+                        )
+                        if message.run_id is not None:
+                            run = self._runs.get((user_id, message.run_id))
+                            if run is not None and run.status != "running":
+                                raise RuntimeError(
+                                    f"run {run.id} is not active: {run.status}"
+                                )
                         updated = message.model_copy(
                             update={
                                 "content": content,
@@ -414,9 +514,6 @@ class MemoryConversationRepository:
                             key = (user_id, message.run_id)
                             run = self._runs.get(key)
                             if run is not None:
-                                effective_status = run_status or (
-                                    "running" if status == "streaming" else status
-                                )
                                 started_at = datetime.fromisoformat(run.started_at)
                                 finished_at = datetime.fromisoformat(now)
                                 self._runs[key] = run.model_copy(
@@ -569,13 +666,49 @@ class MemoryConversationRepository:
                 recovered += 1
         return recovered
 
+    async def recover_cancel_requested_runs(self, stale_before: datetime) -> int:
+        recovered = 0
+        candidates = []
+        async with self._lock:
+            for (user_id, run_id), run in self._runs.items():
+                if run.status != "cancel_requested" or not run.cancel_requested_at:
+                    continue
+                requested_at = datetime.fromisoformat(run.cancel_requested_at).replace(tzinfo=None)
+                if requested_at < stale_before:
+                    candidates.append((user_id, run_id))
+        for user_id, run_id in candidates:
+            result = await self.finalize_run_cancellation(
+                run_id,
+                user_id=user_id,
+                answer=self._assistant_content(user_id, run_id),
+                context_usage={},
+                stream_event_sequence=0,
+            )
+            if result is not None:
+                recovered += 1
+        return recovered
+
+    def _assistant_content(self, user_id: str, run_id: str) -> str:
+        run = self._runs.get((user_id, run_id))
+        if run is None:
+            return ""
+        conversation = self._items.get((user_id, run.conversation_id))
+        if conversation is None:
+            return ""
+        return next(
+            (item.content for item in conversation.messages if item.id == run.assistant_message_id),
+            "",
+        )
+
     def _interrupt_tool_calls(
         self,
         run_id: str,
         now: str,
         *,
+        error_code: str = "AGENT_INTERRUPTED",
         error_type: str,
         error_message: str,
+        retryable: bool = True,
     ) -> None:
         finished = datetime.fromisoformat(now)
         for key, item in list(self._tool_calls.items()):
@@ -589,11 +722,11 @@ class MemoryConversationRepository:
                     "duration_ms": max(
                         0, int((finished - started).total_seconds() * 1000)
                     ),
-                    "error_code": "AGENT_INTERRUPTED",
+                    "error_code": error_code,
                     "error_type": error_type,
                     "error_message": error_message,
                     "failure_stage": "execution",
-                    "retryable": True,
+                    "retryable": retryable,
                     "updated_at": now,
                 },
                 deep=True,

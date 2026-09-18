@@ -83,7 +83,9 @@ async def replay_conversation_run_events(
         nonlocal cursor
         idle_polls = 0
         terminal_idle_polls = 0
-        terminal_statuses = {"completed", "failed", "interrupted", "rejected"}
+        terminal_statuses = {
+            "completed", "failed", "interrupted", "rejected", "cancelled"
+        }
         while True:
             events, status = await conversation_service.list_run_events(
                 conversation_id,
@@ -123,6 +125,20 @@ async def replay_conversation_run_events(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/conversations/{conversation_id}/runs/{run_id}/cancel")
+async def cancel_conversation_run(
+    conversation_id: str,
+    run_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    item = await conversation_service.cancel_run(
+        conversation_id, run_id, user_id=user_id
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="Conversation run not found")
+    return JsonResult.success(item)
 
 
 @router.get("/conversations/{conversation_id}/runs/{run_id}/tool-calls")

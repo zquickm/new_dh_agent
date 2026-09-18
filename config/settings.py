@@ -145,6 +145,8 @@ class ConversationSettings(BaseModel):
     run_heartbeat_seconds: float = Field(default=10, ge=1, le=300)
     run_lease_seconds: float = Field(default=60, ge=5, le=3600)
     run_recovery_interval_seconds: float = Field(default=15, ge=1, le=300)
+    run_cancel_poll_seconds: float = Field(default=1, ge=0.2, le=10)
+    run_cancel_timeout_seconds: float = Field(default=30, ge=5, le=300)
 
     @model_validator(mode="after")
     def validate_run_lease(self):

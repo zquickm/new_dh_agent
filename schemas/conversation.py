@@ -17,7 +17,7 @@ class ConversationMessage(BaseModel):
     created_at: str
     updated_at: Optional[str] = None
     run_id: Optional[str] = None
-    status: Literal["streaming", "completed", "failed"] = "completed"
+    status: Literal["streaming", "completed", "failed", "cancelled"] = "completed"
     stream_event_id: int = 0
     error_code: Optional[str] = None
     sources: list[dict] = Field(default_factory=list)
@@ -72,7 +72,10 @@ class ConversationRun(BaseModel):
     conversation_id: str
     user_message_id: str
     assistant_message_id: str
-    status: Literal["running", "completed", "failed", "interrupted", "rejected"]
+    status: Literal[
+        "running", "cancel_requested", "completed", "failed", "interrupted",
+        "rejected", "cancelled",
+    ]
     model: Optional[str] = None
     system_prompt_version_id: Optional[int] = None
     system_prompt_version_no: Optional[int] = None
@@ -96,6 +99,9 @@ class ConversationRun(BaseModel):
     finished_at: Optional[str] = None
     duration_ms: Optional[int] = None
     heartbeat_at: str
+    cancel_requested_at: Optional[str] = None
+    cancelled_at: Optional[str] = None
+    cancel_reason: Optional[str] = None
     error_code: Optional[str] = None
     error_type: Optional[str] = None
     error_message: Optional[str] = None

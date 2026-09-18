@@ -30,6 +30,8 @@ conversation:
   run_heartbeat_seconds: 10
   run_lease_seconds: 60
   run_recovery_interval_seconds: 15
+  run_cancel_poll_seconds: 1
+  run_cancel_timeout_seconds: 30
 
 persistence:
   host: "${DH_AGENT_DB_HOST:127.0.0.1}"

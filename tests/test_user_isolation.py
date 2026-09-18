@@ -176,6 +176,7 @@ class ApiIsolationTest(unittest.TestCase):
         synonym_patch.start()
         self.addCleanup(synonym_patch.stop)
         repo = MemoryConversationRepository()
+        self.repo = repo
         for target in (
             "services.conversation_service.conversation_repository",
             "services.chat_service.conversation_repository",
@@ -202,6 +203,7 @@ class ApiIsolationTest(unittest.TestCase):
             ("GET", "/conversations", None),
             ("POST", "/conversations", {}),
             ("GET", "/conversations/unknown", None),
+            ("POST", "/conversations/unknown/runs/unknown/cancel", None),
             ("POST", "/agent/chat/stream", {"question": "你好"}),
         ):
             with self.subTest(path=path, method=method):
@@ -210,6 +212,30 @@ class ApiIsolationTest(unittest.TestCase):
                 response = self.client.request(method, path, headers=headers, json=payload)
                 self.assertEqual(response.status_code, 401)
         self.assertEqual(self.agent.calls, [])
+
+    def test_cancel_run_is_idempotent_and_owner_isolated(self):
+        conversation_id = self.create()
+
+        async def create_run():
+            await self.repo.begin_exchange(
+                conversation_id,
+                "长回答",
+                run_id="run-to-cancel",
+                user_id="101",
+                model="fake-model",
+            )
+
+        asyncio.get_event_loop().run_until_complete(create_run())
+        path = f"/conversations/{conversation_id}/runs/run-to-cancel/cancel"
+
+        foreign = self.client.post(path, headers=identity("202"))
+        self.assertEqual(foreign.status_code, 404)
+        first = self.client.post(path, headers=identity("101"))
+        second = self.client.post(path, headers=identity("101"))
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["data"]["status"], "cancel_requested")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["data"]["status"], "cancel_requested")
 
     def test_invalid_and_duplicate_identity_headers_rejected(self):
         for invalid in ("", "0", "-1", "abc", " 101", "01", "101,202", "9223372036854775808", "1" * 40):
