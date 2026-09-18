@@ -231,16 +231,22 @@ class RerankSettings(BaseModel):
     verify_ssl: bool = True
 
 
+class RagKnowledgeBaseSettings(BaseModel):
+    knowledge_id: str
+    name: str = ""
+    recall_top_n: int = Field(default=20, ge=1)
+    top_n: int = Field(default=4, ge=1)
+
+
 class RagToolSettings(BaseModel):
     base_url: str = ""
     recall_path: str = "/rag-platform-default/zsgl/knowledgeRecall"
     recall_url: str = ""
     api_token: SecretStr = SecretStr("")
     tenant_id: str = ""
-    knowledge_ids: list[str] = Field(default_factory=list)
+    knowledge_bases: list[RagKnowledgeBaseSettings] = Field(default_factory=list)
     dept_ids: list[str] = Field(default_factory=list)
     score: float = Field(default=0.6, ge=0, le=1)
-    top_n: int = Field(default=4, ge=1)
     faq_score: float = Field(default=0.8, ge=0, le=1)
     search_method: int = 3
     search_scope: str = "knowledge"

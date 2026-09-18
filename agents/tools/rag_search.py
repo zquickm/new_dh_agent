@@ -57,10 +57,10 @@ class RagSearchTool:
                 recall_url=settings.resolved_recall_url(),
                 api_token=settings.api_token.get_secret_value(),
                 tenant_id=settings.tenant_id,
-                knowledge_ids=tuple(value.strip() for value in settings.knowledge_ids),
+                knowledge_ids=tuple(library.knowledge_id.strip() for library in settings.knowledge_bases),
                 dept_ids=tuple(settings.dept_ids),
                 score=settings.score,
-                candidate_top_n=settings.top_n,
+                candidate_top_n=max((library.recall_top_n for library in settings.knowledge_bases), default=20),
                 faq_score=settings.faq_score,
                 search_method=settings.search_method,
                 search_scope=settings.search_scope,
@@ -97,7 +97,9 @@ class RagSearchTool:
             raise ValueError("tags 必须是不超过 50 项的字符串数组")
         query = expand_query_synonyms(query)
         chunks = await self.backend.search_all(
-            query, get_settings().tools.rag.top_n, {"tags": tags or []}
+            query, [(library.knowledge_id.strip(), library.recall_top_n, library.top_n)
+                    for library in get_settings().tools.rag.knowledge_bases],
+            {"tags": tags or []}
         )
         return {
             "query": query,

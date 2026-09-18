@@ -192,6 +192,9 @@ class RagSearchBackend:
         query: str,
         top_k: int,
         filters: Optional[dict[str, Any]] = None,
+        *,
+        recall_top_n: Optional[int] = None,
+        score_only: bool = False,
     ) -> list[RagChunk]:
         query = query.strip()
         if not query:
@@ -216,11 +219,12 @@ class RagSearchBackend:
         )
         tags = self._string_list("tags", filters.get("tags", []))
 
+        recall_limit = recall_top_n if recall_top_n is not None else self.candidate_top_n
         payload = {
             "tenant_id": self.tenant_id,
             "query": [query],
             "score": self.score,
-            "top_n": self.candidate_top_n,
+            "top_n": recall_limit,
             "faq_score": self.faq_score,
             "rerank_enable": 0,
             "search_method": self.search_method,
@@ -239,7 +243,10 @@ class RagSearchBackend:
             max_retries=self.max_retries,
             retry_backoff=self.retry_backoff,
         )
-        chunks = self._parse_recall(body, self.candidate_top_n)
+        chunks = self._parse_recall(body, recall_limit)
+
+        if score_only:
+            return sorted(chunks, key=lambda chunk: chunk.score, reverse=True)[:top_k]
 
         if not chunks:
             return []
@@ -260,15 +267,21 @@ class RagSearchBackend:
         return chunks[:top_k]
 
     async def search_all(
-        self, query: str, top_k: int, filters: Optional[dict[str, Any]] = None,
+        self, query: str, libraries: list[tuple[str, int, int]],
+        filters: Optional[dict[str, Any]] = None,
     ) -> list[RagChunk]:
         if len(self.knowledge_ids) != 3 or any(not value for value in self.knowledge_ids):
             raise RagToolError("请配置三个知识库的 knowledge_ids")
         if len(set(self.knowledge_ids)) != 3:
             raise RagToolError("三个知识库的 knowledge_ids 不得重复")
+        if tuple(library[0] for library in libraries) != self.knowledge_ids:
+            raise RagToolError("知识库配置与授权范围不一致")
+        if any(recall < 1 or keep < 1 for _, recall, keep in libraries):
+            raise RagToolError("知识库召回及保留数量必须大于零")
         results = await asyncio.gather(*(
-            self.search(query, top_k, {**(filters or {}), "knowledge_ids": [knowledge_id]})
-            for knowledge_id in self.knowledge_ids
+            self.search(query, keep, {**(filters or {}), "knowledge_ids": [knowledge_id]},
+                        recall_top_n=recall, score_only=True)
+            for knowledge_id, recall, keep in libraries
         ), return_exceptions=True)
         for result in results:
             if isinstance(result, BaseException):
