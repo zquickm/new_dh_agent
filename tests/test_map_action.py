@@ -22,7 +22,8 @@ class MapActionToolTest(unittest.TestCase):
                 execute_map_action("GEOJSON_ADD", {**payload, **invalid})
 
     def test_description_forbids_duplicate_station_rendering(self):
-        self.assertIn("查询、输出或显示观测站点时禁止调用本工具", TOOL_DESCRIPTION)
+        self.assertIn("查询、输出或显示业务观测站点时禁止调用本工具", TOOL_DESCRIPTION)
+        self.assertIn("断面测点地图展示除外", TOOL_DESCRIPTION)
         self.assertIn("observation_service 的站点查询和单站分析", TOOL_DESCRIPTION)
         self.assertIn("不得再调用本工具重复清图、标点", TOOL_DESCRIPTION)
 

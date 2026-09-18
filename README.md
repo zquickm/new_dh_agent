@@ -272,10 +272,13 @@ SPATIAL_API_KEY=
 通用查询保留 FeatureCollection、features、total、returned；空间查询默认自动分页取全并发送地图事件，属性查询需显式设置 `render_map=true` 才展示。
 点要素使用 `MARKER_ADD`（观测站沿用 `observation-stations` 图层及站号），线面使用 `GEOJSON_ADD`；仅清除对应类别图层，保留选区。
 自动展示强制 `includeGeometry=true` 且要求 `offset=0`；只查数据或补取文字记录时设置 `render_map=false`。文字结果可能只有首批，`map_result` 描述已提交的地图数据，不代表前端渲染回执。
+`map_result.fetched` 为已取回记录数，`mapped` 为加入绘图指令的要素数，`missing_geometry` 为缺少几何的数量；`complete` 表示指令是否覆盖全部匹配要素，`render_confirmed=false` 表示没有前端渲染确认。不能根据 `returned`、`complete` 或事件数量声称地图已显示全部结果。
+工具错误按 operation 区分“通用空间查询”和“观测站服务”，保留 HTTP 路径及服务错误说明；查询失败不代表无匹配数据。
 字段及查询约束以目录详情为准，由空间服务最终校验。
 复用 `tools.spatial` 和 `SPATIAL_API_KEY`，base_url 继续只配置主机与端口，不附加 v2 路径。
 
 断面及其测点的位置、属性、历史观测和统计统一使用 `database_query`；通用目录过滤 `dm_duanmian`，工具拒绝其详情及查询操作。专题出图使用 `dm_duanmian_analysis`。
+明确要求地图展示断面测点时，按“断面业务” Skill 查询真实点位，再调用 `map_action(MARKER_ADD)`，使用独立图层 `transect-stations`；替换结果只清除该图层，保留选区和其他类别图层。数据库结果不会自动绘图，专题分析浮层也不代替测点地图分布。
 已有环境若发布过旧 Skill 名称或断面转空间查询的提示词，应同步更新为先加载“断面业务” Skill，再按其说明选择工具；代码不会覆盖线上已发布版本。
 
 ### 观测站地图联动事件

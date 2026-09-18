@@ -46,7 +46,9 @@ TOOL_DESCRIPTION = (
     "不能只查观测站，也不能把目录列表当作区域内的结果。"
     "同阶段各要素的独立调用应在同一轮提交；仅自选字段、属性过滤或排序时需先获取详情，"
     "纯区域查询可直接使用默认字段。按要素中文名、total 和 features 汇总，"
-    "returned 小于 total 时说明仅展示部分，查询失败不等于该类要素不存在。"
+    "returned 仅表示本页文字记录数，自动绘图覆盖范围看 map_result.fetched、mapped、missing_geometry；"
+    "complete 仅表示全部匹配要素已包含在绘图指令中，不代表前端已显示。"
+    "地图动作回执不含前端渲染确认，只能说明已提交展示指令；查询失败不等于该类要素不存在。"
     "通用查询参数放在 query 对象中，字段及运算符以详情为准，不编造；结果为 GeoJSON，"
     "mode=spatial 默认自动分页取全，点要素发送 MARKER_ADD，线面发送 GEOJSON_ADD，勿重复调用 map_action；"
     "属性查询默认只返回数据，可设顶层 render_map=true 展示。render_map=false 仅查询一页。"
@@ -601,6 +603,11 @@ class ObservationServiceTool:
                 "geometry_layer_id": geometry_layer_id,
                 "fetched": offset, "mapped": mapped, "missing_geometry": offset - mapped,
                 "complete": mapped == total, "status": "actions_sent",
+                "render_confirmed": False,
+                "message": (
+                    f"已查询 {offset} 条，已为 {mapped} 条生成绘图指令，"
+                    f"{offset - mapped} 条缺少几何未绘制；未确认前端渲染结果。"
+                ),
             },
         }, client_events=tuple(point_events + events))
 

@@ -32,6 +32,44 @@ class FakeLlm:
 
 
 class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
+    async def test_spatial_and_station_failures_identify_operation_without_map_events(self):
+        from tool_backends.spatial_backend import SpatialServiceError
+
+        cases = [
+            (operation, SpatialServiceError("空间服务返回 HTTP 400 (POST /api/spatial/v2/elements/query)：字段不支持"), "通用空间查询调用失败")
+            for operation in ("list_spatial_elements", "get_spatial_element_detail", "query_spatial_element")
+        ] + [
+            ("station_detail", SpatialServiceError("空间服务返回 HTTP 400"), "观测站服务调用失败"),
+            ("query_spatial_element", ValueError("空间服务分页计数无效"), "通用空间查询参数或返回结果无效"),
+            ("search_stations", ValueError("query_type 不能为空"), "观测站服务参数或返回结果无效"),
+        ]
+        for operation, error, prefix in cases:
+            with self.subTest(operation=operation, error=type(error).__name__):
+                async def fail(**arguments):
+                    raise error
+
+                tools = ToolExecutor()
+                tools.register("observation_service", "查询", fail)
+                llm = FakeLlm([
+                    ([], [{"id": "failed-query", "name": "observation_service", "args": {"operation": operation}}]),
+                    (["查询未成功"], []),
+                ])
+                agent = AgentLoop(llm, tools)
+                try:
+                    events = [event async for event in agent.run_stream("查询", [])]
+                    finished = next(event for event in events if event.type == "tool_finished")
+                    self.assertFalse(finished.success)
+                    self.assertTrue(finished.content.startswith(prefix))
+                    self.assertIn(f"operation={operation}", finished.content)
+                    self.assertIn(str(error), finished.content)
+                    self.assertFalse(any(event.type == "map_action" for event in events))
+                    self.assertTrue(any(
+                        message.get("role") == "tool" and message["content"] == finished.content
+                        for message in llm.calls[1][0]
+                    ))
+                finally:
+                    await agent.close()
+
     async def test_all_skill_switch_combinations_preserve_tools(self):
         names = ("空间联动", "断面业务")
         with tempfile.TemporaryDirectory() as directory:
