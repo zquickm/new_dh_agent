@@ -148,9 +148,12 @@ Agent 已注册五个业务工具（括号内为协议调用标识）：
   `RAG_API_TOKEN`，各请求体的 `knowledge_ids` 仅包含一个库 ID。三个 ID 分别通过
   `RAG_POLICY_KNOWLEDGE_ID`、`RAG_BUSINESS_KNOWLEDGE_ID`、`RAG_LITERATURE_KNOWLEDGE_ID`
   配置；缺失或重复 ID 时拒绝检索，不回退到全库查询。
-  `tools.rag.top_n: 4` 表示每库最多返回 4 条片段，合并后最多 12 条（不是 12 份独立文件）。
+  `tools.rag.knowledge_bases` 分别配置三个库，每库 `recall_top_n: 20` 控制接口召回数量，
+  `top_n: 4` 控制按返回 `score` 降序筛选后的保留数量（均可独立调整）。同分保持原顺序，
+  缺失或无法解析的分数按 0 处理，不足时返回实际数量。默认合计最多 12 条切片，不保证来自不同文件。
   召回阈值固定采用配置 `score: 0.6`，不再因结果少或为空而动态降低。结果按配置库顺序
-  合并，保留各片段的知识库和文档信息；可选重排只调整各库内部顺序。
+  合并，保留各片段的知识库和文档信息；此路径直接使用接口分数，不调用模型重排，
+  不做跨库排序或全局 top_n 截断。
   任一库请求失败时本次工具报错，不将失败误报为无结果。
 - 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
 - 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据，也支持通用注册空间要素查询。
@@ -269,10 +272,13 @@ SPATIAL_API_KEY=
 通用查询保留 FeatureCollection、features、total、returned；空间查询默认自动分页取全并发送地图事件，属性查询需显式设置 `render_map=true` 才展示。
 点要素使用 `MARKER_ADD`（观测站沿用 `observation-stations` 图层及站号），线面使用 `GEOJSON_ADD`；仅清除对应类别图层，保留选区。
 自动展示强制 `includeGeometry=true` 且要求 `offset=0`；只查数据或补取文字记录时设置 `render_map=false`。文字结果可能只有首批，`map_result` 描述已提交的地图数据，不代表前端渲染回执。
+`map_result.fetched` 为已取回记录数，`mapped` 为加入绘图指令的要素数，`missing_geometry` 为缺少几何的数量；`complete` 表示指令是否覆盖全部匹配要素，`render_confirmed=false` 表示没有前端渲染确认。不能根据 `returned`、`complete` 或事件数量声称地图已显示全部结果。
+工具错误按 operation 区分“通用空间查询”和“观测站服务”，保留 HTTP 路径及服务错误说明；查询失败不代表无匹配数据。
 字段及查询约束以目录详情为准，由空间服务最终校验。
 复用 `tools.spatial` 和 `SPATIAL_API_KEY`，base_url 继续只配置主机与端口，不附加 v2 路径。
 
 断面及其测点的位置、属性、历史观测和统计统一使用 `database_query`；通用目录过滤 `dm_duanmian`，工具拒绝其详情及查询操作。专题出图使用 `dm_duanmian_analysis`。
+明确要求地图展示断面测点时，按“断面业务” Skill 查询真实点位，再调用 `map_action(MARKER_ADD)`，使用独立图层 `transect-stations`；替换结果只清除该图层，保留选区和其他类别图层。数据库结果不会自动绘图，专题分析浮层也不代替测点地图分布。
 已有环境若发布过旧 Skill 名称或断面转空间查询的提示词，应同步更新为先加载“断面业务” Skill，再按其说明选择工具；代码不会覆盖线上已发布版本。
 
 ### 观测站地图联动事件

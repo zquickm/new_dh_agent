@@ -233,7 +233,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rag_result["chunks"][0]["page"], 2)
         self.assertEqual(
             rag_tool.backend.arguments,
-            ("赤潮", get_settings().tools.rag.top_n, {"tags": ["赤潮"]}),
+            ("赤潮", [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in get_settings().tools.rag.knowledge_bases], {"tags": ["赤潮"]}),
         )
         self.assertEqual(database_result["question"], "E2 平均盐度")
         self.assertEqual(
@@ -268,7 +268,8 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         for enabled in (False, True):
             with self.subTest(rerank_enabled=enabled):
                 settings = get_settings().tools.rag.model_copy(deep=True)
-                settings.top_n = 25
+                settings.knowledge_bases[0].recall_top_n = 25
+                settings.knowledge_bases[0].top_n = 3
                 settings.rerank.enabled = enabled
                 with patch(
                     "agents.tools.rag_search.get_settings",
@@ -278,11 +279,11 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                     tool = RagSearchTool()
                     await tool.execute("赤潮")
                     factory.return_value.search_all.assert_awaited_once_with(
-                        "赤潮", 25, {"tags": []}
+                        "赤潮", [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in settings.knowledge_bases], {"tags": []}
                     )
                     arguments = factory.call_args.kwargs
                     self.assertEqual(arguments["candidate_top_n"], 25)
-                    self.assertEqual(arguments["knowledge_ids"], tuple(settings.knowledge_ids))
+                    self.assertEqual(arguments["knowledge_ids"], tuple(b.knowledge_id.strip() for b in settings.knowledge_bases))
                     self.assertEqual(arguments["dept_ids"], tuple(settings.dept_ids))
 
         tool = RagSearchTool()

@@ -56,9 +56,9 @@ class DictionaryRefreshServiceTest(unittest.IsolatedAsyncioTestCase):
             expanded = expand_query_synonyms("DO")
             self.assertEqual(expanded, "DO（溶解氧浓度）")
             await rag.execute(expanded)
-            backend.search_all.assert_awaited_with(expanded, get_settings().tools.rag.top_n, {"tags": []})
+            backend.search_all.assert_awaited_with(expanded, [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in get_settings().tools.rag.knowledge_bases], {"tags": []})
             await rag.execute("DO")
-            backend.search_all.assert_awaited_with(expanded, get_settings().tools.rag.top_n, {"tags": []})
+            backend.search_all.assert_awaited_with(expanded, [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in get_settings().tools.rag.knowledge_bases], {"tags": []})
 
     def service(self, store, synonyms, sensitive, *, enabled=False):
         return DictionaryRefreshService(

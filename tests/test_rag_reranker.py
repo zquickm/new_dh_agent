@@ -224,7 +224,7 @@ class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
             count = {"policy": 6, "business": 2, "literature": 0}[knowledge_id]
             return web.json_response({"code": 200, "data": {"records": [
                 {"chunk_text": f"{knowledge_id}-{i}", "knowledge_id": knowledge_id,
-                 "doc_id": f"doc-{i}", "chunk_id": f"chunk-{i}", "doc_title": "报告", "score": 0.8}
+                 "doc_id": f"doc-{i}", "chunk_id": f"chunk-{i}", "doc_title": "报告", "score": [0.61, 0.95, 0.7, 0.95, 0.8, 0.9][i]}
                 for i in range(count)
             ]}})
 
@@ -237,15 +237,18 @@ class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
         await site.start()
         backend = make_backend(FakeSession(), FakeReranker())
         backend._session = None
-        backend.reranker = None
         backend.recall_url = f"http://127.0.0.1:{runner.addresses[0][1]}/recall"
         backend.knowledge_ids = ("policy", "business", "literature")
         backend.candidate_top_n = 4
         self.addAsyncCleanup(backend.close)
 
-        result = await backend.search_all("断面调查", 4, {"tags": ["断面"]})
+        result = await backend.search_all("断面调查",
+            [("policy", 20, 3), ("business", 10, 4), ("literature", 5, 2)], {"tags": ["断面"]})
 
-        self.assertEqual([chunk.knowledge_id for chunk in result], ["policy"] * 4 + ["business"] * 2)
+        self.assertEqual([chunk.knowledge_id for chunk in result], ["policy"] * 3 + ["business"] * 2)
+        self.assertEqual([chunk.text for chunk in result],
+                         ["policy-1", "policy-3", "policy-5", "business-1", "business-0"])
+        self.assertEqual(backend.reranker.calls, [])
         self.assertEqual(len(calls), 3)  # Empty/sparse results do not trigger more requests.
         self.assertEqual({tuple(payload["knowledge_ids"]) for _, _, payload in calls},
                          {("policy",), ("business",), ("literature",)})
@@ -255,7 +258,7 @@ class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload["query"], ["断面调查"])
             self.assertEqual(payload["tags"], ["断面"])
             self.assertEqual(payload["score"], 0.6)
-            self.assertEqual(payload["top_n"], 4)
+            self.assertEqual(payload["top_n"], {"policy": 20, "business": 10, "literature": 5}[payload["knowledge_ids"][0]])
 
     async def test_invalid_library_configuration_does_not_send_requests(self):
         for ids in (("one",), ("one", "two", ""), ("one", "two", "one")):
@@ -264,7 +267,7 @@ class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
                 backend = make_backend(session, FakeReranker())
                 backend.knowledge_ids = ids
                 with self.assertRaises(RagToolError):
-                    await backend.search_all("断面", 4)
+                    await backend.search_all("断面", [(kid, 20, 4) for kid in ids])
                 self.assertEqual(session.calls, [])
 
     async def test_recall_candidates_are_reranked_before_final_limit(self) -> None:

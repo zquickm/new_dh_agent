@@ -313,6 +313,8 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
             "layer_id": "spatial-element:test_point",
             "geometry_layer_id": "spatial-element:test_point:shapes", "fetched": 4, "mapped": 3,
             "missing_geometry": 1, "complete": False, "status": "actions_sent",
+            "render_confirmed": False,
+            "message": "已查询 4 条，已为 3 条生成绘图指令，1 条缺少几何未绘制；未确认前端渲染结果。",
         })
         shapes = [e for e in result.client_events if e["action_type"] == "GEOJSON_ADD"]
         self.assertEqual([e["payload"]["replace"] for e in shapes], [True, False])
@@ -341,6 +343,7 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
         self.results["query"] = {"type": "FeatureCollection", "features": [], "total": 0, "returned": 0}
         result = await self.tool.execute("query_spatial_element", query={"element": "test_point"}, render_map=True)
         self.assertTrue(result.content["map_result"]["complete"])
+        self.assertFalse(result.content["map_result"]["render_confirmed"])
         self.assertEqual(len(result.client_events), 1)
         self.assertEqual(result.client_events[0]["action_type"], "CLEAR")
         self.assertEqual(result.client_events[0]["payload"]["layer_ids"], [
@@ -365,6 +368,9 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["markers"][0]["id"], "0")
         self.assertEqual(payload["markers"][0]["type"], "buoy")
         self.assertEqual(result.content["returned"], 20)
+        self.assertTrue(result.content["map_result"]["complete"])
+        self.assertEqual(result.content["map_result"]["mapped"], 41)
+        self.assertFalse(result.content["map_result"]["render_confirmed"])
 
     async def test_internal_id_column_is_not_injected_as_public_sort_field(self):
         self.results["detail"]["idColumn"] = "internal_id"

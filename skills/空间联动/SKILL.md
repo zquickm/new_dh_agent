@@ -5,7 +5,7 @@ description: 查询地图选区或明确范围内的空间要素（含观测站�
 
 # 空间联动
 
-空间要素查询统一使用 `observation_service`。`map_action` 用于选区清除、地点切换及额外展示，不能代替数据查询。参数以工具 Schema 为准。
+通用空间要素查询使用 `observation_service`，断面及其测点按“断面业务” Skill 使用 `database_query`。`map_action` 用于选区清除、地点切换及额外展示，不能代替数据查询。参数以工具 Schema 为准。
 
 ## 对象与范围
 
@@ -17,6 +17,7 @@ description: 查询地图选区或明确范围内的空间要素（含观测站�
 ## 空间要素查询
 
 - 断面及其测点统一按“断面业务” Skill 使用 `database_query`。区域泛问不查询 `dm_duanmian`，不因目录包含断面就调用通用接口，也不回退为无范围的属性查询。
+- 明确要求在地图上展示断面测点时，按“断面业务” Skill 查询真实点位后使用 `map_action(MARKER_ADD)`；这是数据库结果的展示，不属于观测服务自动绘图，不使用专题分析图代替测点分布。
 
 - 区域内泛问“有哪些”时，用 `list_spatial_elements` 发现目录，再按返回的 `dataKey` 逐类调用 `query_spatial_element`，不默认只查观测站。已明确类别时只查目标类别；目录仅表示可查询的类别，不表示区域内实际存在。
 - 通用区域查询使用 `query={"element": dataKey, "mode": "spatial", "spatial": selected_area.spatial}`。默认字段足够时直接查询；自选 `fields`、`conditions` 或 `orderBy` 前，先用 `get_spatial_element_detail` 获取字段定义。不混用通用查询与站点专用参数。
@@ -48,5 +49,6 @@ description: 查询地图选区或明确范围内的空间要素（含观测站�
 
 - 通用结果按目录中文名、`total` 和实际返回的 `features.properties` 汇总；不同目录可能重叠，不将数量相加作为去重总数。站点结果按统一过滤、去重后的 `total`、`type_counts` 和 `stations` 回答。
 - 区分文字返回与地图展示：`returned` 可能只是首批记录，地图可已自动取全；文字不得声称列举完整。需要更多文字记录时，保持范围，用 `offset/limit` 和 `render_map=false` 补取。地图缺少几何、查询失败或未完成的部分按 `map_result` 说明；“动作已发送”不代表前端渲染完成，只能表述已提交地图展示，不能声称已全部显示。
+- `map_result.fetched` 是已取回的记录数，`mapped` 是已加入绘图指令的要素数，`missing_geometry` 是因缺少几何而未绘制的数量；`complete=true` 仅表示指令覆盖全部匹配要素。`render_confirmed=false` 表示没有前端渲染确认，即使 `status=actions_sent` 也不能声称已显示。
 - 仅成功查询的 `total=0` 表示无匹配；失败、未查或截断不等于不存在。空结果不自动放宽范围、类型或时间；失败只在参数可据已有信息纠正时重试，不擅换业务数据源。
 - 在线状态与观测新鲜度分开解释，说明观测时间，“最新”不等于实时。趋势和区间数据有采样或条数限制时说明覆盖范围；缺失值不补零。数据可用但坐标缺失时回答已有数据，不承诺已定位。

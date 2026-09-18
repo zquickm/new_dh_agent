@@ -547,20 +547,24 @@ class AgentLoop:
                     )
                     if name == "load_skill" and isinstance(exc, PermissionError):
                         observation = "该 Skill 在本次任务中不可用，请使用当前可用列表中的 Skill；业务工具仍可正常使用。"
-                    elif name == "observation_service" and isinstance(
-                        exc, ValueError
-                    ):
-                        observation = (
-                            "观测工具参数无效："
-                            f"{exc}。请严格使用 observation_service schema 中定义的 "
-                            "operation 和参数；如果现有操作无法完成问题，应明确说明能力不足，"
-                            "不得编造新的 operation。"
-                        )
+                    elif name == "observation_service":
+                        arguments = tool_call["args"]
+                        operation = arguments.get("operation") if isinstance(arguments, dict) else None
+                        service = "通用空间查询" if operation in (
+                            "list_spatial_elements", "get_spatial_element_detail", "query_spatial_element",
+                        ) else "观测站服务"
+                        context = f"（operation={operation}）" if operation else ""
+                        detail = str(exc).strip() or type(exc).__name__
+                        if isinstance(exc, ValueError):
+                            observation = (
+                                f"{service}参数或返回结果无效{context}：{detail}。"
+                                "请核对 observation_service schema 中的 operation、参数及服务返回结果；"
+                                "如果现有操作无法完成问题，应明确说明能力不足，不得编造新的 operation。"
+                            )
+                        else:
+                            observation = f"{service}调用失败{context}：{detail}"
                     elif name == "dm_duanmian_analysis" and isinstance(exc, ValueError):
                         observation = f"断面专题分析参数无效：{exc}"
-                    elif name == "observation_service":
-                        detail = str(exc).strip() or type(exc).__name__
-                        observation = f"观测服务调用失败：{detail}"
                     else:
                         observation = "工具执行失败"
                     retrieval_data = None
