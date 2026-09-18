@@ -49,7 +49,16 @@ class MemoryConversationRepository:
     ) -> Optional[ConversationDetail]:
         async with self._lock:
             item = self._items.get((user_id, conversation_id))
-            return item.model_copy(deep=True) if item else None
+            if item is None:
+                return None
+            copied = item.model_copy(deep=True)
+            copied.is_generating = any(
+                owner == user_id
+                and run.conversation_id == conversation_id
+                and run.status in {"running", "cancel_requested"}
+                for (owner, _), run in self._runs.items()
+            )
+            return copied
 
     async def list(self, limit: int, *, user_id: str) -> list[ConversationSummary]:
         async with self._lock:
@@ -58,7 +67,19 @@ class MemoryConversationRepository:
                 key=lambda item: item.updated_at,
                 reverse=True,
             )[:limit]
-            return [ConversationSummary(**item.model_dump()) for item in items]
+            active_conversation_ids = {
+                run.conversation_id
+                for (owner, _), run in self._runs.items()
+                if owner == user_id
+                and run.status in {"running", "cancel_requested"}
+            }
+            return [
+                ConversationSummary(
+                    **item.model_dump(exclude={"is_generating"}),
+                    is_generating=item.id in active_conversation_ids,
+                )
+                for item in items
+            ]
 
     async def get_run(
         self, conversation_id: str, run_id: str, *, user_id: str

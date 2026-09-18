@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from database.models import (
     ConversationMessageModel,
@@ -79,13 +79,16 @@ def _message_schema(
     )
 
 
-def _summary_schema(item: ConversationModel) -> ConversationSummary:
+def _summary_schema(
+    item: ConversationModel, *, is_generating: bool = False
+) -> ConversationSummary:
     return ConversationSummary(
         id=item.id,
         title=item.title,
         created_at=_iso(item.created_at),
         updated_at=_iso(item.updated_at),
         message_count=item.message_count,
+        is_generating=is_generating,
     )
 
 
@@ -272,7 +275,13 @@ class MySQLConversationRepository:
                 )
             ).scalar_one_or_none()
             return ConversationDetail(
-                **_summary_schema(item).model_dump(),
+                **_summary_schema(
+                    item,
+                    is_generating=(
+                        latest_run is not None
+                        and latest_run.status in {"running", "cancel_requested"}
+                    ),
+                ).model_dump(),
                 context_enabled=item.context_enabled,
                 context_message_limit=item.context_message_limit,
                 context_token_limit=item.context_token_limit,
@@ -284,19 +293,35 @@ class MySQLConversationRepository:
             )
 
     async def list(self, limit: int, *, user_id: str) -> list[ConversationSummary]:
+        owner_id = int(user_id)
+        active_run_exists = (
+            exists()
+            .where(
+                ConversationRunModel.conversation_id == ConversationModel.id,
+                ConversationRunModel.user_id == owner_id,
+                ConversationRunModel.status.in_(("running", "cancel_requested")),
+            )
+            .correlate(ConversationModel)
+        )
         async with self._runtime.session_factory() as session:
-            items = (
+            rows = (
                 await session.execute(
-                    select(ConversationModel)
-                    .where(ConversationModel.user_id == int(user_id))
+                    select(
+                        ConversationModel,
+                        active_run_exists.label("is_generating"),
+                    )
+                    .where(ConversationModel.user_id == owner_id)
                     .order_by(
                         ConversationModel.updated_at.desc(),
                         ConversationModel.id.desc(),
                     )
                     .limit(limit)
                 )
-            ).scalars().all()
-            return [_summary_schema(item) for item in items]
+            ).all()
+            return [
+                _summary_schema(item, is_generating=bool(is_generating))
+                for item, is_generating in rows
+            ]
 
     async def get_run(
         self, conversation_id: str, run_id: str, *, user_id: str

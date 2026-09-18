@@ -53,6 +53,38 @@ class RepositoryIsolationTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.repo.get(self.owned.id, user_id="202"))
         self.assertIsNone(await self.repo.get("missing", user_id="202"))
 
+    async def test_list_reports_running_and_cancel_requested_runs(self):
+        await self.repo.begin_exchange(
+            self.owned.id,
+            "问题",
+            run_id="active-run",
+            user_id="101",
+        )
+        listed = await self.repo.list(20, user_id="101")
+        owned_summary = next(item for item in listed if item.id == self.owned.id)
+        self.assertTrue(owned_summary.is_generating)
+        self.assertFalse((await self.repo.list(20, user_id="202"))[0].is_generating)
+
+        await self.repo.request_run_cancellation(
+            self.owned.id,
+            "active-run",
+            user_id="101",
+        )
+        listed = await self.repo.list(20, user_id="101")
+        owned_summary = next(item for item in listed if item.id == self.owned.id)
+        self.assertTrue(owned_summary.is_generating)
+
+        await self.repo.finalize_run_cancellation(
+            "active-run",
+            user_id="101",
+            answer="部分回答",
+            context_usage={},
+            stream_event_sequence=1,
+        )
+        listed = await self.repo.list(20, user_id="101")
+        owned_summary = next(item for item in listed if item.id == self.owned.id)
+        self.assertFalse(owned_summary.is_generating)
+
     async def test_foreign_message_write_rejected_without_mutation(self):
         with self.assertRaises(KeyError):
             await self.repo.save_exchange(

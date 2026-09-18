@@ -150,6 +150,12 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(run_response.status_code, 200)
         self.assertEqual(run_response.json()["data"]["status"], "completed")
         self.assertEqual(run_response.json()["data"]["model"], "fake-model")
+        conversation_page = self.client.get("/conversations").json()["data"]
+        listed = next(
+            item for item in conversation_page["items"]
+            if item["id"] == conversation_id
+        )
+        self.assertIs(listed["is_generating"], False)
         with self.client.stream(
             "GET",
             f"/conversations/{conversation_id}/runs/{run_id}/events?after=1",

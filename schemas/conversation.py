@@ -32,6 +32,7 @@ class ConversationSummary(BaseModel):
     created_at: str
     updated_at: str
     message_count: int = 0
+    is_generating: bool = False
 
 
 class ContextUsage(BaseModel):
