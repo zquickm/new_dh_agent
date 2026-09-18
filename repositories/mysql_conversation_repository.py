@@ -193,11 +193,16 @@ class MySQLConversationRepository:
     def __init__(self, runtime: DatabaseRuntime) -> None:
         self._runtime = runtime
 
-    async def create(self, title: str, *, user_id: str) -> ConversationDetail:
+    async def create(self, title: str, *, user_id: str, identity=None) -> ConversationDetail:
         now = _now()
         item = ConversationModel(
             id=uuid4().hex,
             user_id=int(user_id),
+            data_unit_id=int(identity.unit_id) if identity is not None else 1,
+            data_department_id=int(identity.department_id) if identity is not None else 1,
+            creator_display_name=(identity.display_name or None) if identity is not None else None,
+            creator_role_codes=list(identity.role_codes) if identity is not None else ["GENERAL_USER"],
+            creator_profile_version=identity.profile_version if identity is not None else 1,
             title=title.strip() or "新会话",
             context_enabled=True,
             context_message_limit=1000,
@@ -667,6 +672,7 @@ class MySQLConversationRepository:
                     recommend_questions=[],
                     run_id=effective_run_id,
                     status="completed",
+                    stream_event_sequence=0,
                     error_code=None,
                     created_at=now,
                     updated_at=now,
@@ -683,6 +689,7 @@ class MySQLConversationRepository:
                     recommend_questions=[],
                     run_id=effective_run_id,
                     status=assistant_status,
+                    stream_event_sequence=0,
                     error_code=error_code,
                     created_at=now,
                     updated_at=now,

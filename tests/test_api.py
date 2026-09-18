@@ -103,6 +103,7 @@ class ApiTest(unittest.TestCase):
         self.client = TestClient(app)
         self.client.headers[INTERNAL_HEADER] = INTERNAL_TOKEN
         self.client.headers["X-User-Id"] = "101"
+        self.client.headers["X-Username"] = "test-user"
         self.client.headers["X-Auth-Source"] = "dh-gateway"
 
     def tearDown(self):

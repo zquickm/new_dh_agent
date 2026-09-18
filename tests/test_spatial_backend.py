@@ -108,7 +108,7 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
         async def invalid(_request):
             nonlocal attempts
             attempts += 1
-            return web.Response(status=400, text="invalid")
+            return web.json_response({"message": "不允许排序字段 internal_id test-spatial-key"}, status=400)
 
         app = web.Application()
         app.router.add_get("/invalid", invalid)
@@ -127,7 +127,7 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
             retry_backoff=0,
         )
         try:
-            with self.assertRaisesRegex(SpatialServiceError, "HTTP 400"):
+            with self.assertRaisesRegex(SpatialServiceError, r"HTTP 400.*不允许排序字段 internal_id \[redacted\]"):
                 await client._request("GET", "/invalid")
         finally:
             await client.close()

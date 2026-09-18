@@ -159,8 +159,20 @@ class SpatialServiceClient:
                     timeout=request_timeout,
                 ) as response:
                     if not 200 <= response.status < 300:
+                        message = ""
+                        try:
+                            error_body = await response.json(content_type=None)
+                            if isinstance(error_body, dict):
+                                detail = error_body.get("message") or error_body.get("msg") or error_body.get("detail")
+                                if isinstance(detail, str):
+                                    message = " ".join(detail.split())
+                        except (aiohttp.ContentTypeError, ValueError):
+                            pass
+                        # Only expose a bounded business message, never headers or a raw HTML error page.
+                        message = message.replace(self.api_key, "[redacted]")[:500]
                         error = SpatialServiceError(
-                            f"空间服务返回 HTTP {response.status}"
+                            f"空间服务返回 HTTP {response.status} ({method} {path})"
+                            + (f"：{message}" if message else "")
                         )
                         if response.status == 429 or response.status >= 500:
                             retryable_error = error

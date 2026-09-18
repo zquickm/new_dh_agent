@@ -23,11 +23,17 @@ class ConversationModel(Base):
     __table_args__ = (
         UniqueConstraint("id", "user_id", name="uq_agent_conversation_id_user"),
         Index("ix_agent_conversation_user_updated", "user_id", "updated_at", "id"),
+        Index("ix_agent_conversation_department_updated", "data_unit_id", "data_department_id", "updated_at", "id"),
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     user_id: Mapped[int] = mapped_column(mysql.BIGINT(unsigned=False), nullable=False)
+    data_unit_id: Mapped[int] = mapped_column(mysql.BIGINT(unsigned=False), nullable=False, server_default=text("1"))
+    data_department_id: Mapped[int] = mapped_column(mysql.BIGINT(unsigned=False), nullable=False, server_default=text("1"))
+    creator_display_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    creator_role_codes: Mapped[list[str]] = mapped_column(JSON, nullable=False, server_default=text("(JSON_ARRAY('GENERAL_USER'))"))
+    creator_profile_version: Mapped[int] = mapped_column(mysql.BIGINT(unsigned=False), nullable=False, server_default=text("1"))
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     context_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("1")

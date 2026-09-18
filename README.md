@@ -62,6 +62,10 @@ Header。默认名称为 `X-DH-Internal-Token`，Token 从 `DH_INTERNAL_TOKEN`
 | `X-User-Id` | 当前登录用户的正整数 ID，范围为 Java Long 正数范围，不能重复传入 |
 | `X-Auth-Source` | 必须为 `dh-gateway`，不能重复传入 |
 
+创建会话和发起新对话时还会读取 Gateway 注入的姓名、单位、部门、业务角色和
+`X-Profile-Version`，并把创建时的组织归属快照写入 `agent_conversation`。这些字段
+当前不扩大访问范围；列表、详情、更新和续写仍严格使用 `X-User-Id` 隔离。
+
 `X-Username`、`X-Token-Id` 不作为归属依据，因此修改用户名或重新登录不会改变
 会话所属用户。请求体和查询参数中的 `user_id`、`userId` 不能覆盖网关身份。
 
@@ -263,13 +267,15 @@ SPATIAL_API_KEY=
 
 - `list_spatial_elements`：无其他参数，调用 `/api/spatial/v2/elements/list`，结果放在 `elements`。
 - `get_spatial_element_detail`：传 `dataKey`，调用 `/api/spatial/v2/elements/detail`，获取字段、枚举及查询约束。
-- `query_spatial_element`：只传 `query`，对应 `/api/spatial/v2/elements/query` 原始请求体。
+- `query_spatial_element`：传 `query` 和可选顶层 `render_map`，`query` 对应 `/api/spatial/v2/elements/query` 原始请求体。
 
-通用查询保留 FeatureCollection、features、total、returned；不自动发送地图事件。
-`includeGeometry=true` 只控制返回几何；字段及查询约束以目录详情为准，由空间服务最终校验。
+通用查询保留 FeatureCollection、features、total、returned；空间查询默认自动分页取全并发送地图事件，属性查询需显式设置 `render_map=true` 才展示。
+点要素使用 `MARKER_ADD`（观测站沿用 `observation-stations` 图层及站号），线面使用 `GEOJSON_ADD`；仅清除对应类别图层，保留选区。
+自动展示强制 `includeGeometry=true` 且要求 `offset=0`；只查数据或补取文字记录时设置 `render_map=false`。文字结果可能只有首批，`map_result` 描述已提交的地图数据，不代表前端渲染回执。
+字段及查询约束以目录详情为准，由空间服务最终校验。
 复用 `tools.spatial` 和 `SPATIAL_API_KEY`，base_url 继续只配置主机与端口，不附加 v2 路径。
 
-空间联动与断面查询分别按各自 Skill 执行；断面数据使用 `database_query`，专题出图使用 `dm_duanmian_analysis`。
+断面及其测点的位置、属性、历史观测和统计统一使用 `database_query`；通用目录过滤 `dm_duanmian`，工具拒绝其详情及查询操作。专题出图使用 `dm_duanmian_analysis`。
 已有环境若发布过旧 Skill 名称或断面转空间查询的提示词，应同步更新为先加载“断面业务” Skill，再按其说明选择工具；代码不会覆盖线上已发布版本。
 
 ### 观测站地图联动事件

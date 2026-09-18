@@ -16,7 +16,7 @@ TOOL_DESCRIPTION = (
     "除清除失效选区外，单纯查询、输出或显示观测站点时禁止调用本工具，必须调用 observation_service；"
     "observation_service 的站点查询和单站分析会自动发送 CLEAR 和 MARKER_ADD 地图事件，"
     "不得再调用本工具重复清图、标点、定位或适配站点视野。"
-    "observation_service 的通用空间查询默认自动发送 GEOJSON_ADD，不重复绘制。"
+    "observation_service 的通用空间查询自动发送点标记 MARKER_ADD 和线面 GEOJSON_ADD，不重复绘制。"
     "GEOJSON_ADD 用于展示已有的 GeoJSON FeatureCollection，支持点、线、面及多部件几何；"
     "必填 layer_id、geojson，可选 replace（默认 true）、group_id、fit_bounds（默认 false）。"
     "空间联动对话中，用户转而询问另一个明确地点的信息时，若已有该地点的可信坐标，"
