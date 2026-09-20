@@ -6,6 +6,7 @@ from typing import Any
 
 from agents.citations import safe_model_text, strip_citation_markers
 from agents.skills import SkillSummary
+from agents.tools.current_server_time import get_current_server_time
 from schemas.chat import ChatMessage, FrontendContext
 from services.request_context_adapter import enrich_question_with_frontend_context
 from services.synonym_service import expand_query_synonyms
@@ -98,9 +99,13 @@ def build_system_prompt(
     )
     return (
         f"{system_prompt}\n\n"
+        f"本轮当前时间（服务器本地时间，含时区与 UTC 偏移）：{get_current_server_time()}\n"
         f"{CITATION_PROTOCOL_PROMPT}\n\n"
         "会话 RAG 证据缓冲区（完整内容，按 buffer_id 升序）：\n"
         f"{buffer_content}\n\n"
+        "理解“今天”“今年”“最近”等相对时间时，以本轮当前时间为准。"
+        "涉及 RAG 时效性检索时，在 query 中明确相关时间条件，结合片段已有时间标签，"
+        "优先采用符合问题且时间最新的内容；用户指定历史时间范围时，以该范围为准。\n\n"
         "当前可用能力：\n"
         f"{skill_index}\n\n"
         "Skill 加载权限以本次当前可用能力列表为准；只能加载列表中的 Skill。"
