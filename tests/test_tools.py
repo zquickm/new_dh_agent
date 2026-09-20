@@ -62,10 +62,10 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         clear_synonym_matcher_cache()
         self.synonym_patcher.stop()
 
-    def test_database_description_is_generic_and_excludes_observation_stations(self):
+    def test_database_description_is_generic(self):
         self.assertIn("授权业务表", DATABASE_TOOL_DESCRIPTION)
         self.assertIn("Apache Doris", DATABASE_TOOL_DESCRIPTION)
-        self.assertIn("必须调用 observation_service", DATABASE_TOOL_DESCRIPTION)
+        self.assertNotIn("spatial_query_service", DATABASE_TOOL_DESCRIPTION)
         self.assertNotIn("断面", DATABASE_TOOL_DESCRIPTION)
 
     async def test_database_schema_only_accepts_question(self):
@@ -349,7 +349,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                 "CurrentServerTime",
                 "rag_search",
                 "database_query",
-                "observation_service",
+                "spatial_query_service",
                 "map_action",
                 "dm_duanmian_analysis",
             },

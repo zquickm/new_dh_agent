@@ -91,14 +91,14 @@ class SpatialElementQuery(QueryModel):
     spatial: Optional[SpatialCondition] = Field(
         default=None, description="mode=spatial 时必填的空间条件。"
     )
-    includeGeometry: bool = Field(default=False, description="是否返回 GeoJSON 几何；启用 render_map 时工具强制为 true。")
+    includeGeometry: bool = Field(default=False, description="是否返回 GeoJSON 几何；后续需要地图展示时设为 true。")
     geometryFormat: Literal["geojson"] = Field(
         default="geojson", description="当前服务仅支持 geojson，wkt 尚未实现。"
     )
     orderBy: Optional[str] = Field(default=None, min_length=1, description="排序字段，须来自要素详情。")
     orderDirection: Literal["asc", "desc"] = Field(default="asc", description="排序方向。")
-    limit: int = Field(default=20, ge=1, description="每页条数上限，不超过要素 maxQueryLimit；自动展示时继续翻页取全。")
-    offset: int = Field(default=0, ge=0, description="分页偏移；自动展示须为 0，非零值须设 render_map=false。total 为总匹配数，returned 为本页数。")
+    limit: int = Field(default=20, ge=1, description="每页条数上限，不超过要素 maxQueryLimit；每次调用只返回一页。")
+    offset: int = Field(default=0, ge=0, description="分页偏移；下一页使用当前 offset 加 returned。total 为总匹配数，returned 为本页数。")
 
     @model_validator(mode="after")
     def validate_mode(self) -> SpatialElementQuery:

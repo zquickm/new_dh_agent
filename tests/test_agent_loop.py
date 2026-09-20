@@ -64,12 +64,12 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         from tool_backends.spatial_backend import SpatialServiceError
 
         cases = [
-            (operation, SpatialServiceError("空间服务返回 HTTP 400 (POST /api/spatial/v2/elements/query)：字段不支持"), "通用空间查询调用失败")
+            (operation, SpatialServiceError("空间服务返回 HTTP 400 (POST /api/spatial/v2/elements/query)：字段不支持"), "通用空间查询服务调用失败")
             for operation in ("list_spatial_elements", "get_spatial_element_detail", "query_spatial_element")
         ] + [
-            ("station_detail", SpatialServiceError("空间服务返回 HTTP 400"), "观测站服务调用失败"),
-            ("query_spatial_element", ValueError("空间服务分页计数无效"), "通用空间查询参数或返回结果无效"),
-            ("search_stations", ValueError("query_type 不能为空"), "观测站服务参数或返回结果无效"),
+            ("station_status", SpatialServiceError("空间服务返回 HTTP 400"), "通用空间查询服务调用失败"),
+            ("query_spatial_element", ValueError("空间服务分页计数无效"), "通用空间查询服务参数或返回结果无效"),
+            ("observation_summary", ValueError("tzno 不能为空"), "通用空间查询服务参数或返回结果无效"),
         ]
         for operation, error, prefix in cases:
             with self.subTest(operation=operation, error=type(error).__name__):
@@ -77,9 +77,9 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                     raise error
 
                 tools = ToolExecutor()
-                tools.register("observation_service", "查询", fail)
+                tools.register("spatial_query_service", "查询", fail)
                 llm = FakeLlm([
-                    ([], [{"id": "failed-query", "name": "observation_service", "args": {"operation": operation}}]),
+                    ([], [{"id": "failed-query", "name": "spatial_query_service", "args": {"operation": operation}}]),
                     (["查询未成功"], []),
                 ])
                 agent = AgentLoop(llm, tools)
@@ -180,10 +180,10 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         synonym_patch.start()
         self.addCleanup(synonym_patch.stop)
 
-    def test_system_prompt_routes_operational_station_data_to_observation_service(self):
-        self.assertIn("必须优先调用 observation_service", SYSTEM_PROMPT)
-        self.assertIn("也不得改用 database_query", SYSTEM_PROMPT)
-        self.assertNotIn("断面历史调查数据", SYSTEM_PROMPT)
+    def test_system_prompt_delegates_business_routing_to_skills(self):
+        self.assertIn("当前任务相关的 Skill", SYSTEM_PROMPT)
+        self.assertNotIn("必须优先调用 spatial_query_service", SYSTEM_PROMPT)
+        self.assertNotIn("也不得改用 database_query", SYSTEM_PROMPT)
 
     async def test_station_query_keeps_generic_database_tool_available(self):
         llm = FakeLlm([(["已完成"], [])])
@@ -193,7 +193,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
 
         definitions = llm.calls[0][1]
         tool_names = {item["function"]["name"] for item in definitions}
-        self.assertIn("observation_service", tool_names)
+        self.assertIn("spatial_query_service", tool_names)
         self.assertIn("database_query", tool_names)
         await agent.close()
 
@@ -422,7 +422,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"source_key": "<<SRC_1>>"', final_messages[-3]["content"])
         self.assertIn('"avg": 30.1', final_messages[-1]["content"])
 
-    async def test_suppresses_redundant_fly_to_after_observation_map_events(self):
+    async def test_explicit_map_actions_are_not_suppressed_after_other_events(self):
         llm = FakeLlm(
             [
                 (
@@ -430,7 +430,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                     [
                         {
                             "id": "call-observation",
-                            "name": "observation_service",
+                            "name": "spatial_query_service",
                             "args": {},
                             "type": "tool_call",
                         }
@@ -451,7 +451,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        async def observation_service():
+        async def spatial_query_service():
             return ToolOutput(
                 content={"total": 1},
                 client_events=(
@@ -478,7 +478,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             )
 
         tools = ToolExecutor()
-        tools.register("observation_service", "观测查询", observation_service)
+        tools.register("spatial_query_service", "通用空间查询服务", spatial_query_service)
         tools.register("map_action", "地图操作", map_action)
         agent = AgentLoop(llm, tools)
 
@@ -494,6 +494,9 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 "tool_finished",
                 "answer_delta",
                 "tool_started",
+                "map_action",
+                "map_action",
+                "map_action",
                 "tool_finished",
                 "answer_delta",
                 "answer_delta",
@@ -505,7 +508,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 for event in events
                 if event.type == "map_action"
             ],
-            ["CLEAR", "MARKER_ADD", "FLY_TO"],
+            ["CLEAR", "MARKER_ADD", "FLY_TO"] * 2,
         )
         self.assertEqual(
             "".join(
@@ -560,14 +563,14 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             ["CLEAR", "MARKER_ADD", "FLY_TO"],
         )
 
-    async def test_area_rendering_suppresses_extra_flight_in_same_round(self):
+    async def test_query_then_explicit_flight_emits_map_actions(self):
         llm = FakeLlm(
             [
                 (
                     [],
                     [{
                         "id": "call-area",
-                        "name": "observation_service",
+                        "name": "spatial_query_service",
                         "args": {},
                         "type": "tool_call",
                     }],
@@ -585,17 +588,8 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        async def observation_service():
-            return ToolOutput(
-                content={"total": 2},
-                client_events=(
-                    {"action_type": "CLEAR", "payload": {}},
-                    {
-                        "action_type": "MARKER_ADD",
-                        "payload": {"markers": [1, 2]},
-                    },
-                ),
-            )
+        async def spatial_query_service():
+            return ToolOutput(content={"total": 2})
 
         async def map_action():
             return ToolOutput(
@@ -611,7 +605,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             )
 
         tools = ToolExecutor()
-        tools.register("observation_service", "观测查询", observation_service)
+        tools.register("spatial_query_service", "通用空间查询服务", spatial_query_service)
         tools.register("map_action", "地图操作", map_action)
         agent = AgentLoop(llm, tools)
 
@@ -623,18 +617,18 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 for event in events
                 if event.type == "map_action"
             ],
-            ["CLEAR", "MARKER_ADD"],
+            ["CLEAR", "MARKER_ADD", "FLY_TO"],
         )
 
-    async def test_keeps_later_single_station_observation_map_events(self):
+    async def test_keeps_later_visualization_tool_events(self):
         llm = FakeLlm(
             [
                 (
                     [],
                     [{
                         "id": "call-area",
-                        "name": "observation_service",
-                        "args": {"operation": "search_stations"},
+                        "name": "render_result",
+                        "args": {"operation": "area"},
                         "type": "tool_call",
                     }],
                 ),
@@ -642,8 +636,8 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                     [],
                     [{
                         "id": "call-station",
-                        "name": "observation_service",
-                        "args": {"operation": "observation_summary"},
+                        "name": "render_result",
+                        "args": {"operation": "station"},
                         "type": "tool_call",
                     }],
                 ),
@@ -651,8 +645,8 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        async def observation_service(operation):
-            if operation == "search_stations":
+        async def render_result(operation):
+            if operation == "area":
                 client_events = (
                     {"action_type": "CLEAR", "payload": {}},
                     {"action_type": "MARKER_ADD", "payload": {"markers": [1, 2]}},
@@ -672,7 +666,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             )
 
         tools = ToolExecutor()
-        tools.register("observation_service", "观测查询", observation_service)
+        tools.register("render_result", "测试展示工具", render_result)
         agent = AgentLoop(llm, tools)
 
         events = [event async for event in agent.run_stream("先查区域再查单站", [])]
@@ -1016,11 +1010,9 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                     [
                         {
                             "id": "call-observation",
-                            "name": "observation_service",
+                            "name": "render_result",
                             "args": {
-                                "operation": "search_stations",
-                                "query_type": "bbox",
-                                "bbox": [121, 29, 123, 31],
+                                "operation": "area",
                             },
                             "type": "tool_call",
                         }
@@ -1030,7 +1022,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        async def observation_service(**arguments):
+        async def render_result(**arguments):
             return ToolOutput(
                 content={"arguments": arguments, "total": 1},
                 client_events=(
@@ -1040,7 +1032,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             )
 
         tools = ToolExecutor()
-        tools.register("observation_service", "观测查询", observation_service)
+        tools.register("render_result", "测试展示工具", render_result)
         agent = AgentLoop(llm, tools)
 
         events = [event async for event in agent.run_stream("显示站点", [])]

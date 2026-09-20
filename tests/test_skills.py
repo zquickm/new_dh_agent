@@ -44,7 +44,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
             "name: 观测站分析\n"
             "description: Analyze operational observation stations.\n"
             "---\n\n"
-            "Always query the observation service before drawing the map.\n",
+            "Always query the spatial query service before drawing the map.\n",
             encoding="utf-8",
         )
         return SkillCatalog(root)
@@ -60,7 +60,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(summaries[0].name, "观测站分析")
             self.assertEqual(
                 skill.instructions,
-                "Always query the observation service before drawing the map.",
+                "Always query the spatial query service before drawing the map.",
             )
 
     def test_project_transect_business_skill_contains_domain_routing(self):
@@ -72,8 +72,19 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("E1", skill.description)
         self.assertIn("仅按年月询问各类要素对比", skill.description)
         self.assertIn("database_query", skill.instructions)
-        self.assertIn("observation_service", skill.instructions)
+        self.assertIn("spatial_query_service", skill.instructions)
         self.assertIn("dm_duanmian_analysis", skill.instructions)
+        self.assertIn("默认调用 `dm_duanmian_analysis`", skill.instructions)
+        self.assertIn("仅查询位置、数量、基础属性或文档资料时不打开", skill.instructions)
+        spatial = catalog.load("空间联动")
+        self.assertIn("按返回的 `dataKey` 逐类调用", spatial.instructions)
+        self.assertIn("再显式调用 `map_action`", spatial.instructions)
+        self.assertIn("区域总览由本 Skill 独立完成", spatial.instructions)
+        self.assertNotIn("断面业务", spatial.instructions)
+        for obsolete in ("search_stations", "list_station_types", "station_detail", "station_types"):
+            self.assertNotIn(obsolete, spatial.instructions)
+        self.assertNotIn("空间联动", skill.instructions)
+        self.assertNotIn("不查询 `dm_duanmian`", spatial.instructions)
         self.assertIn("E1、E2、E3", skill.instructions)
         self.assertIn("E1、E2、E3、EL、EK", skill.instructions)
         self.assertIn("E1001", skill.instructions)
@@ -107,7 +118,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
             )
 
             self.assertEqual(result["name"], "观测站分析")
-            self.assertIn("observation service", result["instructions"])
+            self.assertIn("spatial query service", result["instructions"])
             await executor.close()
 
     async def test_project_business_skill_loads_through_registered_tool(self):
@@ -139,7 +150,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
                 "- 观测站分析: Analyze operational observation stations.",
                 system_prompt,
             )
-            self.assertNotIn("Always query the observation service", system_prompt)
+            self.assertNotIn("Always query the spatial query service", system_prompt)
             await agent.close()
 
     async def test_loaded_skill_is_added_to_the_next_model_round(self):
@@ -168,5 +179,5 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
             loaded = json.loads(llm.calls[1][0][-1]["content"])
             self.assertEqual(llm.calls[1][0][-1]["role"], "tool")
             self.assertEqual(llm.calls[1][0][-1]["name"], "load_skill")
-            self.assertIn("observation service", loaded["instructions"])
+            self.assertIn("spatial query service", loaded["instructions"])
             await agent.close()

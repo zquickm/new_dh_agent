@@ -38,7 +38,7 @@ _TOOL_DISPLAY_NAMES = {
     "CurrentServerTime": "当前服务器时间",
     "rag_search": "东溟知识库检索",
     "database_query": "数据库查询",
-    "observation_service": "观测分析",
+    "spatial_query_service": "通用空间查询服务",
     "map_action": "地图操作",
     "dm_duanmian_analysis": "断面专题分析",
 }

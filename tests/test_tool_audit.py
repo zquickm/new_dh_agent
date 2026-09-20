@@ -73,7 +73,7 @@ class ToolAuditSanitizerTest(unittest.TestCase):
 
     def test_observation_result_does_not_keep_measurement_values(self):
         summary, _, _, _ = summarize_result(
-            "observation_service",
+            "spatial_query_service",
             '{"operation": "observation_range", '
             '"records": [{"water_temperature": 19.7}]}',
         )

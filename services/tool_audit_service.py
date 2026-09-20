@@ -132,9 +132,9 @@ def _database_summary(parsed: Any) -> Any:
     }
 
 
-def _observation_summary(parsed: Any) -> Any:
+def _spatial_query_summary(parsed: Any) -> Any:
     if not isinstance(parsed, dict):
-        return "observation result returned"
+        return "spatial query result returned"
     return {
         "operation": parsed.get("operation"),
         "total": parsed.get("total"),
@@ -154,8 +154,8 @@ def summarize_result(tool_name: str, result: str) -> tuple[str, int, str, bool]:
         summary = _rag_summary(parsed)
     elif tool_name == "database_query":
         summary = _database_summary(parsed)
-    elif tool_name == "observation_service":
-        summary = _observation_summary(parsed)
+    elif tool_name == "spatial_query_service":
+        summary = _spatial_query_summary(parsed)
     elif tool_name == "load_skill":
         summary = {"status": "skill instructions loaded"}
     elif tool_name == "map_action":

@@ -233,10 +233,7 @@ class RequestContextAdapterTest(unittest.TestCase):
         )
 
         self.assertTrue(enriched.startswith("输出观测站点\n\n"))
-        self.assertIn("都默认限定在 selected_area", enriched)
-        self.assertIn("必须完整使用 selected_area 中的 query_type", enriched)
-        self.assertIn("浮标、浮标站使用 buoy", enriched)
-        self.assertIn("雷达、雷达站使用 radar", enriched)
+        self.assertIn("默认限定在 selected_area", enriched)
         self.assertIn("selected_area 是本轮唯一有效选区", enriched)
         self.assertIn("会话当前有效选区", enriched)
         self.assertIn('"query_type":"polygon"', enriched)
@@ -253,11 +250,10 @@ class RequestContextAdapterTest(unittest.TestCase):
             request.context,
         )
 
-        self.assertIn("单个站点或地点，则该对象优先", enriched)
-        self.assertIn("未明确要求使用框选范围时，忽略 selected_area", enriched)
-        self.assertIn("除非用户明确询问或比较选区，不要复述框选范围、坐标", enriched)
-        self.assertIn("station_name", enriched)
-        self.assertIn("render_map=false", enriched)
+        self.assertIn("明确单个对象时以该对象为准", enriched)
+        self.assertIn("无关问题不套用范围", enriched)
+        self.assertNotIn("search_stations", enriched)
+        self.assertNotIn("database_query", enriched)
 
     def test_single_station_follow_up_does_not_reuse_selected_area(self):
         request = AgentRequest.model_validate(

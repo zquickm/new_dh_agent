@@ -17,7 +17,7 @@ TOOL_DESCRIPTION = (
     "将自然语言问题转换为 Apache Doris（MySQL 兼容方言）只读 SQL，查询授权业务表并返回结构化结果。"
     "每次查询最多返回 {max_rows} 行，超出截断。"
     "不得用于地图选区得到的业务观测站，也不得用于明确站名的业务观测站状态、详情、"
-    "最新观测、趋势或时间区间数据；这些问题必须调用 observation_service。"
+    "最新观测、趋势或时间区间数据；这些问题必须调用 spatial_query_service。"
 )
 def build_tool_parameters() -> dict[str, Any]:
     return {

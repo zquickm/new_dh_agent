@@ -36,9 +36,6 @@ class SpatialServiceClient:
         self._session: Optional[aiohttp.ClientSession] = None
         self._session_lock = asyncio.Lock()
 
-    async def list_station_types(self) -> dict[str, Any]:
-        return await self._request("GET", "/api/spatial/stations/types")
-
     async def list_spatial_elements(self) -> list[dict[str, Any]]:
         return await self._request(
             "GET", "/api/spatial/v2/elements/list", data_type=list,
@@ -57,25 +54,11 @@ class SpatialServiceClient:
             raise SpatialServiceError("空间服务未返回有效的 FeatureCollection")
         return data
 
-    async def query_stations(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self._request(
-            "POST",
-            "/api/spatial/stations/query",
-            json=payload,
-        )
-
     async def query_station_status(self, tznos: list[str]) -> dict[str, Any]:
         return await self._request(
             "POST",
             "/api/spatial/stations/status",
             json={"tznos": tznos},
-        )
-
-    async def get_station_detail(self, tzno: str) -> dict[str, Any]:
-        return await self._request(
-            "GET",
-            "/api/spatial/stations/info",
-            params={"tzno": tzno},
         )
 
     async def get_observation_summary(self, tzno: str) -> dict[str, Any]:
