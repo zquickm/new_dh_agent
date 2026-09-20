@@ -45,7 +45,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
         "voyage": {
             "type": "string",
             "pattern": r"^[0-9]{4}-(0[1-9]|1[0-2])$",
-            "description": "可选航次年月，接受 yyyy-MM，例如 2025-11；无指代时省略，不猜测航次。",
+            "description": "可选航次年月，接受 yyyy-MM，例如 2025-11；无指代时选择一个默认航次。",
         },
         "elementType": {
             "type": "string",
