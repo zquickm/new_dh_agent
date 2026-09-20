@@ -12,6 +12,29 @@ from tests.test_agent_loop import FakeLlm
 
 
 class ContextServiceTest(unittest.IsolatedAsyncioTestCase):
+    def test_each_request_refreshes_time_with_custom_system_prompt(self):
+        timestamps = ["2026-09-20T23:59:59+08:00", "2026-09-21T00:00:01+08:00"]
+        with patch(
+            "agents.tools.current_server_time.datetime"
+        ) as clock:
+            current = clock.now.return_value.astimezone.return_value
+            current.isoformat.side_effect = timestamps
+            current.tzname.return_value = "CST"
+            current.strftime.return_value = "+0800"
+            prompts = [self.service.build_messages(
+                question="最近的报告", history=[], frontend_context=None,
+                skills=(), max_history_messages=2, system_prompt="自定义系统提示",
+            )[0]["content"] for _ in timestamps]
+
+        self.assertEqual(clock.now.call_count, 2)
+        for timestamp, prompt in zip(timestamps, prompts):
+            self.assertTrue(prompt.startswith("自定义系统提示\n\n"))
+            self.assertIn(timestamp, prompt)
+            self.assertIn('"timezone": "CST"', prompt)
+            self.assertIn('"utc_offset": "+0800"', prompt)
+            self.assertIn("用户指定历史时间范围时，以该范围为准", prompt)
+        self.assertNotIn(timestamps[0], prompts[1])
+
     def test_skill_history_filters_only_disabled_calls_without_mutation(self):
         from langchain_core.messages import convert_to_messages
 
