@@ -6,6 +6,7 @@ from typing import Optional
 from uuid import uuid4
 
 from schemas.chat import FrontendContext
+from schemas.citation import RagBufferEntry
 from schemas.conversation import (
     ConversationDetail,
     ConversationMessage,
@@ -30,7 +31,47 @@ class MemoryConversationRepository:
         self._runs: dict[tuple[str, str], ConversationRun] = {}
         self._tool_calls: dict[tuple[str, str], ToolCallAudit] = {}
         self._run_events: dict[tuple[str, str], list[RunStreamEvent]] = {}
+        self._rag_buffers: dict[tuple[str, str], list[RagBufferEntry]] = {}
+        self._next_rag_buffer_id = 1
         self._lock = asyncio.Lock()
+
+    async def list_rag_buffer(
+        self, conversation_id: str, *, user_id: str
+    ) -> list[RagBufferEntry]:
+        async with self._lock:
+            return [
+                item.model_copy(deep=True)
+                for item in self._rag_buffers.get((user_id, conversation_id), [])
+            ]
+
+    async def upsert_rag_buffer(
+        self,
+        conversation_id: str,
+        entries: list[dict],
+        *,
+        user_id: str,
+        query: str,
+        run_id: str,
+    ) -> list[RagBufferEntry]:
+        del query, run_id
+        async with self._lock:
+            if (user_id, conversation_id) not in self._items:
+                raise KeyError(conversation_id)
+            buffer = self._rag_buffers.setdefault((user_id, conversation_id), [])
+            by_hash = {item.identity_hash: item for item in buffer}
+            result = []
+            for value in entries:
+                item = by_hash.get(value["identity_hash"])
+                if item is None:
+                    item = RagBufferEntry(
+                        buffer_id=self._next_rag_buffer_id,
+                        **value,
+                    )
+                    self._next_rag_buffer_id += 1
+                    buffer.append(item)
+                    by_hash[item.identity_hash] = item
+                result.append(item.model_copy(deep=True))
+            return result
 
     async def create(self, title: str, *, user_id: str, identity=None) -> ConversationDetail:
         now = _now()

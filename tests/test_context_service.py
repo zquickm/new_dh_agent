@@ -12,6 +12,22 @@ from tests.test_agent_loop import FakeLlm
 
 
 class ContextServiceTest(unittest.IsolatedAsyncioTestCase):
+    def test_historical_rag_tool_exchange_is_replaced_by_buffer_context(self):
+        history = [ChatMessage.model_validate(item) for item in [
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "rag", "name": "rag_search", "args": {"query": "旧查询"}},
+                {"id": "db", "name": "database_query", "args": {"question": "数据"}},
+            ]},
+            {"role": "tool", "tool_call_id": "rag", "name": "rag_search", "content": "旧片段"},
+            {"role": "tool", "tool_call_id": "db", "name": "database_query", "content": "数据库结果"},
+        ]]
+
+        filtered = ContextService.filter_rag_history(history)
+
+        self.assertEqual([call["id"] for call in filtered[0].tool_calls], ["db"])
+        self.assertEqual(len(filtered), 2)
+        self.assertEqual(filtered[1].name, "database_query")
+
     def test_skill_history_filters_only_disabled_calls_without_mutation(self):
         from langchain_core.messages import convert_to_messages
 

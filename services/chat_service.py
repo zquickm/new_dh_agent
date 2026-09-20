@@ -20,6 +20,7 @@ from schemas.chat import AgentRequest, ChatMessage, FrontendContext
 from services.citation_service import CitationService
 from services.context_service import SYSTEM_PROMPT
 from services.emoji_filter import EmojiStreamFilter
+from services.rag_buffer_service import RagBufferService
 from services.sensitive_word_service import SensitiveWordMatcher
 from services.tool_audit_service import PersistentToolAuditRecorder
 
@@ -329,6 +330,21 @@ class ChatService:
             return int(stored["id"])
 
         try:
+            rag_buffer_service = RagBufferService(conversation_repository)
+            rag_buffer_entries = await rag_buffer_service.list_entries(
+                conversation_id, user_id=user_id
+            )
+            rag_buffer_sources = [entry.source_dict() for entry in rag_buffer_entries]
+
+            async def persist_rag_chunks(chunks: list[dict], query: str):
+                return await rag_buffer_service.persist_chunks(
+                    conversation_id,
+                    chunks,
+                    user_id=user_id,
+                    query=query,
+                    run_id=run_id,
+                )
+
             # The authenticated conversation is the sole source of history.
             # Ignore client history (including stale history after account switches).
             history = []
@@ -405,6 +421,10 @@ class ChatService:
                 run_stream_kwargs["context_usage_callback"] = publish_context_usage
             if "model_messages_callback" in run_stream_parameters:
                 run_stream_kwargs["model_messages_callback"] = save_model_messages
+            if "rag_buffer_sources" in run_stream_parameters:
+                run_stream_kwargs["rag_buffer_sources"] = rag_buffer_sources
+            if "rag_buffer_callback" in run_stream_parameters:
+                run_stream_kwargs["rag_buffer_callback"] = persist_rag_chunks
             async for event in self.agent.run_stream(
                 request.question,
                 history,

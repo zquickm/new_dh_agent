@@ -138,6 +138,8 @@ class AgentLoop:
         context_token_limit: int | None = None,
         context_usage_callback: Callable[[dict[str, Any]], Any] | None = None,
         model_messages_callback: Callable[[list[dict[str, Any]]], Any] | None = None,
+        rag_buffer_sources: list[dict[str, Any]] | None = None,
+        rag_buffer_callback: Callable[[list[dict[str, Any]], str], Any] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         configured_limit = get_settings().conversation.max_history_messages
         limit = min(context_message_limit or configured_limit, configured_limit)
@@ -157,6 +159,7 @@ class AgentLoop:
         )
         tool_definitions = self.tools.definitions()
         skill_summaries = self.skills.summaries() if self.skills else ()
+        history = self.context_service.filter_rag_history(history)
         if enabled_skill_names is not None:
             enabled_skill_names = frozenset(enabled_skill_names)
             skill_summaries = tuple(
@@ -174,13 +177,14 @@ class AgentLoop:
             skills=skill_summaries,
             max_history_messages=limit,
             system_prompt=system_prompt,
+            rag_buffer_sources=tuple(rag_buffer_sources or ()),
         )
         input_message_count = len(messages)
         cumulative_input_tokens = 0
         cumulative_output_tokens = 0
         latest_usage: dict[str, Any] = {}
         cumulative_tool_results_truncated = 0
-        citation_registry = CitationRegistry()
+        citation_registry = CitationRegistry(rag_buffer_sources)
         observation_map_rendered = False
         has_streamed_content = False
         tool_sequence = 0
@@ -300,6 +304,7 @@ class AgentLoop:
                         yield AgentEvent(
                             type="answer_delta",
                             content=content,
+                            sources=citation_registry.sources(display_ids=True),
                             round_number=round_number,
                         )
                 if calls:
@@ -370,6 +375,7 @@ class AgentLoop:
                     yield AgentEvent(
                         type="answer_delta",
                         content=tail,
+                        sources=citation_registry.sources(display_ids=True),
                         round_number=round_number,
                     )
 
@@ -471,6 +477,18 @@ class AgentLoop:
                     failure_stage = "result_processing"
                     tool_arguments = tool_call["args"]
                     if name == "rag_search":
+                        persisted_sources = None
+                        if rag_buffer_callback is not None:
+                            parsed_observation = json.loads(observation)
+                            chunks = parsed_observation.get("chunks")
+                            if not isinstance(chunks, list):
+                                raise ValueError("rag_search returned an invalid result")
+                            query = parsed_observation.get("query")
+                            if not isinstance(query, str):
+                                query = str(tool_arguments.get("query") or "")
+                            persisted_sources = rag_buffer_callback(chunks, query)
+                            if inspect.isawaitable(persisted_sources):
+                                persisted_sources = await persisted_sources
                         rag_result = citation_registry.register_rag_observation(
                             observation,
                             tool_call_id=tool_call["id"],
@@ -479,6 +497,7 @@ class AgentLoop:
                                 if isinstance(tool_arguments, dict)
                                 else ""
                             ),
+                            persisted_sources=persisted_sources,
                         )
                         retrieval_data, observation = rag_result
                     else:
@@ -647,6 +666,10 @@ class AgentLoop:
                             skills=skill_summaries,
                             max_history_messages=limit,
                             system_prompt=system_prompt,
+                            rag_buffer_sources=tuple(
+                                source for source in citation_registry.sources()
+                                if source.get("buffer_id") is not None
+                            ),
                         )
                         history_group_sizes = tuple(
                             len(group)

@@ -30,7 +30,7 @@ def _optional_int(value: Any) -> Optional[int]:
         return None
 
 
-def _safe_model_text(text: str) -> str:
+def safe_model_text(text: str) -> str:
     # Retrieved documents are untrusted data. Prevent their contents from
     # introducing source markers that were not assigned by this registry.
     text = re.sub(r"<<\s*SRC_", "<SRC_", text, flags=re.IGNORECASE)
@@ -38,18 +38,31 @@ def _safe_model_text(text: str) -> str:
 
 
 class CitationRegistry:
-    """Request-local registry for document and database citation sources."""
+    """Conversation source catalog plus request-local display numbering."""
 
-    def __init__(self) -> None:
+    def __init__(self, sources: Optional[list[dict[str, Any]]] = None) -> None:
         self._sources: list[dict[str, Any]] = []
         self._known: dict[tuple[str, Optional[int], str], dict[str, Any]] = {}
+        self._display_ids: dict[int, int] = {}
+        for source in sources or []:
+            self._register_persisted_source(source)
 
     @property
     def has_sources(self) -> bool:
         return bool(self._sources)
 
-    def sources(self) -> list[dict[str, Any]]:
-        return [dict(source) for source in self._sources]
+    def sources(self, *, display_ids: bool = False) -> list[dict[str, Any]]:
+        result = []
+        for index, source in enumerate(self._sources, start=1):
+            item = dict(source)
+            buffer_id = item.get("buffer_id")
+            item["citation_id"] = (
+                self._display_ids.get(int(buffer_id)) if display_ids and buffer_id is not None
+                else None if display_ids
+                else index
+            )
+            result.append(item)
+        return result
 
     def register_database_observation(self, observation: str, *, question: str) -> None:
         try:
@@ -71,7 +84,7 @@ class CitationRegistry:
         )
         if source is None:
             source = {
-                "citation_id": len(self._sources) + 1,
+                "buffer_id": None,
                 "source": "断面数据库",
                 "source_type": "database",
                 "title": "断面观测数据",
@@ -93,6 +106,7 @@ class CitationRegistry:
         *,
         tool_call_id: str,
         fallback_query: Any,
+        persisted_sources: Optional[list[Any]] = None,
     ) -> tuple[dict[str, Any], str]:
         try:
             result = json.loads(observation)
@@ -103,6 +117,8 @@ class CitationRegistry:
 
         retrieval_chunks: list[dict[str, Any]] = []
         model_chunks: list[dict[str, Any]] = []
+        if persisted_sources is not None and len(persisted_sources) != len(result["chunks"]):
+            raise ValueError("持久化 RAG 片段数量与工具结果不一致")
         for rank, item in enumerate(result["chunks"], start=1):
             if not isinstance(item, dict):
                 raise ValueError("rag_search returned an invalid chunk")
@@ -113,12 +129,23 @@ class CitationRegistry:
             if not isinstance(source_name, str) or not source_name.strip():
                 raise ValueError("rag_search returned a chunk without source")
 
-            source = self._register_source(item, text, source_name)
+            persisted = (
+                persisted_sources[rank - 1] if persisted_sources is not None else None
+            )
+            if persisted is not None:
+                if hasattr(persisted, "model_dump"):
+                    persisted = persisted.model_dump()
+                source = self._register_persisted_source({
+                    **dict(persisted),
+                    "preview": dict(persisted).get("text", text),
+                })
+            else:
+                source = self._register_source(item, text, source_name)
             score = _score(item.get("score"))
             retrieval_chunks.append(
                 {
                     "rank": rank,
-                    "citation_id": source["citation_id"],
+                    "buffer_id": source["buffer_id"],
                     "source": source_name,
                     "preview": text,
                     "score": score,
@@ -135,9 +162,9 @@ class CitationRegistry:
             model_chunks.append(
                 {
                     **item,
-                    "text": _safe_model_text(text),
+                    "text": safe_model_text(text),
                     "score": score,
-                    "source_key": f"<<SRC_{source['citation_id']}>>",
+                    "source_key": f"<<SRC_{source['buffer_id']}>>",
                 }
             )
 
@@ -209,7 +236,11 @@ class CitationRegistry:
             source = registry.get(key)
             if source is None:
                 raise ValueError(f"最终模型输出了未知来源键：{token}")
-            output.append(f"[[cite:{source['citation_id']}]]")
+            buffer_id = int(source["buffer_id"])
+            display_id = self._display_ids.setdefault(
+                buffer_id, len(self._display_ids) + 1
+            )
+            output.append(f"[[cite:{display_id}]]")
             position = close_index + 2
 
         return "".join(output), ""
@@ -228,12 +259,45 @@ class CitationRegistry:
     def _source_registry(self) -> dict[str, dict[str, Any]]:
         registry: dict[str, dict[str, Any]] = {}
         for source in self._sources:
-            citation_id = int(source["citation_id"])
-            key = f"SRC_{citation_id}"
-            if citation_id <= 0 or key in registry:
-                raise ValueError(f"引用来源编号无效或重复：{citation_id}")
+            if source.get("buffer_id") is None:
+                continue
+            buffer_id = int(source["buffer_id"])
+            key = f"SRC_{buffer_id}"
+            if buffer_id <= 0 or key in registry:
+                raise ValueError(f"引用缓冲区编号无效或重复：{buffer_id}")
             registry[key] = source
         return registry
+
+    def _register_persisted_source(self, value: dict[str, Any]) -> dict[str, Any]:
+        buffer_id = _optional_int(value.get("buffer_id"))
+        if buffer_id is None or buffer_id <= 0:
+            raise ValueError("持久化引用来源缺少有效 buffer_id")
+        existing = next(
+            (item for item in self._sources if item.get("buffer_id") == buffer_id),
+            None,
+        )
+        if existing is not None:
+            return existing
+        source_name = str(value.get("source") or "").strip()
+        preview = str(value.get("preview") or value.get("text") or "").strip()
+        if not source_name or not preview:
+            raise ValueError("持久化引用来源缺少来源名称或正文")
+        source = {
+            "buffer_id": buffer_id,
+            "source": source_name,
+            "line": _optional_int(value.get("line")),
+            "score": _score(value.get("score")),
+            "preview": preview,
+            "title": value.get("title"),
+            "url": value.get("url"),
+            "page_index": _optional_int(value.get("page_index")),
+            "page": _optional_int(value.get("page")),
+            "document_id": value.get("document_id"),
+            "chunk_id": value.get("chunk_id"),
+            "knowledge_id": value.get("knowledge_id"),
+        }
+        self._sources.append(source)
+        return source
 
     def _register_source(
         self,
@@ -251,8 +315,12 @@ class CitationRegistry:
         identity = (document, location, source_name.strip().casefold())
         source = self._known.get(identity)
         if source is None:
+            existing_ids = [
+                int(item["buffer_id"])
+                for item in self._sources if item.get("buffer_id") is not None
+            ]
             source = {
-                "citation_id": len(self._sources) + 1,
+                "buffer_id": max(existing_ids, default=0) + 1,
                 "source": source_name,
                 "line": line,
                 "score": _score(item.get("score")),

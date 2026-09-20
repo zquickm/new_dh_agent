@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from sqlalchemy import (
     Boolean,
+    Float,
     ForeignKeyConstraint,
     Index,
     JSON,
@@ -206,6 +207,49 @@ class ConversationRunModel(Base):
     error_message: Mapped[Optional[str]] = mapped_column(mysql.LONGTEXT(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+
+
+class ConversationRagBufferModel(Base):
+    __tablename__ = "agent_conversation_rag_buffer"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "user_id"],
+            ["agent_conversation.id", "agent_conversation.user_id"],
+            name="fk_agent_rag_buffer_conversation_owner",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "conversation_id", "user_id", "identity_hash",
+            name="uq_agent_rag_buffer_conversation_identity",
+        ),
+        Index(
+            "ix_agent_rag_buffer_conversation_id",
+            "conversation_id", "user_id", "id",
+        ),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        mysql.BIGINT(unsigned=True), primary_key=True, autoincrement=True
+    )
+    conversation_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    user_id: Mapped[int] = mapped_column(mysql.BIGINT(unsigned=False), nullable=False)
+    identity_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    knowledge_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    document_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    chunk_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    source: Mapped[str] = mapped_column(String(1000), nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    text: Mapped[str] = mapped_column(mysql.LONGTEXT(), nullable=False)
+    url: Mapped[Optional[str]] = mapped_column(mysql.LONGTEXT(), nullable=True)
+    page_index: Mapped[Optional[int]] = mapped_column(mysql.INTEGER(), nullable=True)
+    line: Mapped[Optional[int]] = mapped_column(mysql.INTEGER(), nullable=True)
+    page: Mapped[Optional[int]] = mapped_column(mysql.INTEGER(), nullable=True)
+    score: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    first_query: Mapped[Optional[str]] = mapped_column(mysql.LONGTEXT(), nullable=True)
+    created_run_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(mysql.DATETIME(fsp=6), nullable=False)
 
 
 class RunEventModel(Base):

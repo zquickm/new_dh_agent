@@ -314,6 +314,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             await follow_up.close()
 
     def setUp(self):
+        conversation_repository._rag_buffers.clear()
+        conversation_repository._next_rag_buffer_id = 1
         repository_patch = patch(
             "services.chat_service.conversation_repository", conversation_repository
         )
@@ -920,7 +922,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next_events[-1]["data"]["answer"], "你好。")
         await service._agent.close()
 
-    async def test_explicit_article_without_marker_is_returned_and_persisted(self):
+    async def test_explicit_article_without_marker_is_not_treated_as_citation(self):
         class NamedArticleAgent(FakeAgent):
             async def run_stream(self, question, history, run_id="-", *, frontend_context=None):
                 async for event in super().run_stream(question, history, run_id):
@@ -938,7 +940,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1]["event"], "done")
         done = events[-1]["data"]
         self.assertEqual(done["answer"], "根据《资料》中的内容回答。")
-        self.assertEqual([item["source"] for item in done["sources"]], ["资料.pdf"])
+        self.assertEqual(done["sources"], [])
         detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
         self.assertEqual(detail.messages[-1].sources, done["sources"])
 
@@ -1117,6 +1119,15 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             "第一段[[cite:1]]第二段",
         )
         self.assertEqual(done_payload["data"]["sources"][0]["citation_id"], 1)
+        self.assertGreater(done_payload["data"]["sources"][0]["buffer_id"], 0)
+        persisted_buffer = await conversation_repository.list_rag_buffer(
+            done_payload["data"]["conversation_id"], user_id=TEST_USER_ID
+        )
+        self.assertEqual(len(persisted_buffer), 1)
+        self.assertEqual(
+            persisted_buffer[0].buffer_id,
+            done_payload["data"]["sources"][0]["buffer_id"],
+        )
         await service.close()
 
     async def test_map_action_has_run_batch_and_sequence_metadata(self):

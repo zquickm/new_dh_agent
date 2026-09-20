@@ -5,10 +5,12 @@ from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import exists, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from database.models import (
     ConversationMessageModel,
     ConversationModel,
+    ConversationRagBufferModel,
     ConversationRunModel,
     MessageFeedbackModel,
     RunEventModel,
@@ -26,6 +28,7 @@ from schemas.conversation import (
     ToolCallAudit,
 )
 from schemas.feedback import MessageFeedback
+from schemas.citation import RagBufferEntry
 
 
 def _now() -> datetime:
@@ -44,6 +47,24 @@ def _optional_iso(value: Optional[datetime]) -> Optional[str]:
 
 def _duration_ms(started_at: datetime, finished_at: datetime) -> int:
     return max(0, int((finished_at - started_at).total_seconds() * 1000))
+
+
+def _rag_buffer_schema(item: ConversationRagBufferModel) -> RagBufferEntry:
+    return RagBufferEntry(
+        buffer_id=item.id,
+        identity_hash=item.identity_hash,
+        text=item.text,
+        source=item.source,
+        score=item.score,
+        document_id=item.document_id,
+        chunk_id=item.chunk_id,
+        knowledge_id=item.knowledge_id,
+        title=item.title,
+        url=item.url,
+        page_index=item.page_index,
+        line=item.line,
+        page=item.page,
+    )
 
 
 def _message_schema(
@@ -198,6 +219,83 @@ def _run_event_schema(item: RunEventModel) -> RunStreamEvent:
 class MySQLConversationRepository:
     def __init__(self, runtime: DatabaseRuntime) -> None:
         self._runtime = runtime
+
+    async def list_rag_buffer(
+        self, conversation_id: str, *, user_id: str
+    ) -> list[RagBufferEntry]:
+        async with self._runtime.session_factory() as session:
+            items = (
+                await session.execute(
+                    select(ConversationRagBufferModel)
+                    .where(
+                        ConversationRagBufferModel.conversation_id == conversation_id,
+                        ConversationRagBufferModel.user_id == int(user_id),
+                    )
+                    .order_by(ConversationRagBufferModel.id)
+                )
+            ).scalars().all()
+            return [_rag_buffer_schema(item) for item in items]
+
+    async def upsert_rag_buffer(
+        self,
+        conversation_id: str,
+        entries: list[dict],
+        *,
+        user_id: str,
+        query: str,
+        run_id: str,
+    ) -> list[RagBufferEntry]:
+        if not entries:
+            return []
+        owner_id = int(user_id)
+        now = _now()
+        hashes = [str(item["identity_hash"]) for item in entries]
+        async with self._runtime.session_factory() as session:
+            async with session.begin():
+                owns_conversation = await session.scalar(
+                    select(exists().where(
+                        ConversationModel.id == conversation_id,
+                        ConversationModel.user_id == owner_id,
+                    ))
+                )
+                if not owns_conversation:
+                    raise KeyError(conversation_id)
+                for item in entries:
+                    values = {
+                        "conversation_id": conversation_id,
+                        "user_id": owner_id,
+                        "identity_hash": item["identity_hash"],
+                        "knowledge_id": item.get("knowledge_id"),
+                        "document_id": item.get("document_id"),
+                        "chunk_id": item.get("chunk_id"),
+                        "source": item["source"],
+                        "title": item.get("title"),
+                        "text": item["text"],
+                        "url": item.get("url"),
+                        "page_index": item.get("page_index"),
+                        "line": item.get("line"),
+                        "page": item.get("page"),
+                        "score": float(item.get("score") or 0),
+                        "first_query": query,
+                        "created_run_id": run_id,
+                        "created_at": now,
+                        "last_seen_at": now,
+                    }
+                    statement = mysql_insert(ConversationRagBufferModel).values(**values)
+                    await session.execute(statement.on_duplicate_key_update(
+                        last_seen_at=now,
+                    ))
+                stored = (
+                    await session.execute(
+                        select(ConversationRagBufferModel).where(
+                            ConversationRagBufferModel.conversation_id == conversation_id,
+                            ConversationRagBufferModel.user_id == owner_id,
+                            ConversationRagBufferModel.identity_hash.in_(hashes),
+                        )
+                    )
+                ).scalars().all()
+        by_hash = {item.identity_hash: _rag_buffer_schema(item) for item in stored}
+        return [by_hash[value] for value in hashes]
 
     async def create(self, title: str, *, user_id: str, identity=None) -> ConversationDetail:
         now = _now()

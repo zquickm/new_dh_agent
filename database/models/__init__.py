@@ -1,6 +1,7 @@
 from database.models.conversation import (
     ConversationMessageModel,
     ConversationModel,
+    ConversationRagBufferModel,
     ConversationRunModel,
     MessageFeedbackModel,
     RunEventModel,
@@ -12,6 +13,7 @@ from database.models.skill import SkillModel
 __all__ = [
     "ConversationModel",
     "ConversationMessageModel",
+    "ConversationRagBufferModel",
     "ConversationRunModel",
     "MessageFeedbackModel",
     "RunEventModel",

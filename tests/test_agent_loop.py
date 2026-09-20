@@ -32,6 +32,34 @@ class FakeLlm:
 
 
 class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
+    async def test_full_persisted_rag_buffer_is_injected_and_referenced(self):
+        llm = FakeLlm([(["已有证据<<SRC_19>>"], [])])
+        agent = AgentLoop(llm, ToolExecutor())
+        try:
+            events = [event async for event in agent.run_stream(
+                "继续提问",
+                [],
+                rag_buffer_sources=[{
+                    "buffer_id": 19,
+                    "source": "资料.pdf",
+                    "preview": "持久化证据正文",
+                    "page_index": 2,
+                }],
+            )]
+            self.assertIn("持久化证据正文", llm.calls[0][0][0]["content"])
+            self.assertIn('"source_key":"<<SRC_19>>"', llm.calls[0][0][0]["content"])
+            answer = "".join(
+                event.content for event in events if event.type == "answer_delta"
+            )
+            self.assertEqual(answer, "已有证据[[cite:1]]")
+            source = next(
+                event.sources[0] for event in events
+                if event.type == "answer_delta" and event.sources
+            )
+            self.assertEqual((source["buffer_id"], source["citation_id"]), (19, 1))
+        finally:
+            await agent.close()
+
     async def test_spatial_and_station_failures_identify_operation_without_map_events(self):
         from tool_backends.spatial_backend import SpatialServiceError
 

@@ -12,6 +12,7 @@ from database.base import Base
 from database.models import (
     ConversationMessageModel,
     ConversationModel,
+    ConversationRagBufferModel,
     ConversationRunModel,
     MessageFeedbackModel,
     RunEventModel,
@@ -25,6 +26,7 @@ from database.runtime import build_database_url
 del (
     ConversationMessageModel,
     ConversationModel,
+    ConversationRagBufferModel,
     ConversationRunModel,
     MessageFeedbackModel,
     RunEventModel,

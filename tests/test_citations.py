@@ -29,9 +29,10 @@ class CitationRegistryTest(unittest.TestCase):
         sources = registry.sources()
         self.assertEqual([item["citation_id"] for item in sources], [1, 2])
         self.assertIn("第二批", sources[0]["preview"])
-        answer = registry.transform_answer("正文<<SRC_2>>")
+        answer = registry.transform_answer("正文<<SRC_1>>")
+        sources = registry.sources(display_ids=True)
         answer, cited = CitationService.finalize(answer, sources)
-        self.assertEqual(answer, "正文[[cite:2]]")
+        self.assertEqual(answer, "正文[[cite:1]]")
         self.assertEqual(len(cited), 2)
         self.assertEqual(CitationRegistry().sources(), [])
 
@@ -91,8 +92,11 @@ class CitationRegistryTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            [chunk["citation_id"] for chunk in retrieval["chunks"]],
+            [chunk["buffer_id"] for chunk in retrieval["chunks"]],
             [1, 1, 2],
+        )
+        self.assertTrue(
+            all("citation_id" not in chunk for chunk in retrieval["chunks"])
         )
         sources = registry.sources()
         self.assertEqual(len(sources), 2)
@@ -323,15 +327,39 @@ class CitationRegistryTest(unittest.TestCase):
             fallback_query="",
         )
 
-        self.assertEqual(first["chunks"][0]["citation_id"], 1)
-        self.assertEqual(second["chunks"][0]["citation_id"], 2)
-        self.assertEqual(isolated["chunks"][0]["citation_id"], 1)
+        self.assertEqual(first["chunks"][0]["buffer_id"], 1)
+        self.assertEqual(second["chunks"][0]["buffer_id"], 2)
+        self.assertEqual(isolated["chunks"][0]["buffer_id"], 1)
         self.assertEqual(len(registry.sources()), 2)
         self.assertEqual(len(other_request.sources()), 1)
 
+    def test_persisted_buffer_ids_are_remapped_by_first_use_per_answer(self):
+        sources = [
+            {"buffer_id": 7, "source": "七.pdf", "preview": "证据七"},
+            {"buffer_id": 19, "source": "十九.pdf", "preview": "证据十九"},
+            {"buffer_id": 24, "source": "二十四.pdf", "preview": "证据二十四"},
+        ]
+        registry = CitationRegistry(sources)
+
+        answer = registry.transform_answer(
+            "先用十九<<SRC_19>>，再用七<<SRC_7>>，重复十九<<SRC_19>>。"
+        )
+        self.assertEqual(
+            answer,
+            "先用十九[[cite:1]]，再用七[[cite:2]]，重复十九[[cite:1]]。",
+        )
+        selected = registry.sources(display_ids=True)
+        self.assertEqual(
+            [(item["buffer_id"], item["citation_id"]) for item in selected],
+            [(7, 2), (19, 1), (24, None)],
+        )
+
+        next_answer = CitationRegistry(sources).transform_answer("只用七<<SRC_7>>。")
+        self.assertEqual(next_answer, "只用七[[cite:1]]。")
+
 
 class CitationServiceTest(unittest.TestCase):
-    def test_explicit_article_names_add_one_source_without_changing_answer(self):
+    def test_article_names_without_markers_do_not_create_implicit_citations(self):
         sources = [
             {"citation_id": 1, "source": "2024年2月东海断面调查通报.doc", "url": "doc-a", "page_index": 0},
             {"citation_id": 2, "source": "2024年2月东海断面调查通报.doc", "url": "doc-a", "page_index": 1},
@@ -345,7 +373,7 @@ class CitationServiceTest(unittest.TestCase):
             with self.subTest(answer=answer):
                 actual, selected = CitationService.finalize(answer, sources)
                 self.assertEqual(actual, answer)
-                self.assertEqual([item["citation_id"] for item in selected], [1, 4])
+                self.assertEqual(selected, [])
         _, selected = CitationService.finalize("根据《2024年2月东海断面调查通报》[[cite:2]]", sources)
         self.assertEqual([item["citation_id"] for item in selected], [2])
 
@@ -362,7 +390,7 @@ class CitationServiceTest(unittest.TestCase):
         ):
             with self.subTest(answer=answer):
                 _, selected = CitationService.finalize(answer, sources)
-                self.assertEqual(selected, [sources[2]])
+                self.assertEqual(selected, [{**sources[2], "citation_id": 1}])
 
     def test_finalize_removes_invalid_markers_and_unused_sources(self):
         sources = [
