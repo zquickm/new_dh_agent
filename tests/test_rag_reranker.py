@@ -210,23 +210,28 @@ class VllmDocumentRerankerTest(unittest.IsolatedAsyncioTestCase):
 
 
 class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
-    async def test_three_http_requests_share_token_and_select_distinct_libraries(self):
+    async def test_three_http_requests_run_serially_in_library_order(self):
         calls = []
-        all_started = asyncio.Event()
+        active_requests = 0
+        max_active_requests = 0
 
         async def recall(request):
+            nonlocal active_requests, max_active_requests
             payload = await request.json()
             calls.append((request.method, request.headers["Authorization"], payload))
-            if len(calls) == 3:
-                all_started.set()
-            await asyncio.wait_for(all_started.wait(), 2)
-            knowledge_id = payload["knowledge_ids"][0]
-            count = {"policy": 6, "business": 2, "literature": 0}[knowledge_id]
-            return web.json_response({"code": 200, "data": {"records": [
-                {"chunk_text": f"{knowledge_id}-{i}", "knowledge_id": knowledge_id,
-                 "doc_id": f"doc-{i}", "chunk_id": f"chunk-{i}", "doc_title": "报告", "score": [0.61, 0.95, 0.7, 0.95, 0.8, 0.9][i]}
-                for i in range(count)
-            ]}})
+            active_requests += 1
+            max_active_requests = max(max_active_requests, active_requests)
+            try:
+                await asyncio.sleep(0.01)
+                knowledge_id = payload["knowledge_ids"][0]
+                count = {"policy": 6, "business": 2, "literature": 0}[knowledge_id]
+                return web.json_response({"code": 200, "data": {"records": [
+                    {"chunk_text": f"{knowledge_id}-{i}", "knowledge_id": knowledge_id,
+                     "doc_id": f"doc-{i}", "chunk_id": f"chunk-{i}", "doc_title": "报告", "score": [0.61, 0.95, 0.7, 0.95, 0.8, 0.9][i]}
+                    for i in range(count)
+                ]}})
+            finally:
+                active_requests -= 1
 
         app = web.Application()
         app.router.add_post("/recall", recall)
@@ -250,8 +255,11 @@ class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
                          ["policy-1", "policy-3", "policy-5", "business-1", "business-0"])
         self.assertEqual(backend.reranker.calls, [])
         self.assertEqual(len(calls), 3)  # Empty/sparse results do not trigger more requests.
-        self.assertEqual({tuple(payload["knowledge_ids"]) for _, _, payload in calls},
-                         {("policy",), ("business",), ("literature",)})
+        self.assertEqual(max_active_requests, 1)
+        self.assertEqual(
+            [tuple(payload["knowledge_ids"]) for _, _, payload in calls],
+            [("policy",), ("business",), ("literature",)],
+        )
         for method, authorization, payload in calls:
             self.assertEqual(method, "POST")
             self.assertEqual(authorization, "Bearer test-token")

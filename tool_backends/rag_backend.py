@@ -278,15 +278,20 @@ class RagSearchBackend:
             raise RagToolError("知识库配置与授权范围不一致")
         if any(recall < 1 or keep < 1 for _, recall, keep in libraries):
             raise RagToolError("知识库召回及保留数量必须大于零")
-        results = await asyncio.gather(*(
-            self.search(query, keep, {**(filters or {}), "knowledge_ids": [knowledge_id]},
-                        recall_top_n=recall, score_only=True)
-            for knowledge_id, recall, keep in libraries
-        ), return_exceptions=True)
-        for result in results:
-            if isinstance(result, BaseException):
-                raise RagToolError("知识库检索失败") from result
-        return [chunk for chunks in results for chunk in chunks]
+        results: list[RagChunk] = []
+        for knowledge_id, recall, keep in libraries:
+            try:
+                chunks = await self.search(
+                    query,
+                    keep,
+                    {**(filters or {}), "knowledge_ids": [knowledge_id]},
+                    recall_top_n=recall,
+                    score_only=True,
+                )
+            except Exception as exc:
+                raise RagToolError("知识库检索失败") from exc
+            results.extend(chunks)
+        return results
 
     async def close(self) -> None:
         try:

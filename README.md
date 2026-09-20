@@ -144,7 +144,7 @@ Agent 已注册五个业务工具（括号内为协议调用标识）：
 - 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
 
   工具仅接受必填的 `query` 和可选的 `tags`（标签名称数组）。标签用于优先检索，
-  未命中时平台会在配置的授权范围内扩大检索。每次并发查询三个库，所有请求头共用
+  未命中时平台会在配置的授权范围内扩大检索。每次按配置顺序串行查询三个库，所有请求头共用
   `RAG_API_TOKEN`，各请求体的 `knowledge_ids` 仅包含一个库 ID。三个 ID 分别通过
   `RAG_POLICY_KNOWLEDGE_ID`、`RAG_BUSINESS_KNOWLEDGE_ID`、`RAG_LITERATURE_KNOWLEDGE_ID`
   配置；缺失或重复 ID 时拒绝检索，不回退到全库查询。
