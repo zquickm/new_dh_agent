@@ -8,32 +8,11 @@ from agents.tools.executor import ToolOutput
 
 TOOL_NAME = "map_action"
 TOOL_DESCRIPTION = (
-    "驱动前端地图执行可视化动作，不查询或修改业务数据。"
-    "也可用 CLEAR 清除会话选区：设置顶层 clear_selection=true、payload={}；"
-    "这是后端参数，不放入 payload。有效选区下改问其他地点、无关问题或取消选区时，"
-    "必须先单独执行此操作，收到结果后再回答或查询新对象。普通区域追问、选区内单站查询"
-    "和清理标记不清除选区；清选区时沿用既有 CLEAR 事件通知前端清理地图。"
-    "除清除失效选区外，单纯查询、输出或显示业务观测站点时禁止调用本工具，必须调用 observation_service；"
-    "observation_service 的站点查询和单站分析会自动发送 CLEAR 和 MARKER_ADD 地图事件，"
-    "不得再调用本工具重复清图、标点、定位或适配站点视野。"
-    "observation_service 的通用空间查询自动发送点标记 MARKER_ADD 和线面 GEOJSON_ADD，不重复绘制。"
-    "断面测点地图展示除外：按断面业务 Skill 查询 database_query 后，用 MARKER_ADD 展示真实点位，"
-    "使用独立图层 transect-stations；断面专题分析图使用 dm_duanmian_analysis。"
-    "成功回执仅表示已提交地图指令，没有前端渲染确认，不得声称地图已显示或渲染完成。"
-    "GEOJSON_ADD 用于展示已有的 GeoJSON FeatureCollection，支持点、线、面及多部件几何；"
-    "必填 layer_id、geojson，可选 replace（默认 true）、group_id、fit_bounds（默认 false）。"
-    "空间联动对话中，用户转而询问另一个明确地点的信息时，若已有该地点的可信坐标，"
-    "应调用 FLY_TO 将视角移到该地点；观测服务已自动定位时不重复调用，不编造坐标。"
-    "其他情况下，只有用户明确要求额外执行独立的定位、飞行、绘图、清除图层、展示弹窗/表格、"
-    "播放时序或轨迹等地图操作时，才使用本工具。"
-    "独立调用 FLY_TO 时会先清除旧的站点和定位标记，再添加目标点标记并移动视野；"
-    "使用 center（兼容 coordinates）和 zoom，可通过 marker_name 指定标记名称。"
-    "关键参数：LOCATE.points，MARKER_ADD.markers（每项含 id、name、coordinates），"
-    "MARKER_REMOVE.marker_ids，POLYGON_DRAW.coordinates，"
-    "CIRCLE_DRAW.center/radius，POPUP_SHOW.coordinates/title/content_html，"
-    "TABLE_SHOW.title/columns/data，FLY_TO.center/zoom，TIMELINE_PLAY.scene，"
-    "HEATMAP_SHOW.data_type，TRACK_PLAY.track_type/track_id，"
-    "COMPARE_STATIONS.station_ids/data_types；CLEAR 可使用空 payload。"
+    "向前端发送地图定位、点线面绘制、图层清除、弹窗、表格和播放等动作，不查询业务数据。"
+    "MARKER_ADD 接收点位；GEOJSON_ADD 接收 FeatureCollection。"
+    "CLEAR 可按 layer_ids 清除图层；顶层 clear_selection=true 配合空 payload 清除会话选区。"
+    "FLY_TO 会清除旧站点和定位标记、添加目标点并移动视野。"
+    "成功回执仅表示指令已发送，不表示前端渲染完成。"
 )
 MAP_ACTION_TYPES = (
     "LOCATE",
@@ -67,7 +46,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "description": (
                 "仅 CLEAR 可设为 true，清除后端会话选区及本轮选区上下文；"
                 "不属于前端 payload。清选区并通知前端清图时 payload 使用 {}；"
-                "普通清图、自动定位和选区内单站查询保持 false。"
+                "普通清图、定位和选区内单站展示保持 false。"
             ),
         },
         "payload": {
@@ -75,15 +54,18 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "description": (
                 "动作参数；坐标系为 CGCS2000（EPSG:4490），坐标格式为 [经度, 纬度]。"
                 "MARKER_ADD 的 markers 每项至少包含 id、name、coordinates；"
-                "其余动作使用工具描述列出的必填字段。"
+                "各动作参数见 payload 字段说明。"
             ),
             "properties": {
                 "geojson": {
                     "type": "object",
                     "description": "GEOJSON_ADD 必填的 GeoJSON FeatureCollection，保留完整 geometry 和 properties。",
                     "properties": {
-                        "type": {"type": "string", "enum": ["FeatureCollection"]},
-                        "features": {"type": "array", "items": {"type": "object"}},
+                        "type": {"type": "string", "enum": ["FeatureCollection"], "description": "固定为 FeatureCollection。"},
+                        "features": {
+                            "type": "array", "description": "待展示的 GeoJSON 要素。",
+                            "items": {"type": "object", "description": "含 geometry 和 properties 的 GeoJSON Feature。"},
+                        },
                     },
                     "required": ["type", "features"],
                 },
@@ -401,7 +383,7 @@ def _point(value: Any, name: str) -> list[float]:
 
 def validate_feature_collection(value: Any) -> None:
     """Validate the envelope here; geometry topology is validated by the spatial service."""
-    from agents.tools.spatial_query import SpatialCondition
+    from agents.tools.spatial_query_schema import SpatialCondition
 
     if not isinstance(value, dict) or value.get("type") != "FeatureCollection" or not isinstance(value.get("features"), list):
         raise ValueError("geojson 必须为 FeatureCollection")

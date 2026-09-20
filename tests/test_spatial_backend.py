@@ -12,17 +12,13 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.requests = []
 
-        async def station_types(request):
+        async def spatial_elements(request):
             self.requests.append(request)
             return web.json_response(
                 {
                     "code": 0,
                     "message": "success",
-                    "data": {
-                        "types": [],
-                        "total_types": 0,
-                        "total_stations": 0,
-                    },
+                    "data": [{"dataKey": "obs_station", "dataName": "观测站点"}],
                 }
             )
 
@@ -32,7 +28,7 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
             )
 
         app = web.Application()
-        app.router.add_get("/api/spatial/stations/types", station_types)
+        app.router.add_get("/api/spatial/v2/elements/list", spatial_elements)
         app.router.add_get("/business-error", business_error)
         self.runner = web.AppRunner(app)
         await self.runner.setup()
@@ -53,9 +49,9 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
         await self.runner.cleanup()
 
     async def test_calls_service_with_api_key_and_unwraps_data(self):
-        data = await self.client.list_station_types()
+        data = await self.client.list_spatial_elements()
 
-        self.assertEqual(data["total_types"], 0)
+        self.assertEqual(data, [{"dataKey": "obs_station", "dataName": "观测站点"}])
         self.assertEqual(
             self.requests[0].headers["X-API-Key"],
             "test-spatial-key",

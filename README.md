@@ -156,7 +156,7 @@ Agent 已注册五个业务工具（括号内为协议调用标识）：
   不做跨库排序或全局 top_n 截断。
   任一库请求失败时本次工具报错，不将失败误报为无结果。
 - 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
-- 观测分析（`observation_service`）：查询观测站空间分布、详情、状态、最新数据、趋势和时间区间数据，也支持通用注册空间要素查询。
+- 通用空间查询服务（`spatial_query_service`）：查询注册空间要素的目录、基础属性和几何（含观测站），以及观测站在线状态、最新数据和时序数据。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
 - 断面专题分析（`dm_duanmian_analysis`）：发送断面专题分析出图参数，由前端打开独立浮层并查询出图。
 
@@ -233,9 +233,10 @@ description: 查询或分析业务观测站时使用。
 任务相关时，通过 `load_skill` 加载正文；文件路径不会暴露给模型。Skill 根目录由
 `skills.directory` 配置，默认是项目下的 `skills`。
 
-项目内置“断面业务” Skill，当前已实现断面数据库查询和专题分析图两项能力。
-数据查询、统计比较与描述性分析使用 `database_query`，专题分析图使用
-`dm_duanmian_analysis`；底层数据库工具保持通用只读职责。
+项目内置“空间联动”和“断面业务”两个 Skill。业务路由、查询步骤和可视化时机放在
+各自独立的 Skill 中，Skill 不互相加载；主模型按任务选择对应 Skill。工具描述说明能力、输入输出和副作用，Schema 保留参数校验，
+通用工具不按业务类别限制复用；断面专题出图工具保留先加载“断面业务”的前置提示。空间位置、基础属性和分布（含断面）使用通用空间查询；
+断面历史观测和统计使用 `database_query`，指标分析默认结合 `dm_duanmian_analysis` 出图。
 
 RAG、重排、数据库和 SQL 生成模型的地址、超时、重试、知识库 ID、数据库账号等
 普通参数统一配置在 `config/application.yaml`，不同环境的差异写入对应的
@@ -258,42 +259,42 @@ DEEPSEEK_API_KEY=
 SPATIAL_API_KEY=
 ```
 
-观测工具通过 `tools.spatial.base_url` 调用空间计算服务，并在请求头中携带
+通用空间查询服务通过 `tools.spatial.base_url` 调用空间计算服务，并在请求头中携带
 `SPATIAL_API_KEY`。密钥只配置在 `.env` 或部署环境中，不要写入 YAML。
 
-### 通用空间要素查询（同一个 observation_service 工具）
+### 通用空间要素查询（同一个 spatial_query_service 工具）
 
-新增三个 operation，原有站点操作和 AgentLoop 保持不变：
+观测站也是注册空间要素，位置、基础详情、名称和类型筛选统一使用以下三个 operation：
 
 - `list_spatial_elements`：无其他参数，调用 `/api/spatial/v2/elements/list`，结果放在 `elements`。
 - `get_spatial_element_detail`：传 `dataKey`，调用 `/api/spatial/v2/elements/detail`，获取字段、枚举及查询约束。
-- `query_spatial_element`：传 `query` 和可选顶层 `render_map`，`query` 对应 `/api/spatial/v2/elements/query` 原始请求体。
+- `query_spatial_element`：传 `query`，`query` 对应 `/api/spatial/v2/elements/query` 原始请求体。
 
-通用查询保留 FeatureCollection、features、total、returned；空间查询默认自动分页取全并发送地图事件，属性查询需显式设置 `render_map=true` 才展示。
-点要素使用 `MARKER_ADD`（观测站沿用 `observation-stations` 图层及站号），线面使用 `GEOJSON_ADD`；仅清除对应类别图层，保留选区。
-自动展示强制 `includeGeometry=true` 且要求 `offset=0`；只查数据或补取文字记录时设置 `render_map=false`。文字结果可能只有首批，`map_result` 描述已提交的地图数据，不代表前端渲染回执。
-`map_result.fetched` 为已取回记录数，`mapped` 为加入绘图指令的要素数，`missing_geometry` 为缺少几何的数量；`complete` 表示指令是否覆盖全部匹配要素，`render_confirmed=false` 表示没有前端渲染确认。不能根据 `returned`、`complete` 或事件数量声称地图已显示全部结果。
-工具错误按 operation 区分“通用空间查询”和“观测站服务”，保留 HTTP 路径及服务错误说明；查询失败不代表无匹配数据。
+已删除重复的 `list_station_types`、`search_stations`、`station_detail` 及旧 HTTP 入口。
+类型枚举从字段定义读取，站名、站号和类型作为通用查询条件；不再本地猜测站点类型、改写站名、筛选去重或重算总数。
+通用文档未覆盖实时在线状态及观测数据，因此保留 `station_status`、`observation_summary`、`observation_trend`、`observation_range`。注册属性中的运行状态不能替代实时在线状态。
+
+`spatial_query_service` 的所有操作只返回查询数据，不清图、不标点、不定位，也不为了地图展示额外查询单站详情。已移除 `render_map` 参数和 `map_result` 绘图回执；旧调用传入该参数时返回迁移提示。
+通用查询保留 FeatureCollection、features、total、returned，每次调用只查询一页；需要绘图时请求 `includeGeometry=true`，使用 `limit/offset` 按原范围和条件补齐后续页，不在工具内部自动取全。
+取得数据后由模型显式调用 `map_action`：点位使用 `MARKER_ADD`，线面使用 `GEOJSON_ADD`，清图和定位也由地图工具完成。不同类别分层展示，保留选区；未取全或缺少几何时说明实际覆盖范围。
+地图动作回执仅代表指令已发送，不代表前端已经渲染。观测站搜索保留缺少坐标的业务记录，缺少坐标只影响后续绘图，不影响查询数量。
+工具错误统一标识“通用空间查询服务”，保留 operation、HTTP 路径及服务错误说明；查询失败不代表无匹配数据。
 字段及查询约束以目录详情为准，由空间服务最终校验。
 复用 `tools.spatial` 和 `SPATIAL_API_KEY`，base_url 继续只配置主机与端口，不附加 v2 路径。
 
-断面及其测点的位置、属性、历史观测和统计统一使用 `database_query`；通用目录过滤 `dm_duanmian`，工具拒绝其详情及查询操作。专题出图使用 `dm_duanmian_analysis`。
-明确要求地图展示断面测点时，按“断面业务” Skill 查询真实点位，再调用 `map_action(MARKER_ADD)`，使用独立图层 `transect-stations`；替换结果只清除该图层，保留选区和其他类别图层。数据库结果不会自动绘图，专题分析浮层也不代替测点地图分布。
-已有环境若发布过旧 Skill 名称或断面转空间查询的提示词，应同步更新为先加载“断面业务” Skill，再按其说明选择工具；代码不会覆盖线上已发布版本。
+框选区域询问“有什么要素”时，加载“空间联动” Skill，先发现目录，再按同一范围逐类查询，包括 `dm_duanmian`；目录本身不代表区域内存在该类别。断面位置、基础属性和分布通过通用查询返回后调用 `map_action` 展示，不打开断面专题图。某类别无法完成空间查询时说明限制，不静默跳过，也不放宽为全库查询。
+断面历史观测和统计按“断面业务” Skill 使用 `database_query`，涉及指标、变化或分析时默认调用 `dm_duanmian_analysis`。历史航次的实际测点坐标由数据库查询后使用 `map_action(MARKER_ADD)` 展示，使用独立图层 `transect-stations`，保留选区和其他类别图层。专题分析浮层不代替地图测点分布。
+工具标识统一为 `spatial_query_service`，中文显示名为“通用空间查询服务”；对接方按工具名处理的逻辑及已发布提示词中的引用也需同步更新。
+已有环境需同步发布更新后的系统提示词，将具体业务路由交给当前 Skill；代码只更新默认提示词，不覆盖数据库中已发布的版本。工具代码更新后需重启服务；Skill 文件按次读取，历史对话中已加载的旧说明应在新会话中重新加载。
 
 ### 观测站地图联动事件
 
-`observation_service` 执行 `search_stations` 成功后，会在工具完成事件之前发送
-一组 `map_action`。当前动作协议版本为 `1.0`，首版支持：
+查询完成后，模型显式调用 `map_action` 才会发送地图事件。当前动作协议版本为 `1.0`：
 
-- `CLEAR`：先清除旧的 `observation-stations` 图层，空结果也会发送。
-- `MARKER_ADD`：添加站点标记，并通过 `fit_bounds=true` 自动适配视野。
-- 单站详情、状态、最新观测、趋势和区间分析会清除旧站点，只保留当前站点标记，
-  并通过 `popup_content` 携带可点击查看的站点与观测摘要。
-- 单站联动按 `CLEAR → MARKER_ADD → FLY_TO` 执行，保留带观测详情的真实站点标记。
-- 独立调用通用 `FLY_TO` 时，后端会展开为 `CLEAR → MARKER_ADD → FLY_TO`；
-  使用 `center`（兼容输入 `coordinates`）和 `zoom`，并只保留最新定位点。
-- 通用 `map_action` 工具支持地图操作定义中的全部动作类型。
+- `CLEAR` 可清除指定图层；是否清理由 Skill 根据查询结果决定。
+- `MARKER_ADD` 添加真实点位；线面通过 `GEOJSON_ADD` 展示。
+- 单站状态、最新观测和时序查询不自动标点、清图或构造弹窗，地图展示由 `map_action` 完成。
+- 独立调用 `FLY_TO` 时，后端会展开为 `CLEAR → MARKER_ADD → FLY_TO`；使用 `center`（兼容输入 `coordinates`）和 `zoom`，保留最新定位点，因此应在新结果标点前切换视角。
 
 ```text
 event: map_action
@@ -304,8 +305,8 @@ data: {
     "version": "1.0",
     "conversation_id": "conversation-1",
     "run_id": "run-1",
-    "batch_id": "call-observation-1",
-    "action_id": "call-observation-1-1",
+    "batch_id": "call-map-1",
+    "action_id": "call-map-1-1",
     "seq": 1,
     "action_type": "MARKER_ADD",
     "payload": {
@@ -347,7 +348,7 @@ data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":
 
 仍按 `action_id` 去重、同一 `batch_id` 内按 `seq` 顺序处理。参数无效时不发送动作。
 工具返回 `success: true, message: "action received"` 仅表示指令已接收，不是前端出图成功回执。
-用户只要求统计或文字分析时仍走 `database_query`；仅要求出图时无需先查询数据库。
+断面指标、变化和分析默认查询数据库并展示相关专题图；用户明确只要文字或不要图时不出图。位置、数量和区域总览只联动地图；仅要求出图时仍先加载“断面业务” Skill，但无需先查询数据库。年份或时间范围查询选择结果中最新的实际航次作为示例并说明，不随机编造航次；没有可靠航次时省略 `voyage` 打开浮层。
 
 后续新增观测、海域等分析时，按现有方式增加独立工具模块，在
 `agents/tools/registry.py` 注册，并在 `services/chat_service.py` 添加中文展示名。
@@ -373,12 +374,12 @@ Agent 可使用的内部上下文；
 清除会话选区后，沿用已约定的 `CLEAR` SSE 事件通知前端清图，`payload` 原样发送；
 空对象表示按现有契约清除全部 Map Action 图层，指定 `layer_ids` 时只清理指定图层，无需新增前端字段。
 切换地点后的“这里”“该地区”应指向最近明确地点；新地点缺少范围或查询失败时，不借用旧选区。
-前端仍可显式发送上述清空字段。普通 CLEAR、单站自动定位、适配视野和清理标记图层不清除会话选区。
+前端仍可显式发送上述清空字段。普通 CLEAR、单站定位、适配视野和清理标记图层不清除会话选区。
 查询本轮新框选范围时保留新选区。前端按既有 CLEAR 契约处理地图清理；后端不等待前端渲染回执。
 前端普通追问必须省略 `map_context`，否则重复提交的旧几何会按新选区重新保存。
 较早请求迟到的选区写入不能覆盖较新请求的选区状态。
 用户明确指定的地点优先于默认选区；除非用户明确询问或比较选区，回答不主动复述框选范围、坐标或无关的历史站点结果。
-这些回答规则通过提示词约束，输出端不另做选区内容过滤。单站查询自动定位；
+这些回答规则通过提示词约束，输出端不另做选区内容过滤。单站查询仅返回数据，需要定位时另行调用地图工具；
 空间联动中切换到其他地点时，已有可信坐标则通过 `FLY_TO` 移动视角。
 只有地点名称或坐标时，不自动猜测区域边界或搜索半径；用户重新框选后，以新选区为准。
 

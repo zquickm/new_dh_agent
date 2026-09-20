@@ -10,7 +10,7 @@ from agents.tools.executor import ToolOutput
 TOOL_NAME = "dm_duanmian_analysis"
 TOOL_DESCRIPTION = (
     "打开前端断面专题分析浮层，由前端按参数查询并出图。"
-    "使用前加载“断面业务” Skill；analysis 必填，可选参数不猜测。"
+    "调用前先加载“断面业务” Skill，按其说明选择图型和参数。"
     "仅返回动作回执，不返回实测数据或分析结论。voyage 缺省时仅打开浮层。"
 )
 ANALYSIS_TYPES = (
@@ -45,7 +45,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
         "voyage": {
             "type": "string",
             "pattern": r"^[0-9]{4}-(0[1-9]|1[0-2])$",
-            "description": "可选航次年月，接受 yyyy-MM，例如 2025-11；无指代时选择一个默认航次。",
+            "description": "可选航次年月，格式 yyyy-MM，例如 2025-11；省略时仅打开浮层。",
         },
         "elementType": {
             "type": "string",

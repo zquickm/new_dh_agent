@@ -554,7 +554,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                     "CurrentServerTime",
                     "rag_search",
                     "database_query",
-                    "observation_service",
+                    "spatial_query_service",
                     "map_action",
                     "dm_duanmian_analysis",
                 )
@@ -564,7 +564,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 "CurrentServerTime": "当前服务器时间",
                 "rag_search": "东溟知识库检索",
                 "database_query": "数据库查询",
-                "observation_service": "观测分析",
+                "spatial_query_service": "通用空间查询服务",
                 "map_action": "地图操作",
                 "dm_duanmian_analysis": "断面专题分析",
             },
@@ -1001,14 +1001,14 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 yield AgentEvent(
                     type="tool_started",
                     round_number=1,
-                    tool_name="observation_service",
+                    tool_name="spatial_query_service",
                     tool_call_id="call-observation",
                 )
                 yield AgentEvent(
                     type="tool_finished",
-                    content="观测工具参数无效：query_type 不能为空",
+                    content="通用空间查询服务参数无效：query_type 不能为空",
                     round_number=1,
-                    tool_name="observation_service",
+                    tool_name="spatial_query_service",
                     tool_call_id="call-observation",
                     success=False,
                 )
@@ -1037,7 +1037,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             failed_process["data"]["summary"],
-            "观测工具参数无效：query_type 不能为空",
+            "通用空间查询服务参数无效：query_type 不能为空",
         )
 
     async def test_answer_agent_streams_citation_before_completion(self):
@@ -1143,7 +1143,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                         "action_type": "MARKER_ADD",
                         "payload": {"layer_id": "observation-stations", "markers": []},
                     },
-                    tool_name="observation_service",
+                    tool_name="spatial_query_service",
                     tool_call_id="call-map",
                 )
                 yield AgentEvent(type="answer_delta", content="已显示站点")

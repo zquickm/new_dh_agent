@@ -185,7 +185,6 @@ class AgentLoop:
         latest_usage: dict[str, Any] = {}
         cumulative_tool_results_truncated = 0
         citation_registry = CitationRegistry(rag_buffer_sources)
-        observation_map_rendered = False
         has_streamed_content = False
         tool_sequence = 0
         model_messages: list[dict[str, Any]] = []
@@ -502,13 +501,6 @@ class AgentLoop:
                         retrieval_data, observation = rag_result
                     else:
                         retrieval_data = None
-                    if name == "observation_service" and client_events:
-                        observation_map_rendered = True
-                    elif name == "map_action" and observation_map_rendered and any(
-                        event.get("action_type") == "FLY_TO"
-                        for event in client_events
-                    ):
-                        client_events = ()
                     semantic_error = _semantic_tool_error(name, observation)
                     if semantic_error is None:
                         success = True
@@ -566,18 +558,16 @@ class AgentLoop:
                     )
                     if name == "load_skill" and isinstance(exc, PermissionError):
                         observation = "该 Skill 在本次任务中不可用，请使用当前可用列表中的 Skill；业务工具仍可正常使用。"
-                    elif name == "observation_service":
+                    elif name == "spatial_query_service":
                         arguments = tool_call["args"]
                         operation = arguments.get("operation") if isinstance(arguments, dict) else None
-                        service = "通用空间查询" if operation in (
-                            "list_spatial_elements", "get_spatial_element_detail", "query_spatial_element",
-                        ) else "观测站服务"
+                        service = "通用空间查询服务"
                         context = f"（operation={operation}）" if operation else ""
                         detail = str(exc).strip() or type(exc).__name__
                         if isinstance(exc, ValueError):
                             observation = (
                                 f"{service}参数或返回结果无效{context}：{detail}。"
-                                "请核对 observation_service schema 中的 operation、参数及服务返回结果；"
+                                "请核对 spatial_query_service schema 中的 operation、参数及服务返回结果；"
                                 "如果现有操作无法完成问题，应明确说明能力不足，不得编造新的 operation。"
                             )
                         else:

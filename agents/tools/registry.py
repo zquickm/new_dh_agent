@@ -35,11 +35,11 @@ from agents.tools.load_skill import (
     TOOL_PARAMETERS as LOAD_SKILL_TOOL_PARAMETERS,
     load_skill,
 )
-from agents.tools.observation_service import (
-    TOOL_DESCRIPTION as OBSERVATION_TOOL_DESCRIPTION,
-    TOOL_NAME as OBSERVATION_TOOL_NAME,
-    TOOL_PARAMETERS as OBSERVATION_TOOL_PARAMETERS,
-    ObservationServiceTool,
+from agents.tools.spatial_query_service import (
+    TOOL_DESCRIPTION as SPATIAL_QUERY_TOOL_DESCRIPTION,
+    TOOL_NAME as SPATIAL_QUERY_TOOL_NAME,
+    TOOL_PARAMETERS as SPATIAL_QUERY_TOOL_PARAMETERS,
+    SpatialQueryServiceTool,
 )
 from agents.tools.rag_search import (
     TOOL_DESCRIPTION as RAG_TOOL_DESCRIPTION,
@@ -74,7 +74,7 @@ def build_tool_executor(
     )
     rag_tool = RagSearchTool()
     database_tool = DatabaseQueryTool()
-    observation_tool = ObservationServiceTool()
+    spatial_query_tool = SpatialQueryServiceTool()
     executor.register(
         RAG_TOOL_NAME,
         RAG_TOOL_DESCRIPTION,
@@ -88,10 +88,10 @@ def build_tool_executor(
         build_database_tool_parameters(),
     )
     executor.register(
-        OBSERVATION_TOOL_NAME,
-        OBSERVATION_TOOL_DESCRIPTION,
-        observation_tool.execute,
-        OBSERVATION_TOOL_PARAMETERS,
+        SPATIAL_QUERY_TOOL_NAME,
+        SPATIAL_QUERY_TOOL_DESCRIPTION,
+        spatial_query_tool.execute,
+        SPATIAL_QUERY_TOOL_PARAMETERS,
     )
     executor.register(
         MAP_ACTION_TOOL_NAME,
@@ -107,5 +107,5 @@ def build_tool_executor(
     )
     executor.register_closer(rag_tool.close)
     executor.register_closer(database_tool.close)
-    executor.register_closer(observation_tool.close)
+    executor.register_closer(spatial_query_tool.close)
     return executor

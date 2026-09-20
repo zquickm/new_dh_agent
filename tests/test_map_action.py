@@ -1,6 +1,6 @@
 import unittest
 
-from agents.tools.map_action import TOOL_DESCRIPTION, TOOL_PARAMETERS, execute_map_action
+from agents.tools.map_action import TOOL_PARAMETERS, execute_map_action
 
 
 class MapActionToolTest(unittest.TestCase):
@@ -20,12 +20,6 @@ class MapActionToolTest(unittest.TestCase):
         ):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 execute_map_action("GEOJSON_ADD", {**payload, **invalid})
-
-    def test_description_forbids_duplicate_station_rendering(self):
-        self.assertIn("查询、输出或显示业务观测站点时禁止调用本工具", TOOL_DESCRIPTION)
-        self.assertIn("断面测点地图展示除外", TOOL_DESCRIPTION)
-        self.assertIn("observation_service 的站点查询和单站分析", TOOL_DESCRIPTION)
-        self.assertIn("不得再调用本工具重复清图、标点", TOOL_DESCRIPTION)
 
     def test_fly_to_clears_old_layers_adds_marker_and_moves_the_view(self):
         output = execute_map_action(

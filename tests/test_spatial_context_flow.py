@@ -6,13 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from agents.agent_loop import AgentLoop
 from agents.tools.executor import ToolExecutor
 from agents.tools.map_action import execute_map_action
-from agents.tools.observation_service import ObservationServiceTool
+from agents.tools.spatial_query_service import SpatialQueryServiceTool
 from repositories.mysql_conversation_repository import MySQLConversationRepository
 from schemas.chat import AgentRequest, FrontendContext
 from services.chat_service import ChatService
 from tests.fakes.memory_conversation_repository import MemoryConversationRepository
 from tests.test_agent_loop import FakeLlm
-from tests.test_observation_service import FakeSpatialClient
 
 
 def call(name, **args):
@@ -74,29 +73,50 @@ class SpatialContextFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("selected_area" not in item.content for item in detail.messages))
         self.assertTrue(all("当前空间范围" not in item.content for item in detail.messages))
 
-    async def test_radar_filter_and_single_station_auto_flight_preserve_area(self):
-        client = FakeSpatialClient(stations=[
+    async def test_queries_and_explicit_map_actions_preserve_area(self):
+        stations = [
             {"tzno": "R001", "name": "雷达站", "type": "radar", "lon": 122.1, "lat": 30.2},
             {"tzno": "B001", "name": "浮标站", "type": "buoy", "lon": 122.2, "lat": 30.3},
-        ])
-        self.tools.register("observation_service", "观测查询", ObservationServiceTool(client).execute)
-        geometry = {"query_type": "circle", "center": [122.1, 30.2], "radius": 50000}
-        radar_query = call("observation_service", operation="search_stations", station_types=["radar"], **geometry)
+        ]
+        def result(items):
+            return {"type": "FeatureCollection", "total": len(items), "returned": len(items),
+                    "features": [{"type": "Feature", "id": item["tzno"], "properties": item,
+                                  "geometry": {"type": "Point", "coordinates": [item["lon"], item["lat"]]}}
+                                 for item in items]}
+        client = AsyncMock()
+        client.query_spatial_element.side_effect = [result(stations), *[result(stations[:1])] * 3]
+        self.tools.register("spatial_query_service", "通用空间查询服务", SpatialQueryServiceTool(client).execute)
+        geometry = {"relation": "dwithin", "point": {"lon": 122.1, "lat": 30.2}, "distance": 50000}
+        area_query = {"element": "obs_station", "mode": "spatial", "spatial": geometry, "includeGeometry": True}
+        radar_filter = [{"field": "type", "operator": "=", "value": "radar"}]
+        filtered_query = {**area_query, "conditions": radar_filter}
+        detail_query = {**area_query, "conditions": [{"field": "tzno", "operator": "=", "value": "R001"}]}
+        radar_query = call("spatial_query_service", operation="query_spatial_element", query=filtered_query)
+        def draw(stations):
+            return call("map_action", action_type="MARKER_ADD", payload={
+                "layer_id": "observation-stations", "fit_bounds": False,
+                "markers": [{"id": station["tzno"], "name": station["name"],
+                             "coordinates": [station["lon"], station["lat"]]} for station in stations],
+            })
         llm = self.use_llm([
-            call("observation_service", operation="search_stations", **geometry), (["区域内有雷达站和浮标站"], []),
-            radar_query, (["有 R001 雷达站"], []),
-            call("observation_service", operation="station_detail", tzno="R001"), (["雷达站正常"], []),
-            radar_query, (["雷达站位于原选区"], []),
+            call("spatial_query_service", operation="query_spatial_element", query=area_query),
+            draw(stations), (["区域内有雷达站和浮标站"], []),
+            radar_query, draw(stations[:1]), (["有 R001 雷达站"], []),
+            call("spatial_query_service", operation="query_spatial_element", query=detail_query),
+            call("map_action", action_type="FLY_TO", payload={"center": [122.1, 30.2], "zoom": 12}),
+            (["雷达站正常"], []),
+            radar_query, draw(stations[:1]), (["雷达站位于原选区"], []),
         ])
         await self.send("有哪些观测站", map_context=self.context.model_dump())
         radar_events = await self.send("具体有哪些雷达站")
         station_events = await self.send("这个站点的详情")
         await self.send("其中雷达站的位置有哪些")
-        for index in (0, 2, 6):
+        for index in (0, 3, 9):
             question = llm.calls[index][0][-1]["content"]
             self.assertIn('"center":[122.1,30.2]', question)
             self.assertIn('"radius":50000.0', question)
-        self.assertEqual([args for name, args in client.calls if name == "query_stations"], [geometry] * 3)
+        self.assertEqual([item.args[0] for item in client.query_spatial_element.call_args_list],
+                         [area_query, filtered_query, detail_query, filtered_query])
         markers = next(event["data"]["payload"]["markers"] for event in radar_events
                        if event["event"] == "map_action" and event["data"]["action_type"] == "MARKER_ADD")
         self.assertEqual([marker["id"] for marker in markers], ["R001"])

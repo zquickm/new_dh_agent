@@ -2,7 +2,7 @@ import json
 import unittest
 from copy import deepcopy
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from aiohttp import web
 
@@ -10,8 +10,9 @@ from agents.agent_loop import AgentLoop
 from agents.skills import SkillCatalog
 from agents.tools.executor import ToolExecutor
 from agents.tools.load_skill import load_skill
-from agents.tools.observation_service import (
-    TOOL_DESCRIPTION, TOOL_NAME, TOOL_PARAMETERS, ObservationServiceTool,
+from agents.tools.map_action import execute_map_action
+from agents.tools.spatial_query_service import (
+    TOOL_DESCRIPTION, TOOL_NAME, TOOL_PARAMETERS, SpatialQueryServiceTool,
 )
 from tests.test_agent_loop import FakeLlm
 from schemas.chat import FrontendContext
@@ -72,9 +73,10 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
             base_url=f"http://127.0.0.1:{port}", api_key="test-key",
             timeout=2, connect_timeout=1, verify_ssl=True,
         )
-        self.tool = ObservationServiceTool(self.client)
+        self.tool = SpatialQueryServiceTool(self.client)
         self.executor = ToolExecutor()
         self.executor.register(TOOL_NAME, TOOL_DESCRIPTION, self.tool.execute, TOOL_PARAMETERS)
+        self.executor.register("map_action", "地图操作", execute_map_action)
 
     async def asyncTearDown(self):
         await self.tool.close()
@@ -105,6 +107,53 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {**self.results["query"], "operation": "query_spatial_element"})
         self.assertEqual(events, ())
 
+    async def test_station_queries_use_catalog_fields_without_local_rewriting(self):
+        self.results["list"] = [{"dataKey": "obs_station", "dataName": "观测站点"}]
+        self.results["detail"] = {
+            "dataKey": "obs_station", "idColumn": "tzno", "maxQueryLimit": 100,
+            "fields": [
+                {"name": "tzno", "type": "string", "operatorWhitelist": ["="]},
+                {"name": "name", "type": "string", "operatorWhitelist": ["=", "LIKE"]},
+                {"name": "station_kind", "type": "string", "enums": ["HF_RADAR"],
+                 "enumLabels": ["雷达站"], "operatorWhitelist": ["="]},
+            ],
+        }
+        # Preserve the service's identifiers, classifications and page totals,
+        # including records without geometry and names with business suffixes.
+        self.results["query"] = {
+            "type": "FeatureCollection", "total": 31, "returned": 2,
+            "features": [
+                {"type": "Feature", "id": "R001", "geometry": None,
+                 "properties": {"tzno": "R001", "name": "衢山平台", "station_kind": "HF_RADAR"}},
+                {"type": "Feature", "id": "R001",
+                 "geometry": {"type": "Point", "coordinates": [122.2, 30.3]},
+                 "properties": {"tzno": "R001", "name": "衢山浮标", "station_kind": "HF_RADAR"}},
+            ],
+        }
+        listing = await self.tool.execute("list_spatial_elements")
+        element = listing.content["elements"][0]["dataKey"]
+        detail = await self.tool.execute("get_spatial_element_detail", dataKey=element)
+        kind = detail.content["fields"][2]
+        queries = [
+            {"element": element, "mode": "spatial", "includeGeometry": True,
+             "spatial": {"relation": "dwithin", "point": {"lon": 122.2, "lat": 30.3}, "distance": 10000},
+             "conditions": [{"field": kind["name"], "operator": "=", "value": kind["enums"][0]}],
+             "limit": 2, "offset": 20},
+            {"element": element, "mode": "attribute",
+             "conditions": [{"field": "name", "operator": "=", "value": "衢山平台"}]},
+            {"element": element, "mode": "attribute", "includeGeometry": True,
+             "conditions": [{"field": detail.content["idColumn"], "operator": "=", "value": "R001"}]},
+        ]
+        for query in queries:
+            with self.subTest(query=query):
+                before = len(self.requests)
+                result = await self.tool.execute("query_spatial_element", query=query)
+                self.assertEqual(len(self.requests), before + 1)
+                self.assertEqual(self.requests[-1]["path"], "/api/spatial/v2/elements/query")
+                self.assertEqual(self.requests[-1]["payload"], query)
+                self.assertEqual(result.content, {"operation": "query_spatial_element", **self.results["query"]})
+                self.assertEqual(result.client_events, ())
+
     async def test_spatial_inputs_are_forwarded_without_changing_scope(self):
         polygon = {"type": "Polygon", "coordinates": [[[122, 30], [123, 30], [123, 31], [122, 30]]]}
         spatial_inputs = [
@@ -118,7 +167,7 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
         for spatial in spatial_inputs:
             with self.subTest(relation=spatial["relation"]):
                 query = {"element": "test_point", "mode": "spatial", "spatial": spatial}
-                await self.tool.execute("query_spatial_element", query=query, render_map=False)
+                await self.tool.execute("query_spatial_element", query=query)
                 self.assertEqual(self.requests[-1]["payload"], query)
 
     async def test_invalid_queries_fail_before_http_without_dropping_filters(self):
@@ -213,12 +262,12 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
         self.executor.register("load_skill", "加载能力", lambda name: load_skill(catalog, name))
         self.results["list"] = [
             {"dataKey": "obs_station", "dataName": "观测站点"},
-            {"dataKey": "test_point", "dataName": "测试点"},
+            {"dataKey": "dm_duanmian", "dataName": "断面测点"},
             {"dataKey": "test_area", "dataName": "测试面要素"},
         ]
         self.element_results = {
             "obs_station": {"type": "FeatureCollection", "total": 0, "returned": 0, "features": []},
-            "test_point": {**self.results["query"], "total": 1},
+            "dm_duanmian": {**self.results["query"], "total": 1},
             "test_area": {
                 "type": "FeatureCollection", "total": 1, "returned": 1,
                 "features": [{"type": "Feature", "id": 1, "geometry": None, "properties": {"name": "区域甲"}}],
@@ -240,14 +289,20 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
                 query_calls = [{
                     "id": item["dataKey"], "name": TOOL_NAME,
                     "args": {"operation": "query_spatial_element", "query": {
-                        "element": item["dataKey"], "mode": "spatial", "spatial": spatial,
+                        "element": item["dataKey"], "mode": "spatial", "spatial": spatial, "includeGeometry": True,
                     }},
                 } for item in self.results["list"]]
                 llm = FakeLlm([
                     ([], [{"id": "skill", "name": "load_skill", "args": {"name": "空间联动"}}]),
                     ([], [{"id": "list", "name": TOOL_NAME, "args": {"operation": "list_spatial_elements"}}]),
                     ([], query_calls),
-                    (["测试点1个；测试面要素1个缺少几何；观测站点0个。"], []),
+                    ([], [{"id": "map-points", "name": "map_action", "args": {
+                        "action_type": "MARKER_ADD", "payload": {
+                            "layer_id": "spatial-element:dm_duanmian", "fit_bounds": False,
+                            "markers": [{"id": "E1001", "name": "E1001", "coordinates": [122.5, 31.3]}],
+                        },
+                    }}]),
+                    (["断面测点1个；测试面要素1个缺少几何；观测站点0个。"], []),
                 ])
                 agent = AgentLoop(llm, self.executor, skills=catalog)
                 agent.max_rounds = 5
@@ -258,138 +313,81 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
                 question = next(m["content"] for m in llm.calls[0][0] if m["role"] == "user")
                 selected_area = json.loads(next(line for line in question.splitlines() if line.startswith('{"selected_area":')))["selected_area"]
                 self.assertEqual(selected_area["spatial"], spatial)
-                self.assertIn("不得仅查询观测站", question)
-                self.assertEqual(len(llm.calls), 4)
+                self.assertIn("区域总览应覆盖可查询的各类要素", question)
+                self.assertNotIn("不纳入通用空间查询", question)
+                self.assertEqual(len(llm.calls), 5)
                 self.assertEqual(self.requests[0]["path"], "/api/spatial/v2/elements/list")
                 self.assertEqual([r["payload"] for r in self.requests if r["method"] == "POST"], [
-                    {**c["args"]["query"], "includeGeometry": True, "offset": 0, "limit": 20, "orderBy": "code"}
+                    c["args"]["query"]
                     for c in query_calls
                 ])
                 finished = [event for event in events if event.type == "tool_finished"]
-                self.assertEqual(len(finished), 5)
+                self.assertEqual(len(finished), 6)
                 self.assertTrue(all(event.success for event in finished))
-                for event, item in zip(finished[-3:], self.results["list"]):
+                self.assertEqual(finished[-1].tool_name, "map_action")
+                for event, item in zip(finished[2:5], self.results["list"]):
                     content = json.loads(event.content)
-                    content.pop("map_result")
                     self.assertEqual(content, {
                         **self.element_results[item["dataKey"]], "operation": "query_spatial_element",
                     })
                 actions = [event.data for event in events if event.type == "map_action"]
                 self.assertEqual([action["action_type"] for action in actions], [
-                    "CLEAR", "CLEAR", "MARKER_ADD", "CLEAR",
+                    "MARKER_ADD",
                 ])
-                self.assertEqual(actions[2]["payload"]["layer_id"], "spatial-element:test_point")
-                self.assertEqual(actions[2]["payload"]["markers"][0]["coordinates"], [122.5, 31.3])
+                self.assertEqual(actions[0]["payload"]["layer_id"], "spatial-element:dm_duanmian")
+                self.assertEqual(actions[0]["payload"]["markers"][0]["coordinates"], [122.5, 31.3])
                 self.assertTrue(all("clear_selection" not in action for action in actions))
+                self.assertTrue(all(event.tool_name == "map_action" for event in events if event.type == "map_action"))
 
-    async def test_map_fetches_all_pages_preserving_multipart_geometry_and_scope(self):
-        geometries = [
-            {"type": "Point", "coordinates": [122, 30]},
-            {"type": "LineString", "coordinates": [[122, 30], [123, 31]]},
-            {"type": "MultiPolygon", "coordinates": [[
-                [[122, 30], [123, 30], [123, 31], [122, 30]],
-                [[122.5, 30.2], [122.8, 30.2], [122.8, 30.3], [122.5, 30.2]],
-            ]]},
-            None,
+    async def test_queries_return_one_page_with_geometry_for_explicit_map_action(self):
+        features = [
+            {"type": "Feature", "id": "line", "properties": {"name": "航线"},
+             "geometry": {"type": "LineString", "coordinates": [[122, 30], [123, 31]]}},
+            {"type": "Feature", "id": "area", "properties": {},
+             "geometry": {"type": "Polygon", "coordinates": [[[122, 30], [123, 30], [123, 31], [122, 30]]]}},
+            {"type": "Feature", "id": "missing", "properties": {}, "geometry": None},
         ]
-        features = [{"type": "Feature", "id": i, "geometry": geometry, "properties": {"name": str(i)}}
-                    for i, geometry in enumerate(geometries)]
-        self.element_results = {"test_point": {"type": "FeatureCollection", "features": features, "total": 4}}
-        self.results["detail"]["maxQueryLimit"] = 2
-        query = {
-            "element": "test_point", "mode": "spatial", "limit": 20, "includeGeometry": False,
-            "spatial": {"relation": "bbox", "bbox": {"west": 122, "south": 30, "east": 123, "north": 31}},
-            "conditions": [{"field": "status", "operator": "=", "value": "运行"}],
-        }
+        self.element_results = {"test_area": {"type": "FeatureCollection", "features": features, "total": 3}}
+        query = {"element": "test_area", "mode": "spatial", "includeGeometry": True, "limit": 2,
+                 "spatial": {"relation": "dwithin", "point": {"lon": 122, "lat": 30}, "distance": 1000}}
         original = deepcopy(query)
-        result = await self.tool.execute("query_spatial_element", query=query)
+        first = await self.tool.execute("query_spatial_element", query=query)
         self.assertEqual(query, original)
-        self.assertEqual([r["payload"] for r in self.requests if r["method"] == "POST"], [
-            {**query, "includeGeometry": True, "limit": 2, "offset": offset, "orderBy": "code"}
-            for offset in (0, 2)
-        ])
-        self.assertEqual(result.content["returned"], 2)
-        self.assertEqual(result.content["map_result"], {
-            "layer_id": "spatial-element:test_point",
-            "geometry_layer_id": "spatial-element:test_point:shapes", "fetched": 4, "mapped": 3,
-            "missing_geometry": 1, "complete": False, "status": "actions_sent",
-            "render_confirmed": False,
-            "message": "已查询 4 条，已为 3 条生成绘图指令，1 条缺少几何未绘制；未确认前端渲染结果。",
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(self.requests[0]["payload"], query)
+        self.assertEqual(first.content["features"], features[:2])
+        self.assertEqual(first.content["returned"], 2)
+        self.assertEqual(first.content["total"], 3)
+        self.assertNotIn("map_result", first.content)
+        self.assertEqual(first.client_events, ())
+        second = await self.tool.execute("query_spatial_element", query={**query, "offset": 2})
+        self.assertEqual(second.content["features"], features[2:])
+        self.assertEqual(second.client_events, ())
+        self.assertEqual(self.requests[-1]["payload"], {**query, "offset": 2})
+        _, actions = await self.executor.execute_with_events("map_action", {
+            "action_type": "GEOJSON_ADD", "payload": {
+                "layer_id": "test_area", "fit_bounds": False,
+                "geojson": {"type": "FeatureCollection", "features": first.content["features"]},
+            },
         })
-        shapes = [e for e in result.client_events if e["action_type"] == "GEOJSON_ADD"]
-        self.assertEqual([e["payload"]["replace"] for e in shapes], [True, False])
-        self.assertEqual([f for e in shapes for f in e["payload"]["geojson"]["features"]], features[1:3])
-        self.assertEqual(result.client_events[1]["payload"]["markers"][0]["coordinates"], [122, 30])
-        self.assertTrue(all(not e["payload"].get("fit_bounds", False) for e in result.client_events))
+        self.assertEqual(actions[0]["action_type"], "GEOJSON_ADD")
+        self.assertEqual(actions[0]["payload"]["geojson"]["features"], features[:2])
 
-    async def test_map_rejects_incomplete_or_duplicate_pages_and_nonzero_offset(self):
-        page = deepcopy(self.results["query"])
-        page["total"] = 2
-        failures = [
-            SpatialServiceError("第二页请求失败"),
-            {**page, "features": [], "returned": 0},
-            {**page, "total": 3},
-            {**page, "returned": 2},
-            page,
-        ]
-        for second in failures:
-            with self.subTest(second=second), patch.object(self.client, "query_spatial_element", AsyncMock(side_effect=[page, second])):
-                with self.assertRaises((ValueError, SpatialServiceError)):
-                    await self.tool.execute("query_spatial_element", query={"element": "test_point"}, render_map=True)
-        with self.assertRaisesRegex(ValueError, "offset=0"):
-            await self.tool.execute("query_spatial_element", query={"element": "test_point", "offset": 1}, render_map=True)
-
-    async def test_empty_map_result_replaces_old_layer_without_clearing_selection(self):
-        self.results["query"] = {"type": "FeatureCollection", "features": [], "total": 0, "returned": 0}
-        result = await self.tool.execute("query_spatial_element", query={"element": "test_point"}, render_map=True)
-        self.assertTrue(result.content["map_result"]["complete"])
-        self.assertFalse(result.content["map_result"]["render_confirmed"])
-        self.assertEqual(len(result.client_events), 1)
-        self.assertEqual(result.client_events[0]["action_type"], "CLEAR")
-        self.assertEqual(result.client_events[0]["payload"]["layer_ids"], [
-            "spatial-element:test_point", "spatial-element:test_point:shapes",
-        ])
-        self.assertNotIn("clear_selection", result.client_events[0])
-
-    async def test_station_points_use_existing_marker_layer_and_all_pages(self):
-        features = [{
-            "type": "Feature", "id": f"internal-{i}",
-            "geometry": {"type": "Point", "coordinates": [122, 30]},
-            "properties": {"tzno": str(i), "name": f"站点{i}", "station_type": "buoy"},
-        } for i in range(41)]
-        self.element_results = {"obs_station": {
-            "type": "FeatureCollection", "features": features, "total": 41,
-        }}
-        result = await self.tool.execute("query_spatial_element", query={"element": "obs_station"}, render_map=True)
-        self.assertEqual([e["action_type"] for e in result.client_events], ["CLEAR", "MARKER_ADD"])
-        payload = result.client_events[1]["payload"]
-        self.assertEqual(payload["layer_id"], "observation-stations")
-        self.assertEqual(len(payload["markers"]), 41)
-        self.assertEqual(payload["markers"][0]["id"], "0")
-        self.assertEqual(payload["markers"][0]["type"], "buoy")
-        self.assertEqual(result.content["returned"], 20)
-        self.assertTrue(result.content["map_result"]["complete"])
-        self.assertEqual(result.content["map_result"]["mapped"], 41)
-        self.assertFalse(result.content["map_result"]["render_confirmed"])
-
-    async def test_internal_id_column_is_not_injected_as_public_sort_field(self):
-        self.results["detail"]["idColumn"] = "internal_id"
-        self.results["query"]["total"] = 1
-        await self.tool.execute("query_spatial_element", query={"element": "test_point"}, render_map=True)
-        self.assertNotIn("orderBy", self.requests[-1]["payload"])
-
-    async def test_transect_is_excluded_from_catalog_and_rejected_before_http(self):
+    async def test_transect_catalog_detail_and_queries_reach_spatial_service(self):
         self.results["list"].append({"dataKey": "dm_duanmian", "dataName": "断面测点"})
         result = await self.tool.execute("list_spatial_elements")
-        self.assertEqual([item["dataKey"] for item in result.content["elements"]], ["test_point"])
-        self.requests.clear()
-        with self.assertRaisesRegex(ValueError, "database_query"):
-            await self.tool.execute("get_spatial_element_detail", dataKey="dm_duanmian")
-        for render_map in (True, False):
-            for mode in ("attribute", "spatial"):
+        self.assertEqual(result.content["elements"], self.results["list"])
+        self.results["detail"]["dataKey"] = "dm_duanmian"
+        detail = await self.tool.execute("get_spatial_element_detail", dataKey="dm_duanmian")
+        self.assertEqual(detail.content["dataKey"], "dm_duanmian")
+        self.assertEqual(self.requests[-1]["params"], {"dataKey": "dm_duanmian"})
+        self.results["query"]["total"] = 1
+        for mode in ("attribute", "spatial"):
+            with self.subTest(mode=mode):
                 query = {"element": "dm_duanmian", "mode": mode}
                 if mode == "spatial":
                     query["spatial"] = {"relation": "dwithin", "point": {"lon": 122, "lat": 30}, "distance": 1000}
-                with self.assertRaisesRegex(ValueError, "database_query"):
-                    await self.tool.execute("query_spatial_element", query=query, render_map=render_map)
-        self.assertEqual(self.requests, [])
+                result = await self.tool.execute("query_spatial_element", query=query)
+                self.assertEqual(result.content["features"], self.results["query"]["features"])
+                self.assertEqual(self.requests[-1]["payload"], query)
+                self.assertEqual(result.client_events, ())
