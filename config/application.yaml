@@ -98,7 +98,7 @@ tools:
         top_n: 10
       - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
         name: "海洋图书与文献"
-        recall_top_n: 30
+        recall_top_n: 20
         top_n: 4
     dept_ids:
       - "c3d03091-026c-413a-974e-081a4bbfe8c0"
