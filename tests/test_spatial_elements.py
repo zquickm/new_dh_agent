@@ -165,15 +165,31 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
               for relation in ("within", "contains", "touches", "overlaps", "disjoint")],
         ]
         for spatial in spatial_inputs:
-            with self.subTest(relation=spatial["relation"]):
-                query = {"element": "test_point", "mode": "spatial", "spatial": spatial}
-                await self.tool.execute("query_spatial_element", query=query)
-                self.assertEqual(self.requests[-1]["payload"], query)
+            for explicit_mode in (True, False):
+                with self.subTest(relation=spatial["relation"], explicit_mode=explicit_mode):
+                    query = {
+                        "element": "test_point", "spatial": spatial,
+                        "fields": ["code"], "includeGeometry": True,
+                        "conditions": [{"field": "code", "operator": "=", "value": "E1001"}],
+                        "orderBy": "code", "limit": 10, "offset": 20,
+                    }
+                    if explicit_mode:
+                        query["mode"] = "spatial"
+                    original = deepcopy(query)
+                    before = len(self.requests)
+                    result = await self.tool.execute("query_spatial_element", query=query)
+                    self.assertEqual(len(self.requests), before + 1)
+                    self.assertEqual(self.requests[-1]["payload"], {**original, "mode": "spatial"})
+                    self.assertEqual(query, original)
+                    self.assertEqual(result.client_events, ())
 
     async def test_invalid_queries_fail_before_http_without_dropping_filters(self):
         invalid = [
             {}, {"element": " "}, {"element": "test_point", "mode": "spatial"},
             {"mode": "attribute", "spatial": {"relation": "bbox"}},
+            *[{"mode": mode, "spatial": {
+                "relation": "dwithin", "point": {"lon": 122, "lat": 30}, "distance": 5000,
+            }} for mode in ("attribute", None, "invalid")],
             {"limit": 0}, {"limit": True}, {"offset": -1}, {"geometryFormat": "wkt"},
             {"conditionLogic": "XOR"}, {"query_type": "circle"}, {"includeGeometry": "true"},
             {"conditions": [{"field": "code", "operator": "IN", "value": ["E1001"]}]},

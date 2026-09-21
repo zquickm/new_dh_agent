@@ -30,13 +30,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "get_spatial_element_detail",
                 "query_spatial_element",
             ],
-            "description": (
-                "通用空间查询或观测数据查询。station_status 需要 tznos；"
-                "observation_summary 需要 tzno；observation_trend 需要 tzno、element；"
-                "observation_range 需要 tzno、data_type、start_time、end_time。"
-                "get_spatial_element_detail 需要 dataKey；query_spatial_element 需要 query；"
-                "list_spatial_elements 不需要其他参数。"
-            ),
+            "description": "通用空间或观测数据查询操作；list_spatial_elements 无需其他参数。",
         },
         "dataKey": {
             "type": "string",
@@ -52,22 +46,14 @@ TOOL_PARAMETERS: dict[str, Any] = {
         },
         "tznos": {
             "type": "array",
-            "items": {
-                "type": "string",
-                "description": "一个观测站的唯一站号。",
-            },
+            "items": {"type": "string"},
             "minItems": 1,
             "maxItems": 50,
-            "description": (
-                "station_status 必填的观测站号列表，一次可查询 1 到 50 个站点。"
-            ),
+            "description": "station_status 的站号列表。",
         },
         "tzno": {
             "type": "string",
-            "description": (
-                "目标观测站的唯一站号，observation_summary、"
-                "observation_trend 和 observation_range 必填。"
-            ),
+            "description": "观测数据查询的目标站号。",
         },
         "element": {
             "type": "string",
@@ -77,9 +63,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "type": "integer",
             "minimum": 1,
             "default": 24,
-            "description": (
-                "observation_trend 向前查询的小时数，必须大于 0；省略时默认 24。"
-            ),
+            "description": "observation_trend 向前查询的小时数。",
         },
         "data_type": {
             "type": "string",
@@ -109,20 +93,14 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "type": "string",
             "enum": ["asc", "desc"],
             "default": "asc",
-            "description": (
-                "observation_range 的时间排序方向：asc 从早到晚，desc 从晚到早；"
-                "省略时默认 asc。"
-            ),
+            "description": "观测记录时间排序：asc 从早到晚，desc 从晚到早。",
         },
         "max_records": {
             "type": "integer",
             "minimum": 1,
             "maximum": 5000,
             "default": 2000,
-            "description": (
-                "observation_range 最多返回的观测记录数，范围 1 到 5000；"
-                "省略时默认 2000。"
-            ),
+            "description": "observation_range 最多返回的观测记录数。",
         },
     },
     "required": ["operation"],

@@ -74,8 +74,18 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("database_query", skill.instructions)
         self.assertIn("spatial_query_service", skill.instructions)
         self.assertIn("dm_duanmian_analysis", skill.instructions)
-        self.assertIn("默认调用 `dm_duanmian_analysis`", skill.instructions)
-        self.assertIn("仅查询位置、数量、基础属性或文档资料时不打开", skill.instructions)
+        self.assertIn("## 路由边界", skill.instructions)
+        self.assertIn(
+            "调查断面及其站位、辅助点的位置、属性、历史数据、跨期统计和描述性评价，统一使用 `database_query`",
+            skill.instructions,
+        )
+        self.assertIn("不调用 `spatial_query_service` 的 `dm_duanmian` 详情或查询操作", skill.instructions)
+        self.assertIn("地图选区中的业务观测站，以及明确站名的状态、详情、最新观测、趋势或时间区间数据，使用 `spatial_query_service`。", skill.instructions)
+        self.assertIn("不转调 `spatial_query_service` 或放宽为全库查询", skill.instructions)
+        self.assertNotIn("observation_service", skill.instructions)
+        self.assertIn("仅要求专题出图或打开分析浮层时使用 `dm_duanmian_analysis`", skill.instructions)
+        self.assertIn("向用户综合展示全面的信息", skill.instructions)
+        self.assertIn("再用`map_action`标出E1断面站点", skill.instructions)
         spatial = catalog.load("空间联动")
         self.assertIn("按返回的 `dataKey` 逐类调用", spatial.instructions)
         self.assertIn("再显式调用 `map_action`", spatial.instructions)

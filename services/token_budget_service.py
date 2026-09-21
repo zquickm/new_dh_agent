@@ -178,7 +178,7 @@ class TokenBudgetService:
     ) -> str:
         original = str(messages[tool_index].get("content") or "")
         low, high = 0, len(original)
-        best = _TRUNCATED_TOOL_SUFFIX.lstrip()
+        best = _TRUNCATED_TOOL_SUFFIX
         while low <= high:
             middle = (low + high) // 2
             candidate = original[:middle] + _TRUNCATED_TOOL_SUFFIX

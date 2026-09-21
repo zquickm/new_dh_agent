@@ -77,10 +77,10 @@ class SpatialCondition(QueryModel):
 class SpatialElementQuery(QueryModel):
     element: str = Field(min_length=1, description="目录返回的 dataKey。")
     mode: Literal["attribute", "spatial"] = Field(
-        default="attribute", description="attribute 仅属性查询；spatial 为空间与属性联合查询。"
+        default="attribute", description="attribute 仅属性查询；spatial 为空间与属性联合查询。省略时，有 spatial 自动使用 spatial，否则使用 attribute。"
     )
     fields: list[str] = Field(
-        default_factory=list, description="返回字段名，必须来自要素详情；空数组使用服务默认字段。"
+        default_factory=list, description="返回字段名，必须来自要素详情；区域分布仅选标识、名称及必要分类字段，详情查询按需求选择；空数组使用服务默认字段。"
     )
     conditions: list[AttributeCondition] = Field(
         default_factory=list, description="属性条件数组，字段、类型和枚举以要素详情为准。"
@@ -92,9 +92,7 @@ class SpatialElementQuery(QueryModel):
         default=None, description="mode=spatial 时必填的空间条件。"
     )
     includeGeometry: bool = Field(default=False, description="是否返回 GeoJSON 几何；后续需要地图展示时设为 true。")
-    geometryFormat: Literal["geojson"] = Field(
-        default="geojson", description="当前服务仅支持 geojson，wkt 尚未实现。"
-    )
+    geometryFormat: Literal["geojson"] = "geojson"
     orderBy: Optional[str] = Field(default=None, min_length=1, description="排序字段，须来自要素详情。")
     orderDirection: Literal["asc", "desc"] = Field(default="asc", description="排序方向。")
     limit: int = Field(default=20, ge=1, description="每页条数上限，不超过要素 maxQueryLimit；每次调用只返回一页。")
@@ -104,6 +102,8 @@ class SpatialElementQuery(QueryModel):
     def validate_mode(self) -> SpatialElementQuery:
         if not self.element.strip():
             raise ValueError("element 不能为空")
+        if self.spatial is not None and "mode" not in self.model_fields_set:
+            self.mode = "spatial"
         if self.mode == "spatial" and self.spatial is None:
             raise ValueError("mode=spatial 时必须提供 spatial")
         if self.mode == "attribute" and self.spatial is not None:
@@ -112,5 +112,8 @@ class SpatialElementQuery(QueryModel):
 
 
 QUERY_PARAMETERS = SpatialElementQuery.model_json_schema()
-QUERY_PARAMETERS["properties"]["fields"]["items"]["description"] = "一个返回字段名。"
-QUERY_PARAMETERS["properties"]["conditions"]["items"]["description"] = "一个属性过滤条件。"
+# 仅移除生成的展示标题，保留参数名、引用和全部校验约束。
+for schema in (QUERY_PARAMETERS, *QUERY_PARAMETERS.get("$defs", {}).values()):
+    schema.pop("title", None)
+    for field_schema in schema.get("properties", {}).values():
+        field_schema.pop("title", None)
