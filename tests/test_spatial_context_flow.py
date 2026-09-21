@@ -7,6 +7,7 @@ from agents.agent_loop import AgentLoop
 from agents.tools.executor import ToolExecutor
 from agents.tools.map_action import execute_map_action
 from agents.tools.spatial_query_service import SpatialQueryServiceTool
+from controller.streaming.sse_encoder import encode_sse
 from repositories.mysql_conversation_repository import MySQLConversationRepository
 from schemas.chat import AgentRequest, FrontendContext
 from services.chat_service import ChatService
@@ -96,7 +97,12 @@ class SpatialContextFlowTest(unittest.IsolatedAsyncioTestCase):
             return call("map_action", action_type="MARKER_ADD", payload={
                 "layer_id": "observation-stations", "fit_bounds": False,
                 "markers": [{"id": station["tzno"], "name": station["name"],
-                             "coordinates": [station["lon"], station["lat"]]} for station in stations],
+                             "coordinates": [station["lon"], station["lat"]],
+                             "type": station["type"],
+                             "popup_content": {"title": station["name"], "fields": [
+                                 {"label": "站号", "value": station["tzno"]},
+                                 {"label": "站点类型", "value": station["type"]},
+                             ]}} for station in stations],
             })
         llm = self.use_llm([
             call("spatial_query_service", operation="query_spatial_element", query=area_query),
@@ -120,6 +126,17 @@ class SpatialContextFlowTest(unittest.IsolatedAsyncioTestCase):
         markers = next(event["data"]["payload"]["markers"] for event in radar_events
                        if event["event"] == "map_action" and event["data"]["action_type"] == "MARKER_ADD")
         self.assertEqual([marker["id"] for marker in markers], ["R001"])
+        map_event = next(event for event in radar_events
+                         if event["event"] == "map_action" and event["data"]["action_type"] == "MARKER_ADD")
+        wire_data = json.loads(encode_sse(map_event).split("data: ", 1)[1])["data"]
+        self.assertEqual(wire_data["payload"]["layer_id"], "observation-stations")
+        self.assertEqual(wire_data["payload"]["markers"], [{
+            "id": "R001", "name": "雷达站", "coordinates": [122.1, 30.2], "type": "radar",
+            "popup_content": {"title": "雷达站", "fields": [
+                {"label": "站号", "value": "R001"},
+                {"label": "站点类型", "value": "radar"},
+            ]},
+        }])
         self.assertEqual([event["data"]["action_type"] for event in station_events
                           if event["event"] == "map_action"], ["CLEAR", "MARKER_ADD", "FLY_TO"])
         self.assertEqual(await self.repo.get_map_context(self.conversation.id, user_id="101"), self.context)

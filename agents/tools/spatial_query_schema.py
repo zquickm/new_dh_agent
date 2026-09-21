@@ -80,7 +80,7 @@ class SpatialElementQuery(QueryModel):
         default="attribute", description="attribute 仅属性查询；spatial 为空间与属性联合查询。省略时，有 spatial 自动使用 spatial，否则使用 attribute。"
     )
     fields: list[str] = Field(
-        default_factory=list, description="返回字段名，必须来自要素详情；区域分布仅选标识、名称及必要分类字段，详情查询按需求选择；空数组使用服务默认字段。"
+        default_factory=list, description="普通区域总览优先省略或传空数组，使用服务默认字段；确需自选时，仅使用当前类别字段定义允许返回的字段，不猜测字段名。"
     )
     conditions: list[AttributeCondition] = Field(
         default_factory=list, description="属性条件数组，字段、类型和枚举以要素详情为准。"
@@ -91,7 +91,7 @@ class SpatialElementQuery(QueryModel):
     spatial: Optional[SpatialCondition] = Field(
         default=None, description="mode=spatial 时必填的空间条件。"
     )
-    includeGeometry: bool = Field(default=False, description="是否返回 GeoJSON 几何；后续需要地图展示时设为 true。")
+    includeGeometry: bool = Field(default=False, description="是否返回 GeoJSON 几何；地点或选区内有哪些站点、分布及位置查询默认需地图展示，应设为 true；用户明确只要文字时可省略。")
     geometryFormat: Literal["geojson"] = "geojson"
     orderBy: Optional[str] = Field(default=None, min_length=1, description="排序字段，须来自要素详情。")
     orderDirection: Literal["asc", "desc"] = Field(default="asc", description="排序方向。")
