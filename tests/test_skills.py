@@ -76,12 +76,14 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("dm_duanmian_analysis", skill.instructions)
         self.assertIn("## 路由边界", skill.instructions)
         self.assertIn(
-            "调查断面及其站位、辅助点的位置、属性、历史数据、跨期统计和描述性评价，统一使用 `database_query`",
+            "调查断面及其站位、辅助点的位置、基础属性和分布，使用 `spatial_query_service` 的通用查询",
             skill.instructions,
         )
-        self.assertIn("不调用 `spatial_query_service` 的 `dm_duanmian` 详情或查询操作", skill.instructions)
+        self.assertIn("历史观测、跨期统计和描述性评价使用 `database_query`", skill.instructions)
+        self.assertNotIn("不调用 `spatial_query_service` 的 `dm_duanmian` 详情或查询操作", skill.instructions)
         self.assertIn("地图选区中的业务观测站，以及明确站名的状态、详情、最新观测、趋势或时间区间数据，使用 `spatial_query_service`。", skill.instructions)
-        self.assertIn("不转调 `spatial_query_service` 或放宽为全库查询", skill.instructions)
+        self.assertIn("不猜字段名或放宽为全库查询", skill.instructions)
+        self.assertNotIn("所有断面数据查询和分析都必须使用数据库工具", skill.instructions)
         self.assertNotIn("observation_service", skill.instructions)
         self.assertIn("仅要求专题出图或打开分析浮层时使用 `dm_duanmian_analysis`", skill.instructions)
         self.assertIn("向用户综合展示全面的信息", skill.instructions)
