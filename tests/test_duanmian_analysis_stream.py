@@ -12,7 +12,8 @@ from tests.test_agent_loop import FakeLlm
 
 
 class DuanmianAnalysisStreamTest(unittest.IsolatedAsyncioTestCase):
-    async def test_registered_tool_reaches_sse_with_metadata_and_chinese_display_name(self):
+    @patch("services.chat_service.generate_recommendations", return_value=[])
+    async def test_registered_tool_reaches_sse_with_metadata_and_chinese_display_name(self, _recommendations):
         llm = FakeLlm([
             ([], [{"id": "call-skill", "name": "load_skill", "args": {"name": "断面业务"}}]),
             ([], [{"id": "call-analysis", "name": "dm_duanmian_analysis", "args": {
@@ -60,6 +61,6 @@ class DuanmianAnalysisStreamTest(unittest.IsolatedAsyncioTestCase):
                 "elementType": "chemistry", "element": "温度 T",
             },
         }])
-        self.assertEqual(events[-1][0], "done")
-        self.assertEqual(events[-1][1]["answer"], "已发送出图指令。")
+        self.assertEqual(events[-2][0], "done")
+        self.assertEqual(events[-2][1]["answer"], "已发送出图指令。")
         self.assertEqual(ChatService._tool_display_name("dm_duanmian_analysis"), "断面专题分析")

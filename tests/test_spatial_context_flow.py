@@ -21,6 +21,9 @@ def call(name, **args):
 
 class SpatialContextFlowTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        recommendations = patch("services.chat_service.generate_recommendations", return_value=[])
+        recommendations.start()
+        self.addCleanup(recommendations.stop)
         self.repo = MemoryConversationRepository()
         self.conversation = await self.repo.create("空间连续问答", user_id="101")
         self.context = FrontendContext.model_validate({
@@ -50,10 +53,10 @@ class SpatialContextFlowTest(unittest.IsolatedAsyncioTestCase):
             "question": question, "conversation_id": self.conversation.id, **extra,
         })
         events = [event async for event in self.service.stream_chat(request, user_id="101")]
-        self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(events[-1]["event"], "recommendations")
         self.assertTrue(all(event["event"] in {
             "context_usage",
-            "conversation", "process", "retrieval", "map_action", "token", "done",
+            "conversation", "process", "retrieval", "map_action", "token", "done", "recommendations",
         } for event in events))
         return events
 
