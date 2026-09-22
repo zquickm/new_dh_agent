@@ -71,6 +71,9 @@ class FakeAgent:
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
+        recommendations = patch("services.chat_service.generate_recommendations", return_value=[])
+        recommendations.start()
+        self.addCleanup(recommendations.stop)
         # Python 3.9 中，前一组异步测试可能已关闭同步测试桩所需的默认循环。
         try:
             asyncio.get_event_loop()

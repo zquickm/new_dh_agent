@@ -123,6 +123,9 @@ class RepositoryIsolationTest(unittest.IsolatedAsyncioTestCase):
 
 class ChatIsolationTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        recommendations = patch("services.chat_service.generate_recommendations", return_value=[])
+        recommendations.start()
+        self.addCleanup(recommendations.stop)
         synonym_patch = patch(
             "services.synonym_service._active_synonym_matcher",
             build_synonym_matcher([
@@ -159,7 +162,7 @@ class ChatIsolationTest(unittest.IsolatedAsyncioTestCase):
             chat_history=[{"role": "assistant", "content": "前一账号秘密"}],
         )
         conversation_id = events[0]["data"]["conversation_id"]
-        self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(events[-1]["event"], "recommendations")
         self.assertEqual(self.agent.calls[0][1], [])
         self.assertIsNone(await self.repo.get(conversation_id, user_id="202"))
         await self.stream(
@@ -180,7 +183,7 @@ class ChatIsolationTest(unittest.IsolatedAsyncioTestCase):
             self.stream("101", question="该区域有哪些站点", conversation_id=first.id),
             self.stream("202", question="该区域有哪些站点", conversation_id=second.id),
         )
-        self.assertTrue(all(events[-1]["event"] == "done" for events in results))
+        self.assertTrue(all(events[-1]["event"] == "recommendations" for events in results))
         contexts = {
             tuple(history): context
             for (_, history), context in zip(self.agent.calls, self.agent.contexts)
@@ -194,6 +197,9 @@ class ChatIsolationTest(unittest.IsolatedAsyncioTestCase):
 
 class ApiIsolationTest(unittest.TestCase):
     def setUp(self):
+        recommendations = patch("services.chat_service.generate_recommendations", return_value=[])
+        recommendations.start()
+        self.addCleanup(recommendations.stop)
         # Python 3.9 asyncio.Lock requires a current loop during construction.
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)

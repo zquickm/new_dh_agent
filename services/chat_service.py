@@ -21,6 +21,7 @@ from services.citation_service import CitationService
 from services.context_service import SYSTEM_PROMPT
 from services.emoji_filter import EmojiStreamFilter
 from services.rag_buffer_service import RagBufferService
+from services.recommendation_service import generate_recommendations
 from services.sensitive_word_service import SensitiveWordMatcher
 from services.tool_audit_service import PersistentToolAuditRecorder
 
@@ -664,6 +665,27 @@ class ChatService:
                     "retryable": True,
                 },
             })
+        else:
+            if not event_sink.closed:
+                questions = []
+                try:
+                    questions = await asyncio.wait_for(
+                        generate_recommendations(
+                            self.agent, conversation, request.question, answer, message.id
+                        ),
+                        timeout=20,
+                    )
+                except Exception:
+                    logger.exception("recommendations_failed run_id=%s", run_id)
+                # Transient suggestions: do not write them to the message or event log.
+                event_sink.publish({
+                    "event": "recommendations",
+                    "data": {
+                        "conversation_id": conversation_id,
+                        "message_id": message.id,
+                        "questions": questions,
+                    },
+                })
         finally:
             heartbeat_task.cancel()
             cancellation_task.cancel()

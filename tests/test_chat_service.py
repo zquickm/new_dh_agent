@@ -187,7 +187,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             first = [event async for event in service.stream_chat(
                 AgentRequest(question="初次问题"), user_id=TEST_USER_ID,
             )]
-            conversation_id = first[-1]["data"]["conversation_id"]
+            conversation_id = first[-2]["data"]["conversation_id"]
             before = await conversation_repository.get(conversation_id, user_id=TEST_USER_ID)
             original = before.messages[1].model_messages
             _ = [event async for event in service.stream_chat(
@@ -238,7 +238,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         try:
             await asyncio.wait_for(first_started.wait(), 3)
             second = await asyncio.wait_for(consume("第二个任务"), 3)
-            self.assertEqual(second[-1]["event"], "done")
+            self.assertEqual(second[-2]["event"], "done")
             self.assertEqual(seen["第二个任务"], frozenset())
             release_first.set()
             await asyncio.wait_for(first, 3)
@@ -284,8 +284,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         events = [event async for event in first.stream_chat(
             AgentRequest(question="查看盐度"), user_id=TEST_USER_ID,
         )]
-        self.assertEqual(events[-1]["event"], "done")
-        conversation_id = events[-1]["data"]["conversation_id"]
+        self.assertEqual(events[-2]["event"], "done")
+        conversation_id = events[-2]["data"]["conversation_id"]
         await first.close()
 
         # A new service instance must recover history from storage, not memory.
@@ -297,7 +297,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 AgentRequest(question="继续出图", conversation_id=conversation_id),
                 user_id=TEST_USER_ID,
             )]
-            self.assertEqual(events[-1]["event"], "done")
+            self.assertEqual(events[-2]["event"], "done")
             messages = follow_llm.calls[0][0]
             self.assertEqual([m["role"] for m in messages],
                              ["system", "user", "assistant", "tool", "tool", "assistant", "user"])
@@ -314,6 +314,9 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             await follow_up.close()
 
     def setUp(self):
+        recommendations = patch("services.chat_service.generate_recommendations", return_value=[])
+        recommendations.start()
+        self.addCleanup(recommendations.stop)
         conversation_repository._rag_buffers.clear()
         conversation_repository._next_rag_buffer_id = 1
         repository_patch = patch(
@@ -618,7 +621,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(agent.question, request.question)
         self.assertEqual(agent.frontend_context, request.context)
-        self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(events[-2]["event"], "done")
         detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
         self.assertEqual(detail.messages[0].content, "这个区域有哪些站点")
         self.assertNotIn("selected_area", detail.messages[0].content)
@@ -684,7 +687,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         ]
         for request in requests:
             events = [event async for event in service.stream_chat(request, user_id=TEST_USER_ID)]
-            self.assertEqual(events[-1]["event"], "done")
+            self.assertEqual(events[-2]["event"], "done")
         self.assertEqual(agent.contexts, [
             requests[0].context, requests[0].context,
             requests[2].context, requests[2].context,
@@ -905,8 +908,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             AgentRequest(question="水温统计", conversation_id=conversation.id),
             user_id=TEST_USER_ID,
         )]
-        done = events[-1]["data"]
-        self.assertEqual(events[-1]["event"], "done")
+        done = events[-2]["data"]
+        self.assertEqual(events[-2]["event"], "done")
         self.assertEqual(done["answer"], "平均水温为20.5℃。")
         self.assertEqual("".join(event["data"]["content"] for event in events
                                  if event["event"] == "token"), done["answer"])
@@ -918,8 +921,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             AgentRequest(question="你好", conversation_id=conversation.id),
             user_id=TEST_USER_ID,
         )]
-        self.assertEqual(next_events[-1]["data"]["sources"], [])
-        self.assertEqual(next_events[-1]["data"]["answer"], "你好。")
+        self.assertEqual(next_events[-2]["data"]["sources"], [])
+        self.assertEqual(next_events[-2]["data"]["answer"], "你好。")
         await service._agent.close()
 
     async def test_explicit_article_without_marker_is_not_treated_as_citation(self):
@@ -937,8 +940,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             AgentRequest(question="查询资料", conversation_id=conversation.id),
             user_id=TEST_USER_ID,
         )]
-        self.assertEqual(events[-1]["event"], "done")
-        done = events[-1]["data"]
+        self.assertEqual(events[-2]["event"], "done")
+        done = events[-2]["data"]
         self.assertEqual(done["answer"], "根据《资料》中的内容回答。")
         self.assertEqual(done["sources"], [])
         detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
@@ -966,6 +969,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
                 "token",
                 "token",
                 "done",
+                "recommendations",
             ],
         )
         self.assertEqual(events[2]["data"]["chunks"][0]["preview"], "检索片段")
@@ -978,8 +982,8 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[3]["data"]["step_id"], "call-1")
         self.assertEqual(events[3]["data"]["details"]["result_count"], 1)
         self.assertEqual(events[1]["data"]["agent_id"], "agent-loop")
-        self.assertEqual(events[-1]["data"]["answer"], "你好[[cite:1]]世界")
-        self.assertEqual(events[-1]["data"]["sources"][0]["citation_id"], 1)
+        self.assertEqual(events[-2]["data"]["answer"], "你好[[cite:1]]世界")
+        self.assertEqual(events[-2]["data"]["sources"][0]["citation_id"], 1)
         detail = await conversation_repository.get(conversation.id, user_id=TEST_USER_ID)
         self.assertEqual([message.role for message in detail.messages], ["user", "assistant"])
         self.assertEqual(detail.messages[-1].sources[0]["preview"], "检索片段")
@@ -1162,7 +1166,7 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         map_action = next(
             event["data"] for event in events if event["event"] == "map_action"
         )
-        done = events[-1]["data"]
+        done = events[-2]["data"]
         self.assertEqual(map_action["run_id"], conversation["run_id"])
         self.assertEqual(map_action["batch_id"], "call-map")
         self.assertEqual(map_action["action_id"], "call-map-1")

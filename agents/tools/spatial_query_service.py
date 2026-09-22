@@ -13,6 +13,8 @@ from tool_backends.spatial_backend import SpatialServiceClient
 TOOL_NAME = "spatial_query_service"
 TOOL_DESCRIPTION = (
     "查询已注册空间要素的目录、字段定义、属性和几何，以及观测站在线状态、最新观测和时序数据。"
+    "使用 query.fields、conditions 或 orderBy 前，缺少当前类别字段定义时须先调用 get_spatial_element_detail，"
+    "收到定义后再查询；字段名、用途和运算符以定义为准，不猜测。"
     "通用查询按 limit/offset 返回一页 GeoJSON；需要几何时设置 includeGeometry=true。"
     "仅返回数据，不发送地图动作；地图展示使用 map_action。"
 )
