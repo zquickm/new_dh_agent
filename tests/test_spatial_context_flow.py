@@ -109,7 +109,12 @@ class SpatialContextFlowTest(unittest.IsolatedAsyncioTestCase):
             draw(stations), (["区域内有雷达站和浮标站"], []),
             radar_query, draw(stations[:1]), (["有 R001 雷达站"], []),
             call("spatial_query_service", operation="query_spatial_element", query=detail_query),
-            call("map_action", action_type="FLY_TO", payload={"center": [122.1, 30.2], "zoom": 12}),
+            call("map_action", action_type="FLY_TO", payload={"geojson": {
+                "type": "FeatureCollection", "features": [{
+                    "type": "Feature", "id": "R001", "properties": stations[0],
+                    "geometry": {"type": "Point", "coordinates": [122.1, 30.2]},
+                }],
+            }, "zoom": 12}),
             (["雷达站正常"], []),
             radar_query, draw(stations[:1]), (["雷达站位于原选区"], []),
         ])
@@ -138,7 +143,12 @@ class SpatialContextFlowTest(unittest.IsolatedAsyncioTestCase):
             ]},
         }])
         self.assertEqual([event["data"]["action_type"] for event in station_events
-                          if event["event"] == "map_action"], ["CLEAR", "MARKER_ADD", "FLY_TO"])
+                          if event["event"] == "map_action"], ["CLEAR", "GEOJSON_ADD", "FLY_TO"])
+        station_event = next(event for event in station_events
+                             if event["event"] == "map_action" and event["data"]["action_type"] == "GEOJSON_ADD")
+        station_wire = json.loads(encode_sse(station_event).split("data: ", 1)[1])["data"]
+        self.assertEqual(station_wire["payload"]["geojson"]["features"][0]["properties"], stations[0])
+        self.assertFalse(station_wire["payload"]["fit_bounds"])
         self.assertEqual(await self.repo.get_map_context(self.conversation.id, user_id="101"), self.context)
 
     async def test_visual_clear_and_flight_do_not_change_saved_selection(self):
