@@ -19,7 +19,7 @@ from agents.tools.executor import ToolExecutor
 from agents.tools.registry import build_skill_catalog, build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage, FrontendContext
-from services.context_service import ContextService, SYSTEM_PROMPT
+from services.context_service import ContextService, SYSTEM_PROMPT, build_system_prompt
 from services.token_budget_service import (
     DeepSeekV4TokenCounter,
     TOKENIZER_NAME,
@@ -107,6 +107,7 @@ class AgentLoop:
         self.context_service = ContextService()
         self.max_rounds = settings.react.max_rounds
         self.force_answer = settings.react.force_answer_on_last_round
+        self.temperature = settings.llm.temperature
         self.context_window_tokens = settings.llm.context_window_tokens
         self.max_output_tokens = settings.llm.max_output_tokens
         self.token_safety_margin = settings.llm.token_safety_margin
@@ -268,10 +269,10 @@ class AgentLoop:
                 ],
             )
 
-            stream_kwargs = {}
+            stream_kwargs = {"temperature": self.temperature}
             stream_parameters = inspect.signature(self.llm.stream).parameters
             if "run_id" in stream_parameters:
-                stream_kwargs = {"run_id": run_id, "round_number": round_number}
+                stream_kwargs.update({"run_id": run_id, "round_number": round_number})
             upstream_usage: dict[str, int] = {}
             if "usage_callback" in stream_parameters:
                 stream_kwargs["usage_callback"] = upstream_usage.update
@@ -469,43 +470,73 @@ class AgentLoop:
                 error_type = None
                 error_message = None
                 retryable = False
+                audit_observation = ""
                 try:
                     observation, client_events = await self.tools.execute_with_events(
                         name, tool_call["args"], enabled_skill_names=enabled_skill_names
                     )
+                    audit_observation = observation
                     failure_stage = "result_processing"
-                    tool_arguments = tool_call["args"]
-                    if name == "rag_search":
-                        persisted_sources = None
-                        if rag_buffer_callback is not None:
-                            parsed_observation = json.loads(observation)
-                            chunks = parsed_observation.get("chunks")
-                            if not isinstance(chunks, list):
-                                raise ValueError("rag_search returned an invalid result")
-                            query = parsed_observation.get("query")
-                            if not isinstance(query, str):
-                                query = str(tool_arguments.get("query") or "")
-                            persisted_sources = rag_buffer_callback(chunks, query)
-                            if inspect.isawaitable(persisted_sources):
-                                persisted_sources = await persisted_sources
-                        rag_result = citation_registry.register_rag_observation(
-                            observation,
-                            tool_call_id=tool_call["id"],
-                            fallback_query=(
-                                tool_arguments.get("query")
-                                if isinstance(tool_arguments, dict)
-                                else ""
-                            ),
-                            persisted_sources=persisted_sources,
-                        )
-                        retrieval_data, observation = rag_result
-                    else:
-                        retrieval_data = None
-                    semantic_error = _semantic_tool_error(name, observation)
+                    semantic_error = _semantic_tool_error(
+                        name, audit_observation or observation
+                    )
                     if semantic_error is None:
+                        tool_arguments = tool_call["args"]
+                        if name == "rag_search":
+                            persisted_sources = None
+                            if rag_buffer_callback is not None:
+                                parsed_observation = json.loads(observation)
+                                chunks = parsed_observation.get("chunks")
+                                if not isinstance(chunks, list):
+                                    raise ValueError("rag_search returned an invalid result")
+                                query = parsed_observation.get("query")
+                                if not isinstance(query, str):
+                                    query = str(tool_arguments.get("query") or "")
+                                persisted_sources = rag_buffer_callback(chunks, query)
+                                if inspect.isawaitable(persisted_sources):
+                                    persisted_sources = await persisted_sources
+                            retrieval_data, _ = citation_registry.register_rag_observation(
+                                observation,
+                                tool_call_id=tool_call["id"],
+                                fallback_query=(
+                                    tool_arguments.get("query")
+                                    if isinstance(tool_arguments, dict)
+                                    else ""
+                                ),
+                                persisted_sources=persisted_sources,
+                            )
+                            current_rag_sources = tuple(
+                                source for source in citation_registry.sources()
+                                if source.get("buffer_id") is not None
+                            )
+                            messages[0] = {
+                                "role": "system",
+                                "content": build_system_prompt(
+                                    skill_summaries,
+                                    system_prompt,
+                                    current_rag_sources,
+                                ),
+                            }
+                            buffer_ids = list(dict.fromkeys(
+                                int(chunk["buffer_id"])
+                                for chunk in retrieval_data["chunks"]
+                            ))
+                            observation = json.dumps(
+                                {
+                                    "success": True,
+                                    "buffer_updated": True,
+                                    "result_count": retrieval_data["result_count"],
+                                    "buffer_ids": buffer_ids,
+                                    "message": "检索结果已写入会话 RAG 证据缓冲区，请从系统消息中的完整缓冲区读取。",
+                                },
+                                ensure_ascii=False,
+                            )
+                        else:
+                            retrieval_data = None
                         success = True
                         failure_stage = None
                     else:
+                        retrieval_data = None
                         success = False
                         (
                             error_code,
@@ -576,6 +607,8 @@ class AgentLoop:
                         observation = f"断面专题分析参数无效：{exc}"
                     else:
                         observation = "工具执行失败"
+                    if not audit_observation:
+                        audit_observation = observation
                     retrieval_data = None
                     client_events = ()
                     success = False
@@ -597,7 +630,7 @@ class AgentLoop:
                     await audit_recorder.finished(
                         tool_call_id=tool_call["id"],
                         status="succeeded" if success else "failed",
-                        result=observation,
+                        result=audit_observation or observation,
                         duration_ms=duration_ms,
                         error_code=error_code,
                         error_type=error_type,
@@ -621,7 +654,7 @@ class AgentLoop:
                         duration_ms,
                         len(observation),
                         len(client_events),
-                        observation_log_summary(observation),
+                        observation_log_summary(audit_observation or observation),
                     )
 
                 if retrieval_data is not None:

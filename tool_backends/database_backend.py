@@ -431,11 +431,13 @@ class DatabaseQueryBackend:
         gateway: MysqlReadonlyGateway,
         llm: Any,
         generation_timeout: float,
+        temperature: float = 0,
     ) -> None:
         self.catalog = catalog
         self.gateway = gateway
         self.llm = llm
         self.generation_timeout = generation_timeout
+        self.temperature = temperature
 
     @classmethod
     def from_env(
@@ -493,6 +495,11 @@ class DatabaseQueryBackend:
         ).strip() or default_llm_model.strip()
         if not base_url or not model:
             raise DatabaseToolError("DEEPSEEK_BASE_URL and DEEPSEEK_MODEL are required")
+        llm_temperature = float(
+            os.getenv("DEEPSEEK_TEMPERATURE", "").strip()
+            or os.getenv("NEW_DH_LLM__TEMPERATURE", "").strip()
+            or str(default_llm_temperature)
+        )
         llm = ChatOpenAI(
             api_key=(
                 os.getenv("DEEPSEEK_API_KEY", "").strip()
@@ -503,11 +510,7 @@ class DatabaseQueryBackend:
             ),
             base_url=base_url,
             model=model,
-            temperature=float(
-                os.getenv("DEEPSEEK_TEMPERATURE", "").strip()
-                or os.getenv("NEW_DH_LLM__TEMPERATURE", "").strip()
-                or str(default_llm_temperature)
-            ),
+            temperature=llm_temperature,
             timeout=generation_timeout,
             max_retries=1,
         )
@@ -516,6 +519,7 @@ class DatabaseQueryBackend:
             gateway=gateway,
             llm=llm,
             generation_timeout=generation_timeout,
+            temperature=llm_temperature,
         )
 
     async def query(self, question: str, limit: int) -> dict[str, Any]:
@@ -586,7 +590,7 @@ class DatabaseQueryBackend:
         ]
         try:
             response = await asyncio.wait_for(
-                self.llm.ainvoke(messages),
+                self.llm.ainvoke(messages, temperature=self.temperature),
                 timeout=self.generation_timeout,
             )
         except asyncio.TimeoutError as exc:

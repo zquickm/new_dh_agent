@@ -13,7 +13,7 @@ llm:
   model: "dsv4"
   base_url: "http://71.10.60.31:8900/v1"
   api_key: "${NEW_DH_LLM__API_KEY:}"
-  temperature: 0.6
+  temperature: 0
   timeout: 120
   reasoning_effort: none
   context_window_tokens: 131072
@@ -67,7 +67,7 @@ stream:
   include_tool_result: false
 
 logging:
-  level: INFO
+  level: DEBUG
   directory: logs
   retention_days: 14
 

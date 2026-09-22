@@ -93,6 +93,7 @@ class DatabaseQueryTool:
                 gateway=gateway,
                 llm=llm,
                 generation_timeout=sql_llm.timeout,
+                temperature=sql_llm.temperature,
             )
         return self._backend
 

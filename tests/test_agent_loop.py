@@ -1,4 +1,5 @@
 import asyncio
+import json
 import unittest
 import tempfile
 from pathlib import Path
@@ -20,9 +21,10 @@ class FakeLlm:
     def __init__(self, responses):
         self.responses = iter(responses)
         self.calls = []
+        self.temperatures = []
 
     async def stream(self, messages, tools=None, temperature=0):
-        del temperature
+        self.temperatures.append(temperature)
         self.calls.append((deepcopy(messages), tools))
         content_parts, tool_calls = next(self.responses)
         for content in content_parts:
@@ -52,11 +54,89 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                 event.content for event in events if event.type == "answer_delta"
             )
             self.assertEqual(answer, "已有证据[[cite:1]]")
+            self.assertEqual(llm.temperatures, [agent.temperature])
             source = next(
                 event.sources[0] for event in events
                 if event.type == "answer_delta" and event.sources
             )
             self.assertEqual((source["buffer_id"], source["citation_id"]), (19, 1))
+        finally:
+            await agent.close()
+
+    async def test_retrieved_rag_text_is_only_exposed_through_refreshed_buffer(self):
+        llm = FakeLlm([
+            (
+                [],
+                [{
+                    "id": "call-rag",
+                    "name": "rag_search",
+                    "args": {"query": "重复证据"},
+                    "type": "tool_call",
+                }],
+            ),
+            (["引用已有证据<<SRC_19>>"], []),
+        ])
+
+        async def rag_search(query):
+            return {
+                "query": query,
+                "chunks": [{
+                    "text": "不会重复进入上下文的证据正文",
+                    "source": "资料.pdf",
+                    "score": 0.9,
+                    "document_id": "doc-1",
+                    "chunk_id": "chunk-1",
+                    "knowledge_id": "kb-1",
+                    "page_index": 0,
+                }],
+            }
+
+        async def persist_chunks(chunks, query):
+            self.assertEqual(query, "重复证据")
+            self.assertEqual(len(chunks), 1)
+            return [{
+                "buffer_id": 19,
+                "identity_hash": "hash",
+                "text": chunks[0]["text"],
+                "source": chunks[0]["source"],
+                "score": chunks[0]["score"],
+                "document_id": chunks[0]["document_id"],
+                "chunk_id": chunks[0]["chunk_id"],
+                "knowledge_id": chunks[0]["knowledge_id"],
+                "page_index": chunks[0]["page_index"],
+            }]
+
+        tools = ToolExecutor()
+        tools.register("rag_search", "检索内部文档", rag_search)
+        agent = AgentLoop(llm, tools)
+        try:
+            events = [event async for event in agent.run_stream(
+                "继续提问",
+                [],
+                rag_buffer_sources=[{
+                    "buffer_id": 19,
+                    "source": "资料.pdf",
+                    "preview": "不会重复进入上下文的证据正文",
+                    "page_index": 0,
+                }],
+                rag_buffer_callback=persist_chunks,
+            )]
+            second_round_messages = llm.calls[1][0]
+            evidence = "不会重复进入上下文的证据正文"
+            self.assertEqual(
+                sum(evidence in str(item.get("content") or "") for item in second_round_messages),
+                1,
+            )
+            rag_receipt = next(
+                item for item in second_round_messages
+                if item.get("tool_call_id") == "call-rag"
+            )
+            self.assertNotIn(evidence, rag_receipt["content"])
+            self.assertEqual(json.loads(rag_receipt["content"])["buffer_ids"], [19])
+            answer = "".join(
+                event.content for event in events if event.type == "answer_delta"
+            )
+            self.assertEqual(answer, "引用已有证据[[cite:1]]")
         finally:
             await agent.close()
 
@@ -418,8 +498,18 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             "综合回答[[cite:1]]",
         )
         final_messages = llm.calls[-1][0]
-        self.assertIn("报告依据", final_messages[-3]["content"])
-        self.assertIn('"source_key": "<<SRC_1>>"', final_messages[-3]["content"])
+        rag_tool_message = next(
+            item for item in final_messages
+            if item.get("tool_call_id") == "call-rag"
+        )
+        self.assertIn('"buffer_updated": true', rag_tool_message["content"])
+        self.assertNotIn("报告依据", rag_tool_message["content"])
+        self.assertIn("报告依据", final_messages[0]["content"])
+        self.assertIn('"source_key":"<<SRC_1>>"', final_messages[0]["content"])
+        self.assertEqual(
+            sum("报告依据" in str(item.get("content") or "") for item in final_messages),
+            1,
+        )
         self.assertIn('"avg": 30.1', final_messages[-1]["content"])
 
     async def test_explicit_map_actions_are_not_suppressed_after_other_events(self):

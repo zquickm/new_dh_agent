@@ -38,16 +38,39 @@ class FakeLlm:
         self.response = response
         self.error = error
         self.calls = 0
+        self.temperatures = []
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, temperature=0):
         del messages
         self.calls += 1
+        self.temperatures.append(temperature)
         if self.error is not None:
             raise self.error
         return SimpleNamespace(content=self.response)
 
 
 class DatabaseBackendErrorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_sql_generation_passes_configured_temperature(self):
+        llm = FakeLlm()
+        backend = DatabaseQueryBackend(
+            catalog=FakeCatalog(),
+            gateway=SimpleNamespace(),
+            llm=llm,
+            generation_timeout=1,
+            temperature=0.35,
+        )
+
+        await backend._generate_sql(
+            question="查询数量",
+            limit=10,
+            guide="guide",
+            schemas="schema",
+            previous_sql=None,
+            previous_error=None,
+        )
+
+        self.assertEqual(llm.temperatures, [0.35])
+
     async def test_real_execution_error_survives_repair_and_tool_serialization(self):
         for code in (1054, 1105, 1142, 9999):
             with self.subTest(code=code):
