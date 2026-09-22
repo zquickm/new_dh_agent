@@ -279,6 +279,8 @@ SPATIAL_API_KEY=
 取得数据后由模型显式调用 `map_action`：点位使用 `MARKER_ADD`，线面使用 `GEOJSON_ADD`，清图和定位也由地图工具完成。不同类别分层展示，保留选区；未取全或缺少几何时说明实际覆盖范围。
 地图动作回执仅代表指令已发送，不代表前端已经渲染。观测站搜索保留缺少坐标的业务记录，缺少坐标只影响后续绘图，不影响查询数量。
 工具错误统一标识“通用空间查询服务”，保留 operation、HTTP 路径及服务错误说明；查询失败不代表无匹配数据。
+`observation_range` 对应 `GET /api/spatial/stations/observation-range`，参数为 `tzno`、`data_type`、`start_time`、`end_time`、`order_by`、`max_records`。HTTP 500 表示上游服务未能完成请求；仅凭“服务内部错误”无法区分数据库、字段映射或时间处理异常。需结合智能体 `tool_failed` 日志中的 run_id、call_id、arguments 与同一时刻空间服务日志排查；不要把失败当成无数据，也不要盲目改日期或指标重复查询。
+单站飞行定位调用 `map_action(action_type="FLY_TO", payload={"geojson": 仅含目标站点的FeatureCollection})`，保留真实 Feature.id、geometry 和完整 properties；中心由 Point 坐标推导。后端依次发送 `CLEAR`、`GEOJSON_ADD`、`FLY_TO`，使用 `map-location-markers` 图层。前端须接入 GeoJSON 拾取并展示 properties，详见《地图操作SSE事件契约.txt》；仅接收事件不会自动实现点击弹窗。
 字段及查询约束以目录详情为准，由空间服务最终校验。
 复用 `tools.spatial` 和 `SPATIAL_API_KEY`，base_url 继续只配置主机与端口，不附加 v2 路径。
 
@@ -294,7 +296,7 @@ SPATIAL_API_KEY=
 - `CLEAR` 可清除指定图层；是否清理由 Skill 根据查询结果决定。
 - `MARKER_ADD` 添加真实点位；线面通过 `GEOJSON_ADD` 展示。
 - 单站状态、最新观测和时序查询不自动标点、清图或构造弹窗，地图展示由 `map_action` 完成。
-- 独立调用 `FLY_TO` 时，后端会展开为 `CLEAR → MARKER_ADD → FLY_TO`；使用 `center`（兼容输入 `coordinates`）和 `zoom`，保留最新定位点，因此应在新结果标点前切换视角。
+- 独立调用 `FLY_TO` 时，后端会展开为 `CLEAR → GEOJSON_ADD → FLY_TO`；站点定位传入完整单点 `geojson`，普通坐标定位仍支持 `center`（兼容输入 `coordinates`）和 `zoom`。保留最新定位点及其属性，切换后需要展示其他结果时再添加对应图层。
 
 ```text
 event: map_action

@@ -21,7 +21,7 @@ class MapActionToolTest(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 execute_map_action("GEOJSON_ADD", {**payload, **invalid})
 
-    def test_fly_to_clears_old_layers_adds_marker_and_moves_the_view(self):
+    def test_fly_to_clears_old_layers_adds_geojson_and_moves_the_view(self):
         output = execute_map_action(
             "fly_to",
             {
@@ -34,18 +34,19 @@ class MapActionToolTest(unittest.TestCase):
         self.assertEqual(output.content["action_type"], "FLY_TO")
         self.assertEqual(
             [event["action_type"] for event in output.client_events],
-            ["CLEAR", "MARKER_ADD", "FLY_TO"],
+            ["CLEAR", "GEOJSON_ADD", "FLY_TO"],
         )
         self.assertEqual(
             output.client_events[0]["payload"]["layer_ids"],
             ["observation-stations", "map-location-markers"],
         )
         self.assertEqual(
-            output.client_events[1]["payload"]["markers"],
+            output.client_events[1]["payload"]["geojson"]["features"],
             [{
+                "type": "Feature",
                 "id": "fly-to-target",
-                "name": "目标站点",
-                "coordinates": [121.5, 31.2],
+                "properties": {"name": "目标站点"},
+                "geometry": {"type": "Point", "coordinates": [121.5, 31.2]},
             }],
         )
         self.assertEqual(
@@ -61,10 +62,10 @@ class MapActionToolTest(unittest.TestCase):
 
         self.assertEqual(
             [event["action_type"] for event in output.client_events],
-            ["CLEAR", "MARKER_ADD", "FLY_TO"],
+            ["CLEAR", "GEOJSON_ADD", "FLY_TO"],
         )
         self.assertEqual(
-            output.client_events[1]["payload"]["markers"][0]["coordinates"],
+            output.client_events[1]["payload"]["geojson"]["features"][0]["geometry"]["coordinates"],
             [121.5, 31.2],
         )
         self.assertEqual(
@@ -74,6 +75,42 @@ class MapActionToolTest(unittest.TestCase):
                 "payload": {"center": [121.5, 31.2], "zoom": 12},
             },
         )
+
+    def test_station_flight_preserves_details_and_derives_center(self):
+        geojson = {"type": "FeatureCollection", "features": [{
+            "type": "Feature", "id": "A001",
+            "geometry": {"type": "Point", "coordinates": [121.5, 31.2]},
+            "properties": {"tzno": "A001", "name": "测试站", "type": "潮位站",
+                           "region": "测试区域", "water_level": 0, "status": None},
+        }]}
+        payload = {"geojson": geojson}
+        output = execute_map_action("FLY_TO", payload)
+        self.assertEqual([e["action_type"] for e in output.client_events],
+                         ["CLEAR", "GEOJSON_ADD", "FLY_TO"])
+        self.assertEqual(output.client_events[1]["payload"], {
+            "layer_id": "map-location-markers", "geojson": geojson,
+            "replace": True, "fit_bounds": False,
+        })
+        self.assertEqual(output.client_events[2]["payload"], {"center": [121.5, 31.2], "zoom": 12})
+        self.assertEqual(payload, {"geojson": geojson})
+        for invalid in (
+            {"geojson": None},
+            {"geojson": {"type": "FeatureCollection", "features": []}},
+            {"geojson": {**geojson, "features": geojson["features"] * 2}},
+            {"center": [120, 30]},
+            {"geojson": {"type": "FeatureCollection", "features": [{
+                "type": "Feature", "properties": {}, "geometry": None,
+            }]}},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                execute_map_action("FLY_TO", {**payload, **invalid})
+
+    def test_flight_rejects_invalid_coordinates_and_zoom(self):
+        for invalid in ([181, 30], [120, 91], [True, 30], [float("nan"), 30], [120, float("inf")]):
+            with self.subTest(center=invalid), self.assertRaises(ValueError):
+                execute_map_action("FLY_TO", {"center": invalid})
+        with self.assertRaises(ValueError):
+            execute_map_action("FLY_TO", {"center": [120, 30], "zoom": float("nan")})
 
     def test_clear_accepts_empty_payload(self):
         output = execute_map_action("CLEAR", {})

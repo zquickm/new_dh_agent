@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from agents.tools.executor import ToolOutput
@@ -11,7 +12,8 @@ TOOL_DESCRIPTION = (
     "向前端发送地图定位、点线面绘制、图层清除、弹窗、表格和播放等动作，不查询业务数据。"
     "MARKER_ADD 接收点位；GEOJSON_ADD 接收 FeatureCollection。"
     "CLEAR 可按 layer_ids 清除图层；顶层 clear_selection=true 配合空 payload 清除会话选区。"
-    "FLY_TO 会清除旧站点和定位标记、添加目标点并移动视野。"
+    "FLY_TO 会清除旧站点和定位图层、添加目标 GeoJSON 并移动视野；"
+    "定位站点时传入包含完整属性的单点 geojson，可由其几何自动确定 center。"
     "成功回执仅表示指令已发送，不表示前端渲染完成。"
 )
 MAP_ACTION_TYPES = (
@@ -59,7 +61,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "properties": {
                 "geojson": {
                     "type": "object",
-                    "description": "GEOJSON_ADD 必填的 GeoJSON FeatureCollection，保留完整 geometry 和 properties。",
+                    "description": "GEOJSON_ADD 必填；FLY_TO 定位站点时传入仅含目标 Point 的 FeatureCollection，保留真实 id、geometry 和完整 properties，供前端点击查看详情。",
                     "properties": {
                         "type": {"type": "string", "enum": ["FeatureCollection"], "description": "固定为 FeatureCollection。"},
                         "features": {
@@ -161,7 +163,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
                     "minItems": 2,
                     "maxItems": 2,
                     "description": (
-                        "CIRCLE_DRAW 或 FLY_TO 的中心位置，格式为 [经度,纬度]。"
+                        "CIRCLE_DRAW 或 FLY_TO 的中心位置，格式为 [经度,纬度]；FLY_TO 可由单点 geojson 推导，若同时提供须与几何一致。"
                     ),
                 },
                 "radius": {
@@ -200,7 +202,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
                     "type": "string",
                     "default": "定位点",
                     "description": (
-                        "FLY_TO 自动添加的目标点标记名称，省略时默认“定位点”。"
+                        "FLY_TO 未传 geojson 时生成的定位点名称，省略时默认“定位点”；站点详情必须通过 geojson 传入。"
                     ),
                 },
                 "scene": {
@@ -296,12 +298,23 @@ def execute_map_action(
 
     normalized_payload = payload
     if normalized_type == "FLY_TO":
+        geojson = payload.get("geojson")
+        if "geojson" in payload:
+            validate_feature_collection(geojson)
+            features = geojson["features"]
+            if len(features) != 1 or (features[0].get("geometry") or {}).get("type") != "Point":
+                raise ValueError("FLY_TO geojson 必须仅包含一个有效 Point 要素")
+            target = _point(features[0]["geometry"]["coordinates"], "geojson Point")
         location = payload.get("center")
         if location is None:
             location = payload.get("coordinates")
+        if location is None and geojson is not None:
+            location = target
         center = _point(location, "center 或 coordinates")
+        if geojson is not None and center != target:
+            raise ValueError("FLY_TO center 必须与 geojson Point 坐标一致")
         zoom = payload.get("zoom", 12)
-        if isinstance(zoom, bool) or not isinstance(zoom, (int, float)):
+        if isinstance(zoom, bool) or not isinstance(zoom, (int, float)) or not math.isfinite(zoom):
             raise ValueError("FLY_TO zoom 必须为数值")
         normalized_payload = {
             **payload,
@@ -310,6 +323,7 @@ def execute_map_action(
         }
         normalized_payload.pop("coordinates", None)
         normalized_payload.pop("marker_name", None)
+        normalized_payload.pop("geojson", None)
 
     missing = [
         field
@@ -337,6 +351,12 @@ def execute_map_action(
     client_events = (event,)
     if normalized_type == "FLY_TO":
         marker_name = str(payload.get("marker_name") or "定位点").strip() or "定位点"
+        if geojson is None:
+            geojson = {"type": "FeatureCollection", "features": [{
+                "type": "Feature", "id": "fly-to-target",
+                "geometry": {"type": "Point", "coordinates": normalized_payload["center"]},
+                "properties": {"name": marker_name},
+            }]}
         client_events = (
             {
                 "action_type": "CLEAR",
@@ -348,16 +368,11 @@ def execute_map_action(
                 },
             },
             {
-                "action_type": "MARKER_ADD",
+                "action_type": "GEOJSON_ADD",
                 "payload": {
                     "layer_id": "map-location-markers",
-                    "markers": [
-                        {
-                            "id": "fly-to-target",
-                            "name": marker_name,
-                            "coordinates": normalized_payload["center"],
-                        }
-                    ],
+                    "geojson": geojson,
+                    "replace": True,
                     "fit_bounds": False,
                 },
             },
@@ -376,8 +391,10 @@ def execute_map_action(
 def _point(value: Any, name: str) -> list[float]:
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError(f"FLY_TO {name} 必须包含两个数值")
-    if any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in value):
+    if any(isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item) for item in value):
         raise ValueError(f"FLY_TO {name} 必须包含两个数值")
+    if not -180 <= value[0] <= 180 or not -90 <= value[1] <= 90:
+        raise ValueError(f"FLY_TO {name} 经度或纬度超出范围")
     return [float(value[0]), float(value[1])]
 
 
