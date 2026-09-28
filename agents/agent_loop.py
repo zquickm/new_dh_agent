@@ -19,7 +19,7 @@ from agents.tools.executor import ToolExecutor
 from agents.tools.registry import build_skill_catalog, build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage, FrontendContext
-from services.context_service import ContextService, SYSTEM_PROMPT, build_system_prompt
+from services.context_service import ContextService, SYSTEM_PROMPT
 from services.token_budget_service import (
     DeepSeekV4TokenCounter,
     TOKENIZER_NAME,
@@ -139,8 +139,6 @@ class AgentLoop:
         context_token_limit: int | None = None,
         context_usage_callback: Callable[[dict[str, Any]], Any] | None = None,
         model_messages_callback: Callable[[list[dict[str, Any]]], Any] | None = None,
-        rag_buffer_sources: list[dict[str, Any]] | None = None,
-        rag_buffer_callback: Callable[[list[dict[str, Any]], str], Any] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         configured_limit = get_settings().conversation.max_history_messages
         limit = min(context_message_limit or configured_limit, configured_limit)
@@ -178,21 +176,25 @@ class AgentLoop:
             skills=skill_summaries,
             max_history_messages=limit,
             system_prompt=system_prompt,
-            rag_buffer_sources=tuple(rag_buffer_sources or ()),
         )
         input_message_count = len(messages)
         cumulative_input_tokens = 0
         cumulative_output_tokens = 0
         latest_usage: dict[str, Any] = {}
         cumulative_tool_results_truncated = 0
-        citation_registry = CitationRegistry(rag_buffer_sources)
+        citation_registry = CitationRegistry()
         has_streamed_content = False
         tool_sequence = 0
         model_messages: list[dict[str, Any]] = []
 
         async def save_model_messages(batch: list[dict[str, Any]]) -> None:
             # Save only complete batches; interruption cannot leave orphan calls.
-            model_messages.extend(deepcopy(batch))
+            model_messages.extend(
+                item.model_dump(exclude_none=True)
+                for item in self.context_service.filter_rag_history(
+                    [ChatMessage.model_validate(item) for item in batch]
+                )
+            )
             if model_messages_callback is not None:
                 result = model_messages_callback(deepcopy(model_messages))
                 if inspect.isawaitable(result):
@@ -483,19 +485,7 @@ class AgentLoop:
                     if semantic_error is None:
                         tool_arguments = tool_call["args"]
                         if name == "rag_search":
-                            persisted_sources = None
-                            if rag_buffer_callback is not None:
-                                parsed_observation = json.loads(observation)
-                                chunks = parsed_observation.get("chunks")
-                                if not isinstance(chunks, list):
-                                    raise ValueError("rag_search returned an invalid result")
-                                query = parsed_observation.get("query")
-                                if not isinstance(query, str):
-                                    query = str(tool_arguments.get("query") or "")
-                                persisted_sources = rag_buffer_callback(chunks, query)
-                                if inspect.isawaitable(persisted_sources):
-                                    persisted_sources = await persisted_sources
-                            retrieval_data, _ = citation_registry.register_rag_observation(
+                            retrieval_data, observation = citation_registry.register_rag_observation(
                                 observation,
                                 tool_call_id=tool_call["id"],
                                 fallback_query=(
@@ -503,33 +493,6 @@ class AgentLoop:
                                     if isinstance(tool_arguments, dict)
                                     else ""
                                 ),
-                                persisted_sources=persisted_sources,
-                            )
-                            current_rag_sources = tuple(
-                                source for source in citation_registry.sources()
-                                if source.get("buffer_id") is not None
-                            )
-                            messages[0] = {
-                                "role": "system",
-                                "content": build_system_prompt(
-                                    skill_summaries,
-                                    system_prompt,
-                                    current_rag_sources,
-                                ),
-                            }
-                            buffer_ids = list(dict.fromkeys(
-                                int(chunk["buffer_id"])
-                                for chunk in retrieval_data["chunks"]
-                            ))
-                            observation = json.dumps(
-                                {
-                                    "success": True,
-                                    "buffer_updated": True,
-                                    "result_count": retrieval_data["result_count"],
-                                    "buffer_ids": buffer_ids,
-                                    "message": "检索结果已写入会话 RAG 证据缓冲区，请从系统消息中的完整缓冲区读取。",
-                                },
-                                ensure_ascii=False,
                             )
                         else:
                             retrieval_data = None
@@ -661,7 +624,7 @@ class AgentLoop:
                     yield AgentEvent(
                         type="retrieval",
                         data=retrieval_data,
-                        sources=citation_registry.sources(),
+                        sources=citation_registry.sources(display_ids=True),
                         round_number=round_number,
                         tool_name=name,
                         tool_call_id=tool_call["id"],
@@ -689,10 +652,6 @@ class AgentLoop:
                             skills=skill_summaries,
                             max_history_messages=limit,
                             system_prompt=system_prompt,
-                            rag_buffer_sources=tuple(
-                                source for source in citation_registry.sources()
-                                if source.get("buffer_id") is not None
-                            ),
                         )
                         history_group_sizes = tuple(
                             len(group)
@@ -705,7 +664,7 @@ class AgentLoop:
                     tool_name=name,
                     tool_call_id=tool_call["id"],
                     success=success,
-                    sources=citation_registry.sources(),
+                    sources=citation_registry.sources(display_ids=True),
                 )
                 messages.append(
                     {

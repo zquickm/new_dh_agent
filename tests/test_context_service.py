@@ -1,3 +1,4 @@
+import json
 import unittest
 from copy import deepcopy
 from unittest.mock import patch
@@ -35,21 +36,30 @@ class ContextServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("用户指定历史时间范围时，以该范围为准", prompt)
         self.assertNotIn(timestamps[0], prompts[1])
 
-    def test_historical_rag_tool_exchange_is_replaced_by_buffer_context(self):
-        history = [ChatMessage.model_validate(item) for item in [
-            {"role": "assistant", "content": "", "tool_calls": [
-                {"id": "rag", "name": "rag_search", "args": {"query": "旧查询"}},
-                {"id": "db", "name": "database_query", "args": {"question": "数据"}},
-            ]},
-            {"role": "tool", "tool_call_id": "rag", "name": "rag_search", "content": "旧片段"},
-            {"role": "tool", "tool_call_id": "db", "name": "database_query", "content": "数据库结果"},
-        ]]
-
-        filtered = ContextService.filter_rag_history(history)
-
-        self.assertEqual([call["id"] for call in filtered[0].tool_calls], ["db"])
-        self.assertEqual(len(filtered), 2)
-        self.assertEqual(filtered[1].name, "database_query")
+    def test_historical_rag_results_keep_only_status_without_mutation(self):
+        for result, expected in (
+            ({"chunks": [{"text": "旧片段"}]}, True),
+            ({"chunks": []}, True),
+            ({"success": True, "buffer_updated": True, "buffer_ids": [19]}, True),
+            ({"success": False, "error": "包含旧片段的错误"}, False),
+            ("无效结果", False),
+        ):
+            with self.subTest(result=result):
+                history = [ChatMessage.model_validate(item) for item in [
+                    {"role": "assistant", "content": "", "tool_calls": [
+                        {"id": "rag", "function": {"name": "rag_search", "arguments": "{}"}},
+                        {"id": "db", "name": "database_query", "args": {}},
+                    ]},
+                    {"role": "tool", "tool_call_id": "rag", "content": json.dumps(result)},
+                    {"role": "tool", "tool_call_id": "db", "name": "database_query", "content": "数据库结果"},
+                ]]
+                before = deepcopy(history)
+                filtered = ContextService.filter_rag_history(history)
+                self.assertEqual(filtered[0], history[0])
+                self.assertEqual(json.loads(filtered[1].content), {"success": expected})
+                self.assertEqual(filtered[2], history[2])
+                self.assertEqual(history, before)
+                self.assertEqual(ContextService.filter_rag_history(filtered), filtered)
 
     def test_skill_history_filters_only_disabled_calls_without_mutation(self):
         from langchain_core.messages import convert_to_messages

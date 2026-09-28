@@ -34,109 +34,46 @@ class FakeLlm:
 
 
 class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
-    async def test_full_persisted_rag_buffer_is_injected_and_referenced(self):
-        llm = FakeLlm([(["已有证据<<SRC_19>>"], [])])
-        agent = AgentLoop(llm, ToolExecutor())
-        try:
-            events = [event async for event in agent.run_stream(
-                "继续提问",
-                [],
-                rag_buffer_sources=[{
-                    "buffer_id": 19,
-                    "source": "资料.pdf",
-                    "preview": "持久化证据正文",
-                    "page_index": 2,
-                }],
-            )]
-            self.assertIn("持久化证据正文", llm.calls[0][0][0]["content"])
-            self.assertIn('"source_key":"<<SRC_19>>"', llm.calls[0][0][0]["content"])
-            answer = "".join(
-                event.content for event in events if event.type == "answer_delta"
-            )
-            self.assertEqual(answer, "已有证据[[cite:1]]")
-            self.assertEqual(llm.temperatures, [agent.temperature])
-            source = next(
-                event.sources[0] for event in events
-                if event.type == "answer_delta" and event.sources
-            )
-            self.assertEqual((source["buffer_id"], source["citation_id"]), (19, 1))
-        finally:
-            await agent.close()
-
-    async def test_retrieved_rag_text_is_only_exposed_through_refreshed_buffer(self):
-        llm = FakeLlm([
-            (
-                [],
-                [{
-                    "id": "call-rag",
-                    "name": "rag_search",
-                    "args": {"query": "重复证据"},
-                    "type": "tool_call",
-                }],
-            ),
-            (["引用已有证据<<SRC_19>>"], []),
-        ])
+    async def test_rag_evidence_is_local_to_user_turn_and_history_keeps_status(self):
+        evidence = "仅本次检索可见的证据正文"
 
         async def rag_search(query):
-            return {
-                "query": query,
-                "chunks": [{
-                    "text": "不会重复进入上下文的证据正文",
-                    "source": "资料.pdf",
-                    "score": 0.9,
-                    "document_id": "doc-1",
-                    "chunk_id": "chunk-1",
-                    "knowledge_id": "kb-1",
-                    "page_index": 0,
-                }],
-            }
+            return {"chunks": [{"text": evidence, "source": "资料.pdf"}]}
 
-        async def persist_chunks(chunks, query):
-            self.assertEqual(query, "重复证据")
-            self.assertEqual(len(chunks), 1)
-            return [{
-                "buffer_id": 19,
-                "identity_hash": "hash",
-                "text": chunks[0]["text"],
-                "source": chunks[0]["source"],
-                "score": chunks[0]["score"],
-                "document_id": chunks[0]["document_id"],
-                "chunk_id": chunks[0]["chunk_id"],
-                "knowledge_id": chunks[0]["knowledge_id"],
-                "page_index": chunks[0]["page_index"],
-            }]
+        async def query(question):
+            return {"success": True, "rows": [{"value": 1}]}
 
+        llm = FakeLlm([
+            ([], [{"id": "rag", "name": "rag_search", "args": {"query": "资料"}}]),
+            ([], [{"id": "db", "name": "database_query", "args": {"question": "数据"}}]),
+            (["报告结论<<SRC_1>>"], []),
+            (["需要重新检索。"], []),
+        ])
         tools = ToolExecutor()
-        tools.register("rag_search", "检索内部文档", rag_search)
+        tools.register("rag_search", "检索", rag_search)
+        tools.register("database_query", "查询", query)
         agent = AgentLoop(llm, tools)
+        saved = []
         try:
             events = [event async for event in agent.run_stream(
-                "继续提问",
-                [],
-                rag_buffer_sources=[{
-                    "buffer_id": 19,
-                    "source": "资料.pdf",
-                    "preview": "不会重复进入上下文的证据正文",
-                    "page_index": 0,
-                }],
-                rag_buffer_callback=persist_chunks,
+                "查询资料", [], model_messages_callback=lambda batch: saved.append(batch),
             )]
-            second_round_messages = llm.calls[1][0]
-            evidence = "不会重复进入上下文的证据正文"
-            self.assertEqual(
-                sum(evidence in str(item.get("content") or "") for item in second_round_messages),
-                1,
-            )
-            rag_receipt = next(
-                item for item in second_round_messages
-                if item.get("tool_call_id") == "call-rag"
-            )
-            self.assertNotIn(evidence, rag_receipt["content"])
-            self.assertEqual(json.loads(rag_receipt["content"])["buffer_ids"], [19])
-            answer = "".join(
-                event.content for event in events if event.type == "answer_delta"
-            )
-            self.assertEqual(answer, "引用已有证据[[cite:1]]")
+            for messages, _ in llm.calls[1:3]:
+                self.assertNotIn(evidence, messages[0]["content"])
+                result = next(item for item in messages if item.get("tool_call_id") == "rag")
+                self.assertEqual(json.loads(result["content"])["chunks"][0]["text"], evidence)
+                self.assertEqual(json.loads(result["content"])["chunks"][0]["source_key"], "<<SRC_1>>")
+            self.assertEqual("".join(event.content for event in events if event.type == "answer_delta"),
+                             "报告结论[[cite:1]]")
+            history = [ChatMessage(role="user", content="查询资料")]
+            history.extend(ChatMessage.model_validate(item) for item in saved[-1])
+            self.assertNotIn(evidence, json.dumps(saved, ensure_ascii=False))
+            _ = [event async for event in agent.run_stream("继续提问", history)]
+            next_messages = llm.calls[-1][0]
+            result = next(item for item in next_messages if item.get("tool_call_id") == "rag")
+            self.assertEqual(json.loads(result["content"]), {"success": True})
+            self.assertNotIn(evidence, json.dumps(next_messages, ensure_ascii=False))
+            self.assertNotIn("<<SRC_1>>", json.dumps(next_messages, ensure_ascii=False))
         finally:
             await agent.close()
 
@@ -492,7 +429,7 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[1].data["result_count"], 1)
         self.assertEqual(events[1].data["chunks"][0]["preview"], "报告依据")
         self.assertEqual(events[1].data["chunks"][0]["page_index"], 2)
-        self.assertEqual(events[1].sources[0]["citation_id"], 1)
+        self.assertIsNone(events[1].sources[0]["citation_id"])
         self.assertEqual(
             "".join(event.content for event in events if event.type == "answer_delta"),
             "综合回答[[cite:1]]",
@@ -502,10 +439,9 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             item for item in final_messages
             if item.get("tool_call_id") == "call-rag"
         )
-        self.assertIn('"buffer_updated": true', rag_tool_message["content"])
-        self.assertNotIn("报告依据", rag_tool_message["content"])
-        self.assertIn("报告依据", final_messages[0]["content"])
-        self.assertIn('"source_key":"<<SRC_1>>"', final_messages[0]["content"])
+        self.assertIn("报告依据", rag_tool_message["content"])
+        self.assertNotIn("报告依据", final_messages[0]["content"])
+        self.assertEqual(json.loads(rag_tool_message["content"])["chunks"][0]["source_key"], "<<SRC_1>>")
         self.assertEqual(
             sum("报告依据" in str(item.get("content") or "") for item in final_messages),
             1,

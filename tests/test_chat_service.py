@@ -1044,7 +1044,11 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
             "通用空间查询服务参数无效：query_type 不能为空",
         )
 
-    async def test_answer_agent_streams_citation_before_completion(self):
+    @patch.object(conversation_repository, "list_rag_buffer", new_callable=AsyncMock,
+                  side_effect=AssertionError("聊天不应读取会话 RAG 缓冲区"))
+    @patch.object(conversation_repository, "upsert_rag_buffer", new_callable=AsyncMock,
+                  side_effect=AssertionError("聊天不应写入会话 RAG 缓冲区"))
+    async def test_answer_agent_streams_citation_before_completion(self, write_buffer, read_buffer):
         class DelayedLlm:
             model = "fake-model"
 
@@ -1124,14 +1128,14 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(done_payload["data"]["sources"][0]["citation_id"], 1)
         self.assertGreater(done_payload["data"]["sources"][0]["buffer_id"], 0)
-        persisted_buffer = await conversation_repository.list_rag_buffer(
+        read_buffer.assert_not_awaited()
+        write_buffer.assert_not_awaited()
+        detail = await conversation_repository.get(
             done_payload["data"]["conversation_id"], user_id=TEST_USER_ID
         )
-        self.assertEqual(len(persisted_buffer), 1)
-        self.assertEqual(
-            persisted_buffer[0].buffer_id,
-            done_payload["data"]["sources"][0]["buffer_id"],
-        )
+        rag_result = next(item for item in detail.messages[-1].model_messages
+                          if item.get("name") == "rag_search")
+        self.assertEqual(json.loads(rag_result["content"]), {"success": True})
         await service.close()
 
     async def test_map_action_has_run_batch_and_sequence_metadata(self):
