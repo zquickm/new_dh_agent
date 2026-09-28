@@ -1,4 +1,5 @@
 import json
+import asyncio
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -10,7 +11,7 @@ from agents.agent_loop import AgentLoop
 from agents.skills import SkillCatalog
 from agents.tools.executor import ToolExecutor
 from agents.tools.load_skill import load_skill
-from agents.tools.map_action import execute_map_action
+from agents.tools.map_action import execute_map_action, spatial_map_results
 from agents.tools.spatial_query_service import (
     TOOL_DESCRIPTION, TOOL_NAME, TOOL_PARAMETERS, SpatialQueryServiceTool,
 )
@@ -343,6 +344,7 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(finished[-1].tool_name, "map_action")
                 for event, item in zip(finished[2:5], self.results["list"]):
                     content = json.loads(event.content)
+                    self.assertTrue(content.pop("result_ref").startswith("spatial-"))
                     self.assertEqual(content, {
                         **self.element_results[item["dataKey"]], "operation": "query_spatial_element",
                     })
@@ -354,6 +356,106 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(actions[0]["payload"]["markers"][0]["coordinates"], [122.5, 31.3])
                 self.assertTrue(all("clear_selection" not in action for action in actions))
                 self.assertTrue(all(event.tool_name == "map_action" for event in events if event.type == "map_action"))
+
+    @patch("services.context_service.expand_query_synonyms", new=lambda text: text)
+    async def test_result_references_render_original_pages_and_expire_after_run(self):
+        features = [
+            self.results["query"]["features"][0],
+            {"type": "Feature", "id": "line", "properties": {"name": "航线", "value": 0},
+             "geometry": {"type": "LineString", "coordinates": [[122, 30], [123, 31]]}},
+            {"type": "Feature", "id": "missing", "properties": {"name": "无坐标"}, "geometry": None},
+        ]
+        self.element_results = {"test_point": {"type": "FeatureCollection", "total": 3, "features": features}}
+        query = {"element": "test_point", "includeGeometry": True, "limit": 1}
+        references = []
+
+        class ReferenceLlm:
+            model = "fake-model"
+
+            async def stream(self, messages, tools=None, temperature=0):
+                observations = [json.loads(m["content"]) for m in messages if m["role"] == "tool"]
+                if not observations:
+                    yield "", [{"id": f"query-{offset}", "name": TOOL_NAME, "args": {
+                        "operation": "query_spatial_element", "query": {**query, "offset": offset},
+                    }} for offset in range(3)]
+                elif len(observations) == 3:
+                    references.extend(item["result_ref"] for item in observations)
+                    yield "", [
+                        *[{"id": f"map-{i}", "name": "map_action", "args": {
+                            "action_type": "GEOJSON_ADD", "payload": {"result_ref": ref},
+                        }} for i, ref in enumerate(references)],
+                        {"id": "fly", "name": "map_action", "args": {
+                            "action_type": "FLY_TO", "payload": {"result_ref": references[0]},
+                        }},
+                    ]
+                else:
+                    yield "已提交两条几何，一条缺少坐标。", []
+
+        agent = AgentLoop(ReferenceLlm(), self.executor)
+        events = []
+        async for event in agent.run_stream("展示空间要素", []):
+            self.assertIsNone(spatial_map_results.get())
+            events.append(event)
+        finished = [event for event in events if event.type == "tool_finished"]
+        self.assertTrue(all(event.success for event in finished))
+        self.assertEqual(len(set(references)), 3)
+        actions = [event.data for event in events if event.type == "map_action"]
+        self.assertEqual(len(actions), 6)
+        for index, action in enumerate(actions[:3]):
+            self.assertEqual(action["payload"], {
+                "geojson": {"type": "FeatureCollection", "features": features[index:index + 1]},
+                "layer_id": "spatial-element:test_point", "fit_bounds": False, "replace": index == 0,
+            })
+        self.assertEqual(actions[-2]["payload"]["geojson"]["features"], features[:1])
+        self.assertEqual(actions[-1]["payload"]["center"], features[0]["geometry"]["coordinates"])
+        self.assertEqual([r["payload"] for r in self.requests], [{**query, "offset": i} for i in range(3)])
+
+        agent.llm = FakeLlm([
+            ([], [{"id": "stale-map", "name": "map_action", "args": {
+                "action_type": "GEOJSON_ADD", "payload": {"result_ref": references[0]},
+            }}]),
+            (["引用已过期，需要重新查询。"], []),
+        ])
+        events = [event async for event in agent.run_stream("继续展示", [])]
+        self.assertFalse(any(event.type == "map_action" for event in events))
+        failure = next(event for event in events if event.type == "tool_finished")
+        self.assertFalse(failure.success)
+        self.assertIn("已过期", failure.content)
+        self.assertIsNone(spatial_map_results.get())
+
+    @patch("services.context_service.expand_query_synonyms", new=lambda text: text)
+    async def test_concurrent_runs_have_separate_reference_caches(self):
+        caches = []
+        both_started = asyncio.Event()
+
+        async def query_and_check():
+            cache = spatial_map_results.get()
+            caches.append(cache)
+            if len(caches) == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=2)
+            result = await self.tool.execute("query_spatial_element", query={
+                "element": "obs_station", "includeGeometry": True,
+            })
+            self.assertEqual(list(cache), [result.content["result_ref"]])
+            self.assertEqual(cache[result.content["result_ref"]]["layer_id"], "observation-stations")
+            return result
+
+        self.executor.register("query_and_check", "并发查询", query_and_check)
+        llm = FakeLlm([
+            ([], [{"id": "query", "name": "query_and_check", "args": {}}]),
+            ([], [{"id": "query", "name": "query_and_check", "args": {}}]),
+            (["完成"], []), (["完成"], []),
+        ])
+        agent = AgentLoop(llm, self.executor)
+
+        async def run():
+            return [event async for event in agent.run_stream("查询", [])]
+
+        runs = await asyncio.gather(run(), run())
+        self.assertIsNot(caches[0], caches[1])
+        self.assertTrue(all(event.success for events in runs for event in events if event.type == "tool_finished"))
+        self.assertIsNone(spatial_map_results.get())
 
     async def test_queries_return_one_page_with_geometry_for_explicit_map_action(self):
         features = [

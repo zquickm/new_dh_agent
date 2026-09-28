@@ -2,18 +2,25 @@ from __future__ import annotations
 
 import json
 import math
+from contextvars import ContextVar
 from typing import Any
 
 from agents.tools.executor import ToolOutput
 
 
+# Bound only while a tool executes; each AgentLoop run owns a separate dictionary.
+spatial_map_results: ContextVar[dict[str, dict[str, Any]] | None] = ContextVar(
+    "spatial_map_results", default=None,
+)
+
 TOOL_NAME = "map_action"
 TOOL_DESCRIPTION = (
     "向前端发送地图定位、点线面绘制、图层清除、弹窗、表格和播放等动作，不查询业务数据。"
-    "MARKER_ADD 接收点位；GEOJSON_ADD 接收 FeatureCollection。"
+    "空间查询返回 result_ref 时，优先 GEOJSON_ADD + payload.result_ref，直接复用原始点线面及完整属性，勿重写坐标或弹窗。"
+    "图层、分页 replace 和 fit_bounds 默认由后端补齐；MARKER_ADD 和内联 geojson 仍可用于其他数据来源。"
     "CLEAR 可按 layer_ids 清除图层；顶层 clear_selection=true 配合空 payload 清除会话选区。"
     "FLY_TO 会清除旧站点和定位图层、添加目标 GeoJSON 并移动视野；"
-    "定位站点时传入包含完整属性的单点 geojson，可由其几何自动确定 center。"
+    "定位站点时引用单点查询 result_ref 或传入完整单点 geojson，由几何自动确定 center。"
     "成功回执仅表示指令已发送，不表示前端渲染完成。"
 )
 MAP_ACTION_TYPES = (
@@ -59,9 +66,17 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "各动作参数见 payload 字段说明。"
             ),
             "properties": {
+                "result_ref": {
+                    "type": "string", "minLength": 1,
+                    "description": (
+                        "当前任务空间查询返回的 result_ref；GEOJSON_ADD 或单点 FLY_TO 可用，"
+                        "与 geojson 互斥。GEOJSON_ADD 仅传此字段即可：按类别分层、首分页替换后续页追加、"
+                        "fit_bounds=false；可显式覆盖展示参数。引用不跨任务保留，失效时重新查询。"
+                    ),
+                },
                 "geojson": {
                     "type": "object",
-                    "description": "GEOJSON_ADD 必填；FLY_TO 定位站点时传入仅含目标 Point 的 FeatureCollection，保留真实 id、geometry 和完整 properties，供前端点击查看详情。",
+                    "description": "未使用 result_ref 时，GEOJSON_ADD 必填；FLY_TO 定位站点时传入仅含目标 Point 的 FeatureCollection，保留真实 id、geometry 和完整 properties，供前端点击查看详情。",
                     "properties": {
                         "type": {"type": "string", "enum": ["FeatureCollection"], "description": "固定为 FeatureCollection。"},
                         "features": {
@@ -238,7 +253,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 },
                 "layer_id": {
                     "type": "string",
-                    "description": "MARKER_ADD 可选、GEOJSON_ADD 必填的目标图层 ID。",
+                    "description": "目标图层 ID；MARKER_ADD 可选，GEOJSON_ADD 使用 result_ref 时按类别自动补齐，否则必填。",
                 },
                 "layer_ids": {
                     "type": "array",
@@ -295,6 +310,20 @@ def execute_map_action(
         raise ValueError("clear_selection 只能用于 CLEAR")
     if "clear_selection" in payload:
         raise ValueError("clear_selection 是顶层工具参数，不得放入前端 payload")
+
+    if "result_ref" in payload:
+        if normalized_type not in {"GEOJSON_ADD", "FLY_TO"}:
+            raise ValueError("result_ref 只能用于 GEOJSON_ADD 或 FLY_TO")
+        if "geojson" in payload:
+            raise ValueError("result_ref 与 geojson 不能同时提供")
+        result_ref = payload["result_ref"]
+        results = spatial_map_results.get()
+        if not isinstance(result_ref, str) or not results or result_ref not in results:
+            raise ValueError("result_ref 无效或已过期，请在当前任务重新查询空间数据")
+        cached = results[result_ref]
+        defaults = cached if normalized_type == "GEOJSON_ADD" else {"geojson": cached["geojson"]}
+        payload = {**defaults, **payload}
+        payload.pop("result_ref")
 
     normalized_payload = payload
     if normalized_type == "FLY_TO":

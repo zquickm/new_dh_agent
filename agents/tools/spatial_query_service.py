@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Any, Optional
+from uuid import uuid4
 
 from agents.tools.executor import ToolOutput
+from agents.tools.map_action import spatial_map_results
 from agents.tools.spatial_query_schema import QUERY_PARAMETERS, SpatialElementQuery
 from config.settings import get_settings
 from tool_backends.spatial_backend import SpatialServiceClient
@@ -16,6 +18,7 @@ TOOL_DESCRIPTION = (
     "使用 query.fields、conditions 或 orderBy 前，缺少当前类别字段定义时须先调用 get_spatial_element_detail，"
     "收到定义后再查询；字段名、用途和运算符以定义为准，不猜测。"
     "通用查询按 limit/offset 返回一页 GeoJSON；需要几何时设置 includeGeometry=true。"
+    "返回 result_ref 时，地图展示直接调用 map_action(action_type=GEOJSON_ADD, payload={result_ref:该引用})，无需重新组装 features。"
     "仅返回数据，不发送地图动作；地图展示使用 map_action。"
 )
 TOOL_PARAMETERS: dict[str, Any] = {
@@ -212,6 +215,16 @@ class SpatialQueryServiceTool:
             payload = query.model_dump(exclude_unset=True, exclude_none=True)
             json.dumps(payload, allow_nan=False)
             data = await self.client.query_spatial_element(payload)
+            results = spatial_map_results.get()
+            if query.includeGeometry and results is not None:
+                result_ref = "spatial-" + uuid4().hex
+                results[result_ref] = {
+                    "geojson": {"type": "FeatureCollection", "features": data["features"]},
+                    "layer_id": "observation-stations" if query.element == "obs_station" else f"spatial-element:{query.element}",
+                    "replace": query.offset == 0,
+                    "fit_bounds": False,
+                }
+                data = {**data, "result_ref": result_ref}
         elif operation == "station_status":
             tznos = self._string_list(arguments.get("tznos"), "tznos", maximum=50)
             data = await self.client.query_station_status(tznos)

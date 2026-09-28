@@ -50,12 +50,12 @@ description: 查询区域空间要素（观测站、断面测点及线面）并�
 
 ## 地图联动
 
-- “杭州湾有哪些观测站点”等地点或选区查询默认同时需要文字回答和地图展示，无需用户另说“标点”。通用查询设置 `query.includeGeometry=true`，取得真实结果后调用 `map_action`：点位使用 `MARKER_ADD`，线面使用 `GEOJSON_ADD`，再完成回答。用户明确只要文字或仅为内部候选查找时不绘图；缺少有效坐标时说明限制，不编造点位。
-- 站点 `markers` 保留真实 `id`、`name`、`coordinates` 和已有的 `type`、`status`；业务观测站有真实站号时以站号作为 `id`。由助手根据查询结果组装每个站点的 `popup_content={"title":站点名称,"fields":[{"label":字段名称,"value":真实字段值}]}`，保留已有的站号、类型、所属区域、管理单位等详情，不省略弹窗或编造缺失信息。查询工具不会自动生成弹窗。
-- 通用查询每次只返回一页。需要完整结果时，保持类别、范围、过滤及稳定排序，通过 `query.limit`、`query.offset` 补取；下一页偏移为当前偏移加本页 `returned`。返回零条或分页结果异常时停止并说明未取全。合并同一图层已取得的点位后提交，避免分页绘制覆盖已有点位。
+- “杭州湾有哪些观测站点”等地点或选区查询默认同时需要文字回答和地图展示，无需用户另说“标点”。通用查询设置 `query.includeGeometry=true`，取得 `result_ref` 后，点线面统一调用 `map_action(action_type="GEOJSON_ADD", payload={"result_ref":查询返回的引用})`，再完成回答。后端直接复用原始 Feature.id、geometry 和完整 properties，前端按 properties 展示详情；不要重新抄写 features、坐标或逐个组装弹窗。用户明确只要文字或仅为内部候选查找时不绘图；缺少有效坐标时说明限制，不编造点位。
+- `result_ref` 仅在当前任务内有效，不从历史复用；失效时按当前真实条件重新查询。其他数据来源没有引用时，仍可使用内联 `geojson` 或 `MARKER_ADD`；后者保留真实 `id`、`name`、`coordinates` 和已有属性，按真实字段组装 `popup_content`，不编造缺失信息。
+- 通用查询每次只返回一页。需要完整结果时，保持类别、范围、过滤及稳定排序，通过 `query.limit`、`query.offset` 补取；下一页偏移为当前偏移加本页 `returned`。返回零条或分页结果异常时停止并说明未取全。每页取得后可直接用对应 `result_ref` 展示，按分页顺序提交；后端默认 `offset=0` 替换图层、后续页追加，无需模型合并整批几何。若首个展示页的 offset 大于零，显式传 `replace=true`，避免混入旧图层。
 - 业务观测站使用 `layer_id="observation-stations"`，属于同一图层的不同类别结果合并提交；其他要素按稳定类别标识分层。保留其他图层和有效选区，有选区时 `fit_bounds=false`。查询成功为空时可清除对应图层，失败时保留已有结果。
 - 已有数据库等工具返回的真实点位或几何可直接调用 `map_action` 展示，无需重复查询。位置和弹窗信息均未变化的已展示对象无需重复绘制；缺少弹窗时用相同真实标识补齐。单站追问复用真实坐标，缺少时用通用查询按真实站号获取；不按站号或返回顺序自行连线。
-- 飞行定位某个站点时，使用 `FLY_TO`，在 `payload.geojson` 中传入仅包含目标站点的 FeatureCollection，保留查询返回的真实 Feature.id、Point geometry 和完整 properties（包括站号、站名及已有详情）。缺少几何或详情时先按真实站号查询并设置 `includeGeometry=true`。由几何自动确定飞行中心，不再只传 center 和 marker_name 丢弃详情；不要另加重复 MARKER_ADD。前端通过 GeoJSON 要素拾取展示 properties 中的真实信息。
+- 飞行定位某个站点时，使用 `FLY_TO`，优先传 `payload.result_ref` 引用仅包含目标站点的单点查询结果；没有引用时在 `payload.geojson` 中传入仅包含目标站点的 FeatureCollection，保留查询返回的真实 Feature.id、Point geometry 和完整 properties（包括站号、站名及已有详情）。缺少几何或详情时先按真实站号查询并设置 `includeGeometry=true`。由几何自动确定飞行中心，不再只传 center 和 marker_name 丢弃详情；不要另加重复 MARKER_ADD。前端通过 GeoJSON 要素拾取展示 properties 中的真实信息。
 - 定位、表格、弹窗等额外展示使用 `map_action`。局部清除仅指定目标图层，不取消选区；`FLY_TO` 会清除旧观测站和定位图层、添加目标 GeoJSON，再移动视野。仅有可信坐标的普通地点定位可传 center 和 marker_name，生成的点只含名称，不冒充站点详情；没有可信坐标时不编造定位。
 
 ## 结果解释
