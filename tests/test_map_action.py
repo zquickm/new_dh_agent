@@ -1,9 +1,34 @@
 import unittest
 
-from agents.tools.map_action import TOOL_PARAMETERS, execute_map_action
+from agents.tools.map_action import TOOL_PARAMETERS, execute_map_action, spatial_map_results
 
 
 class MapActionToolTest(unittest.TestCase):
+    def test_result_reference_validates_input_and_preserves_display_overrides(self):
+        cached = {"geojson": {"type": "FeatureCollection", "features": []},
+                  "layer_id": "spatial-element:test", "replace": True, "fit_bounds": False}
+        token = spatial_map_results.set({"result-1": cached})
+        try:
+            payload = {"result_ref": "result-1", "layer_id": "custom", "replace": False, "fit_bounds": True}
+            result = execute_map_action("GEOJSON_ADD", payload)
+            self.assertEqual(result.client_events[0]["payload"], {
+                "geojson": cached["geojson"], "layer_id": "custom", "replace": False, "fit_bounds": True,
+            })
+            self.assertEqual(payload["result_ref"], "result-1")
+            self.assertEqual(cached["layer_id"], "spatial-element:test")
+            for action, invalid in [
+                ("CLEAR", {"result_ref": "result-1"}),
+                ("FLY_TO", {"result_ref": "result-1"}),  # Empty result is not a flight target.
+                ("GEOJSON_ADD", {"result_ref": "result-1", "geojson": cached["geojson"]}),
+                *[("GEOJSON_ADD", {"result_ref": ref}) for ref in ("missing", "", None, [], {})],
+            ]:
+                with self.subTest(action=action, invalid=invalid), self.assertRaises(ValueError):
+                    execute_map_action(action, invalid)
+        finally:
+            spatial_map_results.reset(token)
+        with self.assertRaisesRegex(ValueError, "已过期"):
+            execute_map_action("GEOJSON_ADD", {"result_ref": "result-1"})
+
     def test_geojson_action_preserves_geometry_and_validates_envelope(self):
         geojson = {"type": "FeatureCollection", "features": [
             {"type": "Feature", "id": 1, "properties": {"name": "航线"},

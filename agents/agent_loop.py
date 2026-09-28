@@ -16,6 +16,7 @@ from agents.llm_client import HelloAgentsLLM
 from agents.skills import SkillCatalog
 from agents.tool_audit import ToolAuditRecorder
 from agents.tools.executor import ToolExecutor
+from agents.tools.map_action import spatial_map_results
 from agents.tools.registry import build_skill_catalog, build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage, FrontendContext
@@ -188,6 +189,7 @@ class AgentLoop:
         citation_registry = CitationRegistry(rag_buffer_sources)
         has_streamed_content = False
         tool_sequence = 0
+        map_results: dict[str, dict[str, Any]] = {}
         model_messages: list[dict[str, Any]] = []
 
         async def save_model_messages(batch: list[dict[str, Any]]) -> None:
@@ -472,9 +474,14 @@ class AgentLoop:
                 retryable = False
                 audit_observation = ""
                 try:
-                    observation, client_events = await self.tools.execute_with_events(
-                        name, tool_call["args"], enabled_skill_names=enabled_skill_names
-                    )
+                    token = spatial_map_results.set(map_results)
+                    try:
+                        observation, client_events = await self.tools.execute_with_events(
+                            name, tool_call["args"], enabled_skill_names=enabled_skill_names
+                        )
+                    finally:
+                        # Reset before yielding, including failure/cancellation paths.
+                        spatial_map_results.reset(token)
                     audit_observation = observation
                     failure_stage = "result_processing"
                     semantic_error = _semantic_tool_error(
@@ -605,6 +612,8 @@ class AgentLoop:
                             observation = f"{service}调用失败{context}：{detail}"
                     elif name == "dm_duanmian_analysis" and isinstance(exc, ValueError):
                         observation = f"断面专题分析参数无效：{exc}"
+                    elif name == "map_action" and isinstance(exc, ValueError):
+                        observation = f"地图操作参数无效：{exc}"
                     else:
                         observation = "工具执行失败"
                     if not audit_observation:

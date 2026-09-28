@@ -276,7 +276,8 @@ SPATIAL_API_KEY=
 
 `spatial_query_service` 的所有操作只返回查询数据，不清图、不标点、不定位，也不为了地图展示额外查询单站详情。已移除 `render_map` 参数和 `map_result` 绘图回执；旧调用传入该参数时返回迁移提示。
 通用查询保留 FeatureCollection、features、total、returned，每次调用只查询一页；需要绘图时请求 `includeGeometry=true`，使用 `limit/offset` 按原范围和条件补齐后续页，不在工具内部自动取全。
-取得数据后由模型显式调用 `map_action`：点位使用 `MARKER_ADD`，线面使用 `GEOJSON_ADD`，清图和定位也由地图工具完成。不同类别分层展示，保留选区；未取全或缺少几何时说明实际覆盖范围。
+Agent 任务内请求 `includeGeometry=true` 后，查询结果额外返回 `result_ref`。模型显式调用 `map_action(action_type="GEOJSON_ADD", payload={"result_ref":查询返回的引用})` 即可展示点线面；后端直接复用原始 GeoJSON，避免模型再次生成整批坐标和属性。默认图层为 `spatial-element:{dataKey}`（`obs_station` 使用 `observation-stations`），`offset=0` 时替换、后续页追加，`fit_bounds=false`；展示参数可显式覆盖。各页按顺序提交，首个展示页 offset 大于零时传 `replace=true`。引用按任务隔离，只在当前任务内有效；历史引用失效时重新查询。查询仍保留完整 features、total、returned，不自动绘图或翻页。
+引用由后端展开，前端仍收到现有 `GEOJSON_ADD` 和完整 `payload.geojson`，不接收 `result_ref`；详情沿用 GeoJSON properties 拾取。没有引用的其他数据来源仍支持内联 GeoJSON、`MARKER_ADD`；清图和定位由地图工具完成。不同类别分层展示，保留选区；未取全或缺少几何时说明实际覆盖范围。单点查询引用同样可用于 `FLY_TO`。
 地图动作回执仅代表指令已发送，不代表前端已经渲染。观测站搜索保留缺少坐标的业务记录，缺少坐标只影响后续绘图，不影响查询数量。
 工具错误统一标识“通用空间查询服务”，保留 operation、HTTP 路径及服务错误说明；查询失败不代表无匹配数据。
 `observation_range` 对应 `GET /api/spatial/stations/observation-range`，参数为 `tzno`、`data_type`、`start_time`、`end_time`、`order_by`、`max_records`。HTTP 500 表示上游服务未能完成请求；仅凭“服务内部错误”无法区分数据库、字段映射或时间处理异常。需结合智能体 `tool_failed` 日志中的 run_id、call_id、arguments 与同一时刻空间服务日志排查；不要把失败当成无数据，也不要盲目改日期或指标重复查询。
@@ -294,7 +295,7 @@ SPATIAL_API_KEY=
 查询完成后，模型显式调用 `map_action` 才会发送地图事件。当前动作协议版本为 `1.0`：
 
 - `CLEAR` 可清除指定图层；是否清理由 Skill 根据查询结果决定。
-- `MARKER_ADD` 添加真实点位；线面通过 `GEOJSON_ADD` 展示。
+- 通用查询优先通过 `result_ref` 展开为 `GEOJSON_ADD` 展示点线面；`MARKER_ADD` 仍支持其他来源的真实点位。
 - 单站状态、最新观测和时序查询不自动标点、清图或构造弹窗，地图展示由 `map_action` 完成。
 - 独立调用 `FLY_TO` 时，后端会展开为 `CLEAR → GEOJSON_ADD → FLY_TO`；站点定位传入完整单点 `geojson`，普通坐标定位仍支持 `center`（兼容输入 `coordinates`）和 `zoom`。保留最新定位点及其属性，切换后需要展示其他结果时再添加对应图层。
 
