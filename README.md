@@ -333,7 +333,7 @@ data: {
 
 | 参数 | 规则 |
 | --- | --- |
-| `analysis` | 必填：`depth-curve` 沿水深曲线、`temp-section` 化学要素剖面、`ts-scatter` T-S 点聚图、`nutrient` 营养盐结构、`do-profile` 溶解氧垂向分布、`surface` 表层沿程变化 |
+| `analysis` | 必填：`temp-section` 整条断面的化学要素剖面（海水温度、盐度等）、`ts-scatter` T-S 点聚图、`nutrient` 营养盐结构、`do-profile` 溶解氧垂向分布、`surface` 表层沿程变化 |
 | `section` | 可选：`E1` / `E2` / `E3`；`ts-scatter` 固定合并全部断面，传入的断面会被移除 |
 | `voyage` | 可选：有效的 `yyyy-MM`；省略时不自动查询 |
 | `elementType` | 可选：`chemistry` / `hydromet`；`temp-section` 始终设为 `chemistry` |

@@ -21,6 +21,12 @@ description: 指导东海 E1、E2、E3、EL、EK 断面及辅助点的业务、�
 - 断面业务信息、报告、制度和其他非结构化资料，使用 `rag_search`，必须使用标签：`断面`优先查询相关文档。
 - 非结构化文档不能替代结构化查询结果：断面位置与基础属性以 `spatial_query_service` 返回为准，历史观测和统计分析以 `database_query` 返回为准，不用文档中的数值替代实际查询。
 
+## 专题图参数
+
+- 整条断面的海水温度、盐度等分布使用 `temp-section`；已明确的 `section`、`voyage`、`element` 必须传齐，水温为 `温度 T`、盐度为 `盐度 S`，不留给用户再次选择。
+- `surface` 同时传对应 `elementType`；其余图型及参数按 Schema。未明确的参数可省略，航次使用用户指定或已有查询结果中的实际年月，不为补参数额外查库。
+- 例：“2022年5月 E1 断面的温度情况” → `dm_duanmian_analysis(analysis="temp-section", section="E1", voyage="2022-05", element="温度 T")`。
+
 ## 断面与数据范围
 
 - 当前东海共布设5条断面（E1、E2、E3、EL、EK）及4个辅助点。

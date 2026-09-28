@@ -11,10 +11,12 @@ TOOL_NAME = "dm_duanmian_analysis"
 TOOL_DESCRIPTION = (
     "打开前端断面专题分析浮层，由前端按参数查询并出图。"
     "调用前先加载“断面业务” Skill，按其说明选择图型和参数。"
+    "整条断面的海水温度、盐度等要素分布使用 temp-section。"
+    "temp-section、surface 中，用户或上下文已明确要素时必须传 element，不依赖前端默认值。"
     "仅返回动作回执，不返回实测数据或分析结论。voyage 缺省时仅打开浮层。"
 )
 ANALYSIS_TYPES = (
-    "depth-curve", "temp-section", "ts-scatter", "nutrient", "do-profile", "surface",
+    "temp-section", "ts-scatter", "nutrient", "do-profile", "surface",
 )
 CHEMISTRY_ELEMENTS = (
     "溶解氧", "盐度 S", "温度 T", "活性磷酸盐 PO4-P", "活性硅酸盐 SiO3-N",
@@ -31,8 +33,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "type": "string",
             "enum": list(ANALYSIS_TYPES),
             "description": (
-                "分析类型：depth-curve=单要素沿水深变化曲线；"
-                "temp-section=断面剖面图（化学要素色阶剖面）；"
+                "分析类型：temp-section=整条断面的化学要素色阶剖面图（海水温度、盐度等）；"
                 "ts-scatter=T-S 点聚图（水团识别）；nutrient=营养盐结构分析；"
                 "do-profile=溶解氧垂向分布；surface=表层沿程变化图。"
             ),
@@ -50,17 +51,17 @@ TOOL_PARAMETERS: dict[str, Any] = {
         "elementType": {
             "type": "string",
             "enum": ["chemistry", "hydromet"],
-            "description": "可选要素类型：chemistry=海水化学，hydromet=水文气象；仅 depth-curve 和 surface 需要选择，其他分析类型省略。",
+            "description": "可选要素类型：chemistry=海水化学，hydromet=水文气象；仅 surface 需要选择，其他分析类型省略。",
         },
         "element": {
             "type": "string",
             "enum": list(CHEMISTRY_ELEMENTS + HYDROMET_ELEMENTS),
             "description": (
-                "depth-curve 和 surface 仅在指定 elementType 时填写；"
-                "temp-section 可直接选择 chemistry 下的要素；其他分析类型省略。"
+                "temp-section、surface 中，用户或上下文已明确要素时必须填写，不依赖前端默认值。"
+                "temp-section 仅选择 chemistry 要素；surface 同时填写对应 elementType；其他分析类型省略。"
                 f"chemistry 可选：{'、'.join(CHEMISTRY_ELEMENTS)}（温度 T 指水温）；"
                 f"hydromet 可选：{'、'.join(HYDROMET_ELEMENTS)}。"
-                "用户未指定且上下文不明确时省略。"
+                "使用枚举原值：水温为 温度 T，盐度为 盐度 S，气温为 气温。未明确要素时可省略。"
             ),
         },
     },

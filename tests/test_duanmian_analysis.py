@@ -47,6 +47,7 @@ class DuanmianAnalysisTest(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(executor.close)
         cases = [
             {}, {"analysis": "unknown"}, {"analysis": None}, {"analysis": []},
+            {"analysis": "depth-curve"},
             {"analysis": "surface", "section": "E4"},
             {"analysis": "surface", "elementType": "unknown"},
             {"analysis": "surface", "element": " "},
