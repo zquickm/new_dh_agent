@@ -270,10 +270,10 @@ class RagSearchBackend:
         self, query: str, libraries: list[tuple[str, int, int]],
         filters: Optional[dict[str, Any]] = None,
     ) -> list[RagChunk]:
-        if len(self.knowledge_ids) != 3 or any(not value for value in self.knowledge_ids):
-            raise RagToolError("请配置三个知识库的 knowledge_ids")
-        if len(set(self.knowledge_ids)) != 3:
-            raise RagToolError("三个知识库的 knowledge_ids 不得重复")
+        if not self.knowledge_ids or any(not value for value in self.knowledge_ids):
+            raise RagToolError("请配置非空的知识库 knowledge_ids")
+        if len(set(self.knowledge_ids)) != len(self.knowledge_ids):
+            raise RagToolError("知识库的 knowledge_ids 不得重复")
         if tuple(library[0] for library in libraries) != self.knowledge_ids:
             raise RagToolError("知识库配置与授权范围不一致")
         if any(recall < 1 or keep < 1 for _, recall, keep in libraries):

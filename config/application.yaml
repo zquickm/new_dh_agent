@@ -88,18 +88,10 @@ tools:
     api_token: "${RAG_API_TOKEN:}"
     tenant_id: "c3d03091-026c-413a-974e-081a4bbfe8c0"
     knowledge_bases:
-      - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
-        name: "政策法规与标准规范"
-        recall_top_n: 30 # 接口召回数量
-        top_n: 4 # 库内按返回分数降序保留数量
-      - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
+      - knowledge_id: "KLB_14a237908da04979b7f0154c15689f46"
         name: "核心业务"
-        recall_top_n: 50
-        top_n: 10
-      - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
-        name: "海洋图书与文献"
-        recall_top_n: 20
-        top_n: 4
+        recall_top_n: 50 # 接口召回数量
+        top_n: 15 # 按返回分数降序保留数量
     dept_ids:
       - "c3d03091-026c-413a-974e-081a4bbfe8c0"
     score: 0.6 # 固定召回阈值，不动态降低
