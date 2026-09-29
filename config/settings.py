@@ -249,6 +249,7 @@ class RagToolSettings(BaseModel):
     knowledge_bases: list[RagKnowledgeBaseSettings] = Field(default_factory=list)
     dept_ids: list[str] = Field(default_factory=list)
     score: float = Field(default=0.6, ge=0, le=1)
+    result_score_threshold: float = Field(default=0.6, ge=0, le=1)
     faq_score: float = Field(default=0.8, ge=0, le=1)
     search_method: int = 3
     search_scope: str = "knowledge"

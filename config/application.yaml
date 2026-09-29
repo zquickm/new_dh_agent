@@ -102,7 +102,8 @@ tools:
         top_n: 4
     dept_ids:
       - "c3d03091-026c-413a-974e-081a4bbfe8c0"
-    score: 0.6 # 固定召回阈值，不动态降低
+    score: 0.6 # 接口召回阈值，不动态降低
+    result_score_threshold: 0.6 # 本地结果最低分数，低于此值的切片会被过滤
     faq_score: 0.8
     search_method: 3
     search_scope: "knowledge"

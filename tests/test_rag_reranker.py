@@ -210,6 +210,20 @@ class VllmDocumentRerankerTest(unittest.IsolatedAsyncioTestCase):
 
 
 class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
+    async def test_search_all_filters_scores_below_result_threshold(self):
+        records = [
+            {"chunk_text": "低分", "fileName": "a.pdf", "chunk_id": "low", "score": 0.59},
+            {"chunk_text": "达标", "fileName": "b.pdf", "chunk_id": "ok", "score": 0.6},
+        ]
+        session = FakeSession(FakeResponse({"code": 200, "data": {"records": records}}))
+        backend = make_backend(session, FakeReranker())
+        backend.knowledge_ids = ("policy", "business", "literature")
+        backend.result_score_threshold = 0.6
+        result = await backend.search_all(
+            "查询", [("policy", 10, 10), ("business", 10, 10), ("literature", 10, 10)]
+        )
+        self.assertEqual([item.chunk_id for item in result], ["ok", "ok", "ok"])
+
     async def test_three_http_requests_run_serially_in_library_order(self):
         calls = []
         active_requests = 0

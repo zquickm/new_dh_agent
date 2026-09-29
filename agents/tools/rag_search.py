@@ -60,6 +60,7 @@ class RagSearchTool:
                 knowledge_ids=tuple(library.knowledge_id.strip() for library in settings.knowledge_bases),
                 dept_ids=tuple(settings.dept_ids),
                 score=settings.score,
+                result_score_threshold=settings.result_score_threshold,
                 candidate_top_n=max((library.recall_top_n for library in settings.knowledge_bases), default=20),
                 faq_score=settings.faq_score,
                 search_method=settings.search_method,

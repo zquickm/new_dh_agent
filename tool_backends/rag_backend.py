@@ -86,6 +86,7 @@ class RagSearchBackend:
         rerank_max_retries: int,
         rerank_retry_backoff: float,
         rerank_verify_ssl: bool,
+        result_score_threshold: float = 0.6,
         reranker: Optional[DocumentReranker] = None,
     ) -> None:
         if not recall_url or not api_token or not tenant_id or not knowledge_ids:
@@ -99,6 +100,7 @@ class RagSearchBackend:
         self.knowledge_ids = knowledge_ids
         self.dept_ids = dept_ids
         self.score = score
+        self.result_score_threshold = result_score_threshold
         self.candidate_top_n = max(1, candidate_top_n)
         self.faq_score = faq_score
         self.search_method = search_method
@@ -283,14 +285,18 @@ class RagSearchBackend:
             try:
                 chunks = await self.search(
                     query,
-                    keep,
+                    recall,
                     {**(filters or {}), "knowledge_ids": [knowledge_id]},
                     recall_top_n=recall,
                     score_only=True,
                 )
             except Exception as exc:
                 raise RagToolError("知识库检索失败") from exc
-            results.extend(chunks)
+            chunks = [
+                chunk for chunk in chunks
+                if chunk.score >= self.result_score_threshold
+            ]
+            results.extend(chunks[:keep])
         return results
 
     async def close(self) -> None:
