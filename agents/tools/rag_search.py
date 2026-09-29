@@ -9,7 +9,7 @@ from tool_backends.rag_backend import RagSearchBackend
 
 TOOL_NAME = "rag_search"
 TOOL_DESCRIPTION = (
-    "检索核心业务知识库中的文档、制度、报告或说明，返回相关片段及来源。"
+    "检索内部知识库中的文档、制度、报告或说明，返回相关片段及来源。"
     "当问题需要非结构化文档依据时使用。"
 )
 TOOL_PARAMETERS: dict[str, Any] = {
@@ -32,7 +32,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "maxItems": 50,
             "description": (
                 "可选的文档标签名称列表，优先检索指定标签；"
-                "未检索到结果时，平台会在核心业务库内扩大检索。"
+                "未检索到结果时，平台会在配置的授权范围内扩大检索。"
                 "省略或传空数组时不指定优先标签。"
             ),
         },

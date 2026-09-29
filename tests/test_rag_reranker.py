@@ -3,11 +3,8 @@ from __future__ import annotations
 import unittest
 import asyncio
 from typing import Any, Optional
-from unittest.mock import patch
 
 from aiohttp import web
-from agents.tools.rag_search import RagSearchTool
-from config.settings import get_settings
 from tool_backends.rag_backend import RagSearchBackend
 from tool_backends.rag_models import RagChunk, RagToolError
 from tool_backends.rerank_backend import (
@@ -213,37 +210,6 @@ class VllmDocumentRerankerTest(unittest.IsolatedAsyncioTestCase):
 
 
 class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
-    async def test_tool_queries_only_business_library_and_selects_15_of_50(self):
-        libraries = get_settings().tools.rag.knowledge_bases
-        self.assertEqual([(item.name, item.recall_top_n, item.top_n) for item in libraries],
-                         [("核心业务", 50, 15)])
-        knowledge_id = libraries[0].knowledge_id.strip()
-        for count in (50, 2, 0):
-            with self.subTest(count=count):
-                records = [
-                    {"chunk_text": f"证据{i}", "fileName": f"报告{i}.pdf", "chunk_id": str(i),
-                     "knowledge_id": knowledge_id, "score": 0.6 + i / 125}
-                    for i in range(count)
-                ]
-                session = FakeSession(FakeResponse({"code": 200, "data": {"records": records}}))
-                backend = make_backend(session, FakeReranker())
-                backend.knowledge_ids = (knowledge_id,)
-                tool = RagSearchTool(backend)
-                try:
-                    with patch("agents.tools.rag_search.expand_query_synonyms", side_effect=lambda query: query):
-                        result = await tool.execute("断面调查", tags=["断面"])
-                    self.assertEqual(len(session.calls), 1)
-                    payload = session.calls[0]["json"]
-                    self.assertEqual(payload["knowledge_ids"], [knowledge_id])
-                    self.assertEqual(payload["top_n"], 50)
-                    self.assertEqual(payload["tags"], ["断面"])
-                    self.assertEqual(result["count"], min(count, 15))
-                    self.assertEqual([chunk["chunk_id"] for chunk in result["chunks"]],
-                                     [str(i) for i in reversed(range(count))][:15])
-                    self.assertEqual(backend.reranker.calls, [])
-                finally:
-                    await tool.close()
-
     async def test_three_http_requests_run_serially_in_library_order(self):
         calls = []
         active_requests = 0
@@ -303,7 +269,7 @@ class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload["top_n"], {"policy": 20, "business": 10, "literature": 5}[payload["knowledge_ids"][0]])
 
     async def test_invalid_library_configuration_does_not_send_requests(self):
-        for ids in ((), ("",), ("one", "two", ""), ("one", "two", "one")):
+        for ids in (("one",), ("one", "two", ""), ("one", "two", "one")):
             with self.subTest(ids=ids):
                 session = FakeSession()
                 backend = make_backend(session, FakeReranker())
