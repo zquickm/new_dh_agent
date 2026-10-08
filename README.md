@@ -184,10 +184,13 @@ save=false只试算，本次明细无法后续查询；save=true覆盖所选图�
 缺失或失败不算合规，多标签去重，incompletePatchCount与疑点数可能重叠。
 源overlapRatio单位不明确，原样保留，不转换成百分比。
 
-空间目录需注册suspicion_patch，暴露batchNo/batch_no、patchNo/patch_no，并支持批次过滤和分页。
-省略batchNo按批次号降序取首个，适用于XM-2026-06这样的可时间排序编码；其他编码应明确指定批次。
+三个工具仅调用疑点疑区规则接口，不依赖通用空间目录、字段定义或图斑清单。
+省略batchNo由业务接口取最新批次；执行拿到实际批次后，后续规则沿用它。
+查询、统计的/results列表未提供实际批次时返回batchNo=null；连续翻页或研判后回查应沿用已知批次。
+查询、统计按五条规则返回的图斑编号并集计算覆盖和去重数量，totalPatchCount仅表示已保存结果中的图斑数。
+五条规则均无保存记录的图斑无法统计；空结果不表示原始批次为空或全部合规。
 
-分层：`tool_backends/suspicion_backend.py`管理接口与图斑清单；`agents/tools/suspicion.py`管理规则流程、展示事件、筛选和统计。
+分层：`tool_backends/suspicion_backend.py`调用疑点疑区业务接口；`agents/tools/suspicion.py`管理规则流程、展示事件、筛选和统计。
 ToolContext仅传入执行研判工具的进度回调，禁止模型覆盖；不传用户或会话身份。整体开始/结束继续由框架发送，工具只上报规则结果，无额外进度管理或结束追踪。
 chat_service只分配序号、持久化和发送，不识别规则或解析业务返回。
 所有工具进度遵循现有include_process配置。

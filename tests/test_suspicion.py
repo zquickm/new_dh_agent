@@ -23,9 +23,6 @@ class Backend:
         self.reads = []
         self.missing_coastline = False
 
-    async def inventory(self, batch):
-        return batch or "XM-2026-06", {f"P{i:03}" for i in range(100)}
-
     def rows(self, path, keys=None):
         rule = next(r for r, spec in RULES.items() if spec[0] == path)
         keys = sorted(keys) if keys is not None else [f"P{i:03}" for i in range(100)]
@@ -43,7 +40,7 @@ class Backend:
         if payload["save"]:
             stored = self.saved.setdefault(path, {})
             stored.update({row["patchNo"]: row for row in rows})
-        return {"batchNo": payload["batchNo"], "saved": payload["save"], "verdicts": rows}
+        return {"batchNo": payload.get("batchNo", "XM-2026-06"), "total": len(rows), "saved": payload["save"], "verdicts": rows}
 
     async def results(self, path, batch):
         if path == self.fail:
@@ -83,6 +80,8 @@ class SuspicionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([e["step_id"] for e in events], list(RULES))
         self.assertEqual([p for p, _ in self.backend.calls], ["sea-rights", "eco-restore", "history", "coastline", "redline"])
         self.assertTrue(all(not args["save"] for _, args in self.backend.calls))
+        self.assertNotIn("batchNo", self.backend.calls[0][1])
+        self.assertTrue(all(args["batchNo"] == "XM-2026-06" for _, args in self.backend.calls[1:]))
         self.assertTrue(all(e["details"]["status"] == "SUCCESS" for e in events))
         self.assertEqual(events[0]["summary"], "海域权属校验完成：共100个图斑；未批先建35个，超范围用海0个，改变用海方式0个，本规则无疑点65个。")
         self.assertEqual(events[2]["summary"], "历史疑点校验完成：共100个图斑；命中历史疑点35个，本规则无疑点65个。")
@@ -116,7 +115,8 @@ class SuspicionTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("analysisId", output["data"])
         self.assertNotIn("expiresAt", output["data"])
         summary = await self.tools.summarize()
-        self.assertEqual(summary["data"]["summary"]["incompletePatchCount"], 100)
+        self.assertEqual(summary["data"]["totalPatchCount"], 0)
+        self.assertEqual(summary["data"]["summary"]["incompletePatchCount"], 0)
         query = await self.tools.query(suspicionTypes=["REDLINE"])
         self.assertEqual(query["data"]["pagination"]["total"], 0)
         await self.tools.analyze(save=True)
@@ -190,6 +190,8 @@ class SuspicionTest(unittest.IsolatedAsyncioTestCase):
         output = await self.tools.analyze(context=self.context)
         self.assertEqual(output["status"], "FAILED")
         self.assertEqual(len(self.backend.calls), 1)
+        self.assertIsNone(output["data"]["total"])
+        self.assertIsNone(output["data"]["summary"])
         self.assertEqual([r["status"] for r in output["data"]["ruleResults"]], ["FAILED"] + ["SKIPPED"] * 4)
         started, stopped = asyncio.Event(), asyncio.Event()
         async def blocking(path, payload):
@@ -209,6 +211,26 @@ class SuspicionTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(stopped.is_set())
         with self.assertRaisesRegex(ValueError, "上下文"):
             await executor.execute_with_events("analyze_suspicion", {"context": {"on_progress": "invalid"}})
+
+    async def test_first_rule_failure_and_business_scope_validation(self):
+        self.backend.fail = "sea-rights"
+        output = await self.tools.analyze()
+        self.assertEqual(output["status"], "PARTIAL_SUCCESS")
+        self.assertEqual(output["data"]["batchNo"], "XM-2026-06")
+        self.assertEqual(output["data"]["summary"]["incompletePatchCount"], 100)
+        self.assertNotIn("batchNo", self.backend.calls[1][1])
+        self.assertTrue(all(args["batchNo"] == "XM-2026-06" for _, args in self.backend.calls[2:]))
+        self.backend.fail = None
+        validate = self.backend.validate
+        async def bad_scope(path, payload):
+            result = await validate(path, payload)
+            if path == "eco-restore":
+                result["verdicts"][-1]["patchNo"] = "OTHER"
+            return result
+        self.backend.validate = bad_scope
+        output = await self.tools.analyze(batchNo="XM-2026-06")
+        self.assertEqual(output["data"]["ruleResults"][1]["status"], "FAILED")
+        self.assertIn("范围或数量不一致", output["errors"][0]["message"])
 
     @patch("services.chat_service.generate_recommendations", return_value=[])
     async def test_sse_progress_and_generic_transport(self, _recommendations):
@@ -242,25 +264,31 @@ class SuspicionTest(unittest.IsolatedAsyncioTestCase):
 
 
 class SuspicionBackendTest(unittest.IsolatedAsyncioTestCase):
-    async def test_inventory_pagination_and_validate_request_policy(self):
+    async def test_tools_use_only_business_endpoints(self):
         from unittest.mock import AsyncMock
         from tool_backends.suspicion_backend import SuspicionBackend
         client = AsyncMock()
-        client.get_spatial_element_detail.return_value = {"maxQueryLimit": 2, "fields": [{"name": "batch_no"}, {"name": "patch_no"}]}
-        client.query_spatial_element.side_effect = [
-            {"total": 3, "features": [{"properties": {"batch_no": "XM-2026-06", "patch_no": "P0"}}]},
-            {"total": 3, "features": [{"properties": {"patch_no": "P0"}}, {"properties": {"patch_no": "P1"}}]},
-            {"total": 3, "features": [{"properties": {"patch_no": "P2"}}]},
-        ]
+        async def respond(method, path, **kwargs):
+            rows = [{"patchNo": "P0", "resultType": "CLEAR"}]
+            if method == "GET":
+                self.assertIs(kwargs["data_type"], list)
+                return rows
+            self.assertEqual(kwargs["retries"], 0)
+            self.assertFalse(kwargs["json"]["save"])
+            return {"batchNo": "XM-2026-06", "saved": False, "total": 1, "verdicts": rows}
+        client._request.side_effect = respond
         backend = SuspicionBackend(client)
-        batch, keys = await backend.inventory(None)
-        self.assertEqual(batch, "XM-2026-06")
-        self.assertEqual(keys, {"P0", "P1", "P2"})
-        self.assertFalse(client.query_spatial_element.call_args.kwargs)
-        self.assertEqual(client.query_spatial_element.call_args.args[0]["offset"], 2)
-        await backend.validate("sea-rights", {"batchNo": batch, "save": True})
-        self.assertEqual(client._request.call_args.args, ("POST", "/api/spatial/suspicion/sea-rights/validate"))
-        self.assertEqual(client._request.call_args.kwargs["retries"], 0)
-        await backend.results("redline", batch)
-        self.assertEqual(client._request.call_args.kwargs["params"], {"batchNo": batch})
+        self.addAsyncCleanup(backend.close)
+        tools = SuspicionTools(backend)
+        self.assertEqual((await tools.analyze())["status"], "SUCCESS")
+        self.assertEqual((await tools.query())["data"]["pagination"]["total"], 1)
+        self.assertEqual((await tools.summarize())["data"]["totalPatchCount"], 1)
+        expected = [("POST", f"/api/spatial/suspicion/{path}/validate") for path, _, _ in RULES.values()]
+        expected += [("GET", f"/api/spatial/suspicion/{path}/results") for path, _, _ in RULES.values()] * 2
+        self.assertEqual([call.args for call in client._request.call_args_list], expected)
+        self.assertTrue(all(call.kwargs["params"] == {} for call in client._request.call_args_list[5:]))
+        client.get_spatial_element_detail.assert_not_awaited()
+        client.query_spatial_element.assert_not_awaited()
+        await backend.results("redline", "XM-2026-06")
+        self.assertEqual(client._request.call_args.kwargs["params"], {"batchNo": "XM-2026-06"})
         self.assertIs(client._request.call_args.kwargs["data_type"], list)

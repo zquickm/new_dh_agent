@@ -26,7 +26,7 @@ RESULT_LABELS = {
 
 class Scope(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    batchNo: Optional[str] = Field(default=None, min_length=1, description="批次号，省略取最新可排序批次。")
+    batchNo: Optional[str] = Field(default=None, min_length=1, description="批次号，省略由疑点疑区业务接口取最新批次。")
 
     @field_validator("batchNo", check_fields=False)
     @classmethod
@@ -75,6 +75,15 @@ def response(data, errors):
             **({"error": {"type": "SuspicionError", "message": errors[0]["message"], "retryable": False}} if status == "FAILED" else {})}
 
 
+def patch_keys(rows):
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise ValueError("规则返回了无效图斑记录")
+    keys = {row.get("patchNo") for row in rows if isinstance(row.get("patchNo"), str) and row["patchNo"].strip() and row["patchNo"] == row["patchNo"].strip()}
+    if len(keys) != len(rows):
+        raise ValueError("规则结果包含无效编号或重复图斑")
+    return keys
+
+
 def merge(patch_nos, results):
     patches = {key: {"patchNo": key, "conclusions": []} for key in sorted(patch_nos)}
     for rule, rows in results.items():
@@ -111,26 +120,31 @@ class SuspicionTools:
         results, rule_results, errors = {}, [], []
         try:
             args = Analyze.model_validate(arguments)
-            batch, patch_nos = await self.backend.inventory(args.batchNo)
-            if args.patchNos is not None:
-                if set(args.patchNos) - patch_nos:
-                    raise ValueError("部分图斑不属于指定批次")
-                patch_nos = set(args.patchNos)
+            batch = args.batchNo
+            patch_nos = set(args.patchNos) if args.patchNos is not None else None
             for index, (rule, (path, title, codes)) in enumerate(RULES.items(), 1):
                 details = {"ruleCode": rule, "ruleIndex": index, "batchNo": batch,
                            "finishedRules": index, "totalRules": len(RULES)}
                 stop = False
                 try:
-                    payload = {"batchNo": batch, "save": args.save}
+                    payload = {"save": args.save}
+                    if batch is not None:
+                        payload["batchNo"] = batch
                     if args.patchNos is not None:
                         payload["patchNos"] = args.patchNos
                     result = await self.backend.validate(path, payload)
                     rows = result.get("verdicts")
-                    if result.get("batchNo") != batch or not isinstance(rows, list) or len(rows) != len(patch_nos):
-                        raise ValueError("返回批次或图斑数量不一致")
-                    merge(patch_nos, {rule: rows})
+                    result_batch = result.get("batchNo")
+                    keys = patch_keys(rows)
+                    if not isinstance(result_batch, str) or (batch is not None and result_batch != batch):
+                        raise ValueError("返回批次无效或与请求不一致")
+                    Scope.valid_string(result_batch)
+                    if type(result.get("total")) is not int or result["total"] != len(rows) or (patch_nos is not None and keys != patch_nos):
+                        raise ValueError("返回图斑范围或数量不一致")
+                    merge(keys, {rule: rows})
                     if result.get("saved") is not args.save:
                         raise ValueError("保存状态与请求不一致，请核查正式结果")
+                    batch, patch_nos = result_batch, keys
                     results[rule] = rows
                     item = {"ruleCode": rule, "status": "SUCCESS",
                             "saved": result["saved"], "counts": {code: sum(row["resultType"] == code for row in rows) for code in codes}}
@@ -147,29 +161,31 @@ class SuspicionTools:
                 await context.report(
                     step_id=rule, kind="rule", status=item["status"].lower(), title=title,
                     summary=summary,
-                    details={**details, **item},
+                    details={**details, "batchNo": batch, **item},
                 )
                 if stop:
                     for remaining in list(RULES)[index:]:
                         rule_results.append({"ruleCode": remaining, "status": "SKIPPED", "counts": None, "saved": False})
                     break
-            patches = merge(patch_nos, results)
-            data = {"batchNo": batch, "total": len(patches), "saveRequested": args.save,
+            patches = merge(patch_nos or set(), results)
+            data = {"batchNo": batch, "total": len(patches) if patch_nos is not None else None, "saveRequested": args.save,
                     "assessedRules": list(RULES), "totalRules": len(RULES),
                     "finishedRules": sum(r["status"] != "SKIPPED" for r in rule_results),
-                    "ruleResults": rule_results, "summary": totals(patches)}
+                    "ruleResults": rule_results, "summary": totals(patches) if patch_nos is not None else None}
             output = response(data, errors)
         except (ValidationError, ValueError, SpatialServiceError) as exc:
             output = response({"ruleResults": rule_results}, [error(exc)])
         return output
 
     async def load(self, args):
-        batch, keys = await self.backend.inventory(args.batchNo)
+        batch, keys = args.batchNo, set()
         results, states, errors = {}, [], []
         for rule, (path, _, _) in RULES.items():
             try:
                 rows = await self.backend.results(path, batch)
-                merge(keys, {rule: rows})
+                returned_keys = patch_keys(rows)
+                merge(returned_keys, {rule: rows})
+                keys.update(returned_keys)
                 results[rule] = rows
                 states.append({"ruleCode": rule, "status": "SUCCESS"})
             except (SpatialServiceError, ValueError) as exc:

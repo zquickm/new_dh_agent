@@ -8,13 +8,15 @@ description: 疑点疑区图斑的海域权属、生态修复项目、历史疑�
 ## 工具选择
 
 - 分析、检查、重新研判：`analyze_suspicion`。固定①海域权属→②生态修复项目→③历史疑点→④自然岸线→⑤生态保护红线，全部调用真实规则服务，不提供规则选择参数。
-- 不传 batchNo 取最新可排序批次（当前格式如 XM-2026-06）；不传 patchNos 处理整批。保留用户指定范围，单图斑也传数组。
+- 三个业务工具直接调用疑点疑区规则接口，不需要先查通用空间目录、字段定义或图斑清单。
+- 不传 batchNo 由业务接口取最新批次；执行工具拿到实际批次后，后续规则沿用它。不传 patchNos 处理整批，保留用户指定范围，单图斑也传数组。
 - 默认 save=false 试算。明确要求保存、更新结果时传 true，会覆盖所选图斑同规则历史结果。逐规则查看 saved，不能把部分保存说成全部成功。
 - 框架发送整体开始/结束，工具每条规则结束后发送一个process，不用模型文字模拟进度。
 - 查清单、某图斑结论：`query_suspicion_results`。默认 page=1、pageSize=10，最多20；仅当需要解释具体图斑时传 includeEvidence=true。
 - 筛选参数 suspicionTypes；match=any 满足任一，all 同时满足。工具先筛选全部结果，再按图斑编号排序分页。total 是匹配总数，不是当前页数量；hasMore=true 时不能把当前页当全部。用户继续查看时保持条件和pageSize不变，递增page。
-- 查数量：`summarize_suspicion_results`，不用分页明细自行计算总数。该工具统计整批正式结果；指定图斑范围的本次统计使用执行摘要，不用整批统计替代。
+- 查数量：`summarize_suspicion_results`，不用分页明细自行计算总数。该工具统计五条规则返回的已保存正式结果；指定图斑范围的本次统计使用执行摘要，不用整批统计替代。
 - 查询和统计只读取空间服务已保存的正式批次结果，每次重新读取。执行摘要不暂存明细；save=false后查询到的正式结果不能称为该次试算结果。
+- 查询和统计未指定batchNo时，各业务接口按最新批次读取；列表响应未提供实际批次时返回batchNo=null，不编造批次号。研判后查询或连续翻页沿用已知batchNo，避免期间新增批次影响范围。
 - 用户明确要求研判后查看明细、翻页时，需要保存才能完成，说明覆盖行为并使用save=true；明确要求不保存时只提供本次摘要，不自动保存。后续查询沿用执行返回的batchNo和用户指定patchNos，保持范围一致。
 
 ## 结果口径
@@ -26,6 +28,7 @@ description: 疑点疑区图斑的海域权属、生态修复项目、历史疑�
 - REDLINE：REDLINE 占用生态保护红线，重叠面积>0；边界相切不算，红线合并后计算以免重复。
 - assessedRules、complete、missingRules 及合规统计覆盖五条规则。hasSuspicion=null 表示规则结果不足且已知结论没有疑点，不能当作合规。EXEMPT只对生态修复规则合规，不抵消其他规则疑点；五条规则均齐全且全部为CLEAR或EXEMPT才计入allClearPatchCount。
 - 疑点总数使用去重 suspicionPatchCount，不相加各规则计数。incompletePatchCount 和疑点数可能重叠。
+- 查询、统计的图斑范围是五条规则结果的编号并集；totalPatchCount是其中去重图斑数，missingRules只反映这些图斑缺少哪些规则。五条规则均无保存记录的图斑无法计数；返回空列表不表示原始批次没有图斑或全部合规。
 - PARTIAL_SUCCESS 应说明失败规则；失败规则counts=null，不能说零疑点。未研判与读取失败要区分。
 - Ha公顷、M米、Pct百分比；源overlapRatio单位未明确，不转成百分比。引用真实evidence，不编造结论。红树林→其他方式映射尚待确认。
 
