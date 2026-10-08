@@ -17,6 +17,7 @@ from agents.skills import SkillCatalog
 from agents.tool_audit import ToolAuditRecorder
 from agents.tools.executor import ToolExecutor
 from agents.tools.map_action import spatial_map_results
+from agents.tools.context import ToolContext
 from agents.tools.registry import build_skill_catalog, build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage, FrontendContext
@@ -140,6 +141,7 @@ class AgentLoop:
         context_token_limit: int | None = None,
         context_usage_callback: Callable[[dict[str, Any]], Any] | None = None,
         model_messages_callback: Callable[[list[dict[str, Any]]], Any] | None = None,
+        tool_progress_callback: Callable[[dict[str, Any]], Any] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         configured_limit = get_settings().conversation.max_history_messages
         limit = min(context_message_limit or configured_limit, configured_limit)
@@ -463,6 +465,7 @@ class AgentLoop:
                     tool_call["id"],
                     tool_call["args"],
                 )
+                registered_tool = self.tools.get(name)
                 yield AgentEvent(
                     type="tool_started",
                     round_number=round_number,
@@ -478,8 +481,20 @@ class AgentLoop:
                 try:
                     token = spatial_map_results.set(map_results)
                     try:
+                        async def on_progress(data):
+                            if tool_progress_callback is not None:
+                                await tool_progress_callback({
+                                    **data,
+                                    "step_id": f"{tool_call['id']}:{data['step_id']}",
+                                    "parent_id": tool_call["id"],
+                                    "round_number": round_number,
+                                })
+
+                        execute_kwargs = {"enabled_skill_names": enabled_skill_names}
+                        if registered_tool and registered_tool.contextual:
+                            execute_kwargs["context"] = ToolContext(on_progress=on_progress)
                         observation, client_events = await self.tools.execute_with_events(
-                            name, tool_call["args"], enabled_skill_names=enabled_skill_names
+                            name, tool_call["args"], **execute_kwargs
                         )
                     finally:
                         # Reset before yielding, including failure/cancellation paths.

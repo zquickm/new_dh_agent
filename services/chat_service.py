@@ -406,6 +406,21 @@ class ChatService:
                 run_stream_kwargs["context_usage_callback"] = publish_context_usage
             if "model_messages_callback" in run_stream_parameters:
                 run_stream_kwargs["model_messages_callback"] = save_model_messages
+            async def publish_tool_progress(data):
+                nonlocal sequence
+                if not get_settings().stream.include_process:
+                    return
+                sequence += 1
+                process = self._process_data(
+                    data["round_number"], "tool", data.get("kind", "tool"), data["status"],
+                    data["title"], data["summary"], sequence,
+                    step_id=data["step_id"], details=data.get("details", {}),
+                )
+                process["parent_id"] = data["parent_id"]
+                await emit({"event": "process", "data": process})
+
+            if "tool_progress_callback" in run_stream_parameters:
+                run_stream_kwargs["tool_progress_callback"] = publish_tool_progress
             async for event in self.agent.run_stream(
                 request.question,
                 history,

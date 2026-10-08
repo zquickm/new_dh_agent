@@ -23,6 +23,7 @@ from agents.tools.duanmian_analysis import (
     execute_duanmian_analysis,
 )
 from agents.tools.executor import ToolExecutor
+from agents.tools.suspicion import SuspicionTools
 from agents.tools.map_action import (
     TOOL_DESCRIPTION as MAP_ACTION_TOOL_DESCRIPTION,
     TOOL_NAME as MAP_ACTION_TOOL_NAME,
@@ -105,6 +106,7 @@ def build_tool_executor(
         execute_duanmian_analysis,
         DUANMIAN_TOOL_PARAMETERS,
     )
+    SuspicionTools().register(executor)
     executor.register_closer(rag_tool.close)
     executor.register_closer(database_tool.close)
     executor.register_closer(spatial_query_tool.close)

@@ -352,6 +352,9 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                 "spatial_query_service",
                 "map_action",
                 "dm_duanmian_analysis",
+                "analyze_suspicion",
+                "query_suspicion_results",
+                "summarize_suspicion_results",
             },
         )
         await executor.close()

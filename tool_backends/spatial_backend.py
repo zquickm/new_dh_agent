@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 class SpatialServiceError(RuntimeError):
     """Raised when the spatial service cannot provide a valid business result."""
 
+    def __init__(self, message: str, *, http_status: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.http_status = http_status
+
 
 class SpatialServiceClient:
     def __init__(
@@ -116,6 +120,7 @@ class SpatialServiceClient:
         json: Optional[dict[str, Any]] = None,
         params: Optional[dict[str, Any]] = None,
         data_type: type = dict,
+        retries: Optional[int] = None,
     ) -> Any:
         if not self.base_url:
             raise SpatialServiceError("空间服务地址未配置")
@@ -123,7 +128,7 @@ class SpatialServiceClient:
             raise SpatialServiceError("空间服务 API Key 未配置")
 
         body: Any = None
-        attempts = self.max_retries + 1
+        attempts = (self.max_retries if retries is None else retries) + 1
         for attempt in range(attempts):
             retryable_error: Optional[BaseException] = None
             try:
@@ -155,7 +160,8 @@ class SpatialServiceClient:
                         message = message.replace(self.api_key, "[redacted]")[:500]
                         error = SpatialServiceError(
                             f"空间服务返回 HTTP {response.status} ({method} {path})"
-                            + (f"：{message}" if message else "")
+                            + (f"：{message}" if message else ""),
+                            http_status=response.status,
                         )
                         if response.status == 429 or response.status >= 500:
                             retryable_error = error
@@ -197,7 +203,7 @@ class SpatialServiceClient:
         code = body.get("code")
         if code not in (0, 200):
             message = str(body.get("message") or "空间服务业务处理失败")
-            raise SpatialServiceError(message[:200])
+            raise SpatialServiceError(message.replace(self.api_key, "[redacted]")[:200])
         data = body.get("data")
         if not isinstance(data, data_type):
             raise SpatialServiceError("空间服务响应缺少 data")

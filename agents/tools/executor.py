@@ -7,6 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from agents.tools.context import ToolContext
+
 
 ToolFunction = Callable[..., Any]
 ToolMatcher = Callable[[str], bool]
@@ -26,6 +28,7 @@ class RegisteredTool:
     function: ToolFunction
     parameters: dict[str, Any]
     matcher: Optional[ToolMatcher] = None
+    contextual: bool = False
 
 
 class ToolExecutor:
@@ -44,6 +47,7 @@ class ToolExecutor:
         parameters: Optional[dict[str, Any]] = None,
         *,
         matcher: Optional[ToolMatcher] = None,
+        contextual: bool = False,
     ) -> None:
         self.tools[name] = RegisteredTool(
             description=description,
@@ -55,6 +59,7 @@ class ToolExecutor:
                 "additionalProperties": False,
             },
             matcher=matcher,
+            contextual=contextual,
         )
 
     def register_closer(self, closer: Callable[..., Any]) -> None:
@@ -100,6 +105,7 @@ class ToolExecutor:
         argument: Any,
         *,
         enabled_skill_names: Optional[frozenset[str]] = None,
+        context: Optional[ToolContext] = None,
     ) -> tuple[str, tuple[dict[str, Any], ...]]:
         tool = self.get(name)
         if tool is None:
@@ -120,7 +126,11 @@ class ToolExecutor:
                 raise PermissionError("该 Skill 在本次任务中不可用")
 
         args: tuple[Any, ...] = () if isinstance(argument, dict) else (argument,)
-        kwargs = argument if isinstance(argument, dict) else {}
+        kwargs = dict(argument) if isinstance(argument, dict) else {}
+        if tool.contextual:
+            if "context" in kwargs:
+                raise ValueError("工具执行上下文不能由模型提供")
+            kwargs["context"] = context or ToolContext()
 
         async def invoke() -> Any:
             if inspect.iscoroutinefunction(tool.function):

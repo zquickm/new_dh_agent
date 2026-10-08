@@ -139,7 +139,7 @@ NEW_DH_LLM__API_KEY=your-key
 
 ## RAG、数据库、观测、地图与专题分析工具
 
-Agent 已注册五个业务工具（括号内为协议调用标识）：
+Agent 已注册八个业务工具（括号内为协议调用标识）：
 
 - 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
 
@@ -161,7 +161,36 @@ Agent 已注册五个业务工具（括号内为协议调用标识）：
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
 - 断面专题分析（`dm_duanmian_analysis`）：发送断面专题分析出图参数，由前端打开独立浮层并查询出图。
 
+- 疑点疑区研判（`analyze_suspicion`）：五步串行流程，实时进度，仅返回本次摘要。
+- 疑点疑区明细（`query_suspicion_results`）：先筛选再分页，默认第一页10个、最多20个。
+- 疑点疑区统计（`summarize_suspicion_results`）：各规则覆盖情况及去重图斑统计。
+
 框架还注册了技能加载（`load_skill`）和当前服务器时间（`CurrentServerTime`）两个工具。
+
+## 疑点疑区
+
+业务入口为 `skills/疑点疑区/SKILL.md`。工具共用 `tools.spatial` 配置，base_url为服务根地址
+（不含 `/api`），使用 `SPATIAL_API_KEY`，validate POST不自动重试。
+执行参数为batchNo、patchNos、save（默认false），固定①海域权属→②生态修复项目→③历史疑点→④自然岸线→⑤生态红线。
+五条规则全部调用真实服务，规则编码为SEA_RIGHTS、ECO_RESTORE、HISTORY、COASTLINE、REDLINE。
+前端process携带真实规则状态、计数与保存状态；调用失败发送failed，不再有展示占位分支。
+正常共7个process：框架原有整体开始/结束，加每条规则结束后一个process。普通规则失败后继续，401/403停止后续，取消终止执行。
+
+执行只返回本次摘要，不暂存研判明细。查询和统计每次都读取空间服务已保存的正式批次结果。
+save=false只试算，本次明细无法后续查询；save=true覆盖所选图斑同规则的正式结果，之后可按批次查询或统计。
+明细按图斑编号稳定排序，先对全部结果筛选，再返回指定页；page=1、pageSize=10（最多20），includeEvidence默认false。
+正式/results接口未提供分页，所以第一版完整读取后由工具分页；这限制交给模型的数据量，不减少后端读取量。
+统计覆盖五条规则；EXEMPT为免审批合规，不计为疑点，HISTORY为历史关联命中，不直接证明新增违法。
+缺失或失败不算合规，多标签去重，incompletePatchCount与疑点数可能重叠。
+源overlapRatio单位不明确，原样保留，不转换成百分比。
+
+空间目录需注册suspicion_patch，暴露batchNo/batch_no、patchNo/patch_no，并支持批次过滤和分页。
+省略batchNo按批次号降序取首个，适用于XM-2026-06这样的可时间排序编码；其他编码应明确指定批次。
+
+分层：`tool_backends/suspicion_backend.py`管理接口与图斑清单；`agents/tools/suspicion.py`管理规则流程、展示事件、筛选和统计。
+ToolContext仅传入执行研判工具的进度回调，禁止模型覆盖；不传用户或会话身份。整体开始/结束继续由框架发送，工具只上报规则结果，无额外进度管理或结束追踪。
+chat_service只分配序号、持久化和发送，不识别规则或解析业务返回。
+所有工具进度遵循现有include_process配置。
 
 ## 用户输入敏感词拦截
 
