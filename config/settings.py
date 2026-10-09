@@ -240,16 +240,21 @@ class RagKnowledgeBaseSettings(BaseModel):
     top_n: int = Field(default=4, ge=1)
 
 
+class RagScenarioSettings(BaseModel):
+    knowledge_bases: list[RagKnowledgeBaseSettings] = Field(default_factory=list)
+    score: float = Field(default=0.6, ge=0, le=1)
+    result_score_threshold: float = Field(default=0.3, ge=0, le=1)
+
+
 class RagToolSettings(BaseModel):
     base_url: str = ""
     recall_path: str = "/rag-platform-default/zsgl/knowledgeRecall"
     recall_url: str = ""
     api_token: SecretStr = SecretStr("")
     tenant_id: str = ""
-    knowledge_bases: list[RagKnowledgeBaseSettings] = Field(default_factory=list)
+    general: RagScenarioSettings = Field(default_factory=RagScenarioSettings)
+    xiamen: Optional[RagScenarioSettings] = None
     dept_ids: list[str] = Field(default_factory=list)
-    score: float = Field(default=0.6, ge=0, le=1)
-    result_score_threshold: float = Field(default=0.6, ge=0, le=1)
     faq_score: float = Field(default=0.8, ge=0, le=1)
     search_method: int = 3
     search_scope: str = "knowledge"

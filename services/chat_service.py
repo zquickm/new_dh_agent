@@ -395,6 +395,10 @@ class ChatService:
                     run_id,
                     repository=conversation_repository,
                 )
+            rag_display_names = (
+                run_stream_kwargs["audit_recorder"].rag_display_names
+                if "audit_recorder" in run_stream_kwargs else {}
+            )
             if "system_prompt" in run_stream_parameters:
                 run_stream_kwargs["system_prompt"] = prompt_snapshot.content
             if skill_snapshot is not None and "enabled_skill_names" in run_stream_parameters:
@@ -434,7 +438,7 @@ class ChatService:
                     registered_sources = event.sources
                 if event.type == "tool_started":
                     if get_settings().stream.include_process:
-                        tool_display_name = self._tool_display_name(event.tool_name)
+                        tool_display_name = rag_display_names.get(event.tool_call_id) or self._tool_display_name(event.tool_name)
                         await emit({
                             "event": "process",
                             "data": self._process_data(
@@ -451,7 +455,7 @@ class ChatService:
                 elif event.type == "retrieval":
                     data = {
                         **(event.data or {}),
-                        "tool_name": self._tool_display_name(event.tool_name),
+                        "tool_name": rag_display_names.get(event.tool_call_id) or self._tool_display_name(event.tool_name),
                     }
                     result_count = data.get("result_count")
                     if isinstance(result_count, int) and not isinstance(
@@ -485,7 +489,7 @@ class ChatService:
                     })
                 elif event.type == "tool_finished":
                     if get_settings().stream.include_process:
-                        tool_display_name = self._tool_display_name(event.tool_name)
+                        tool_display_name = rag_display_names.get(event.tool_call_id) or self._tool_display_name(event.tool_name)
                         summary = (
                             event.content
                             if not event.success

@@ -42,6 +42,15 @@ TOOL_PARAMETERS: dict[str, Any] = {
 }
 
 
+def is_xiamen_query(query: str) -> bool:
+    return any(word in query for word in ("厦门", "疑点疑区", "图斑"))
+
+
+def rag_display_name(query: str) -> str:
+    query = expand_query_synonyms(query) if isinstance(query, str) else ""
+    return "厦门局业务知识库" if is_xiamen_query(query) else "东溟知识库检索"
+
+
 class RagSearchTool:
     """Adapt the RAG backend to the agent tool contract."""
 
@@ -53,15 +62,20 @@ class RagSearchTool:
         if self._backend is None:
             settings = get_settings().tools.rag
             rerank = settings.rerank
+            libraries = settings.general.knowledge_bases + (
+                settings.xiamen.knowledge_bases if settings.xiamen else []
+            )
             self._backend = RagSearchBackend(
                 recall_url=settings.resolved_recall_url(),
                 api_token=settings.api_token.get_secret_value(),
                 tenant_id=settings.tenant_id,
-                knowledge_ids=tuple(library.knowledge_id.strip() for library in settings.knowledge_bases),
+                knowledge_ids=tuple(dict.fromkeys(
+                    library.knowledge_id.strip() for library in libraries if library.knowledge_id.strip()
+                )),
                 dept_ids=tuple(settings.dept_ids),
-                score=settings.score,
-                result_score_threshold=settings.result_score_threshold,
-                candidate_top_n=max((library.recall_top_n for library in settings.knowledge_bases), default=20),
+                score=settings.general.score,
+                result_score_threshold=settings.general.result_score_threshold,
+                candidate_top_n=max((library.recall_top_n for library in settings.general.knowledge_bases), default=20),
                 faq_score=settings.faq_score,
                 search_method=settings.search_method,
                 search_scope=settings.search_scope,
@@ -97,10 +111,16 @@ class RagSearchTool:
         ):
             raise ValueError("tags 必须是不超过 50 项的字符串数组")
         query = expand_query_synonyms(query)
+        settings = get_settings().tools.rag
+        scenario = settings.xiamen if is_xiamen_query(query) else settings.general
+        if scenario is None or not scenario.knowledge_bases:
+            raise ValueError("请配置当前场景的 RAG 知识库参数")
         chunks = await self.backend.search_all(
             query, [(library.knowledge_id.strip(), library.recall_top_n, library.top_n)
-                    for library in get_settings().tools.rag.knowledge_bases],
-            {"tags": tags or []}
+                    for library in scenario.knowledge_bases],
+            {"tags": tags or []},
+            score=scenario.score,
+            result_score_threshold=scenario.result_score_threshold,
         )
         return {
             "query": query,

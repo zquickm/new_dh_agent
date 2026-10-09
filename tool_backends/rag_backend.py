@@ -197,6 +197,7 @@ class RagSearchBackend:
         *,
         recall_top_n: Optional[int] = None,
         score_only: bool = False,
+        score: Optional[float] = None,
     ) -> list[RagChunk]:
         query = query.strip()
         if not query:
@@ -225,7 +226,7 @@ class RagSearchBackend:
         payload = {
             "tenant_id": self.tenant_id,
             "query": [query],
-            "score": self.score,
+            "score": self.score if score is None else score,
             "top_n": recall_limit,
             "faq_score": self.faq_score,
             "rerank_enable": 0,
@@ -237,6 +238,11 @@ class RagSearchBackend:
             "dept_ids": dept_ids,
             "forceTagList": [],
         }
+        logger.info(
+            "rag_recall_requested knowledge_ids=%s tenant_id=%s dept_ids=%s "
+            "score=%s top_n=%s tags=%s query=%r",
+            knowledge_ids, self.tenant_id, dept_ids, payload["score"], recall_limit, tags, query,
+        )
         body = await self._post_json(
             self.recall_url,
             payload,
@@ -246,6 +252,10 @@ class RagSearchBackend:
             retry_backoff=self.retry_backoff,
         )
         chunks = self._parse_recall(body, recall_limit)
+        logger.info(
+            "rag_recall_returned knowledge_ids=%s raw_count=%d parsed_count=%d",
+            knowledge_ids, len(body["data"]["records"]), len(chunks),
+        )
 
         if score_only:
             return sorted(chunks, key=lambda chunk: chunk.score, reverse=True)[:top_k]
@@ -271,12 +281,16 @@ class RagSearchBackend:
     async def search_all(
         self, query: str, libraries: list[tuple[str, int, int]],
         filters: Optional[dict[str, Any]] = None,
+        *, score: Optional[float] = None, result_score_threshold: Optional[float] = None,
     ) -> list[RagChunk]:
-        if len(self.knowledge_ids) != 3 or any(not value for value in self.knowledge_ids):
-            raise RagToolError("请配置三个知识库的 knowledge_ids")
-        if len(set(self.knowledge_ids)) != 3:
-            raise RagToolError("三个知识库的 knowledge_ids 不得重复")
-        if tuple(library[0] for library in libraries) != self.knowledge_ids:
+        threshold = self.result_score_threshold if result_score_threshold is None else result_score_threshold
+        if not self.knowledge_ids or any(not value for value in self.knowledge_ids):
+            raise RagToolError("请配置知识库的 knowledge_ids")
+        if len(set(self.knowledge_ids)) != len(self.knowledge_ids):
+            raise RagToolError("知识库的 knowledge_ids 不得重复")
+        selected_ids = [library[0] for library in libraries]
+        if (not selected_ids or len(set(selected_ids)) != len(selected_ids)
+                or not set(selected_ids).issubset(self.knowledge_ids)):
             raise RagToolError("知识库配置与授权范围不一致")
         if any(recall < 1 or keep < 1 for _, recall, keep in libraries):
             raise RagToolError("知识库召回及保留数量必须大于零")
@@ -289,13 +303,21 @@ class RagSearchBackend:
                     {**(filters or {}), "knowledge_ids": [knowledge_id]},
                     recall_top_n=recall,
                     score_only=True,
+                    score=score,
                 )
             except Exception as exc:
                 raise RagToolError("知识库检索失败") from exc
+            recalled_count = len(chunks)
             chunks = [
                 chunk for chunk in chunks
-                if chunk.score >= self.result_score_threshold
+                if chunk.score >= threshold
             ]
+            logger.info(
+                "rag_library_filtered knowledge_id=%s recalled=%d above_threshold=%d "
+                "kept=%d result_score_threshold=%s",
+                knowledge_id, recalled_count, len(chunks), min(keep, len(chunks)),
+                threshold,
+            )
             results.extend(chunks[:keep])
         return results
 

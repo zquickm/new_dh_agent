@@ -283,7 +283,7 @@ class RagRerankFlowTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload["top_n"], {"policy": 20, "business": 10, "literature": 5}[payload["knowledge_ids"][0]])
 
     async def test_invalid_library_configuration_does_not_send_requests(self):
-        for ids in (("one",), ("one", "two", ""), ("one", "two", "one")):
+        for ids in ((), ("",), ("one", "two", ""), ("one", "two", "one")):
             with self.subTest(ids=ids):
                 session = FakeSession()
                 backend = make_backend(session, FakeReranker())

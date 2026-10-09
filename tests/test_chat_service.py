@@ -14,6 +14,7 @@ from schemas.chat import AgentRequest
 from schemas.skill import ActiveSkillSnapshot
 from services.chat_service import ChatService
 from services.sensitive_word_service import SensitiveWordMatcher
+from services.synonym_service import build_synonym_matcher
 
 
 TEST_USER_ID = "101"
@@ -329,6 +330,11 @@ class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         synonym_patch.start()
         self.addCleanup(synonym_patch.stop)
+        matcher_patch = patch("services.synonym_service._active_synonym_matcher", build_synonym_matcher([
+            {"standardTerm": "溶解氧", "terms": [{"term": "DO"}]},
+        ]))
+        matcher_patch.start()
+        self.addCleanup(matcher_patch.stop)
 
     @staticmethod
     def _sensitive_word_matcher(_directory: str) -> SensitiveWordMatcher:

@@ -5,6 +5,7 @@ import json
 import re
 from typing import Any, Optional
 
+from agents.tools.rag_search import rag_display_name
 from repositories.repository import conversation_repository
 
 
@@ -180,6 +181,7 @@ class PersistentToolAuditRecorder:
         self.run_id = run_id
         self._repository = repository or conversation_repository
         self._tool_names: dict[str, str] = {}
+        self.rag_display_names: dict[str, str] = {}
 
     async def started(
         self,
@@ -201,6 +203,8 @@ class PersistentToolAuditRecorder:
             arguments_truncated=truncated,
         )
         self._tool_names[tool_call_id] = tool_name
+        if tool_name == "rag_search":
+            self.rag_display_names[tool_call_id] = rag_display_name(arguments.get("query", ""))
 
     async def finished(
         self,
