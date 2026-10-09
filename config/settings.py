@@ -254,6 +254,7 @@ class RagToolSettings(BaseModel):
     tenant_id: str = ""
     general: RagScenarioSettings = Field(default_factory=RagScenarioSettings)
     xiamen: Optional[RagScenarioSettings] = None
+    三新技术适用评估: RagScenarioSettings = Field(default_factory=RagScenarioSettings)
     dept_ids: list[str] = Field(default_factory=list)
     faq_score: float = Field(default=0.8, ge=0, le=1)
     search_method: int = 3

@@ -148,8 +148,10 @@ Agent 已注册八个业务工具（括号内为协议调用标识）：
   `RAG_API_TOKEN`，各请求体的 `knowledge_ids` 仅包含一个库 ID。三个 ID 分别通过
   `RAG_POLICY_KNOWLEDGE_ID`、`RAG_BUSINESS_KNOWLEDGE_ID`、`RAG_LITERATURE_KNOWLEDGE_ID`
   配置；缺失或重复 ID 时拒绝检索，不回退到全库查询。
-  `tools.rag.general` 和 `tools.rag.xiamen` 分别配置通用和厦门场景的
-  `knowledge_bases`、`score`、`result_score_threshold`，共用服务地址、API Token、租户和部门范围。
+  `tools.rag.general`、`tools.rag.xiamen`、`tools.rag.三新技术适用评估` 分别配置通用、厦门、三新技术适用评估场景，
+  三者格式一致，均包含 `knowledge_bases`、`score`、`result_score_threshold`，
+  共用服务地址、API Token、租户和部门范围。三新场景初始参数与通用完全一致，可独立调整；
+  当前仅预置三新参数，尚未接入 `front_context.module_l2` 场景路由。
   `query` 同义词扩展后包含“厦门”“疑点疑区”或“图斑”时，使用厦门场景，否则使用通用场景。
   通用场景三个库的召回/保留数量依次为 20/4、50/14、20/4，接口分数阈值 0.6，
   本地结果阈值 0.3，合计最多 22 条。厦门场景前三库均为 15/3，另加厦门局业务库 30/15
