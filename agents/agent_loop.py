@@ -15,6 +15,7 @@ from agents.events import AgentEvent
 from agents.llm_client import HelloAgentsLLM
 from agents.skills import SkillCatalog
 from agents.tool_audit import ToolAuditRecorder
+from agents.temporary_suspicion_scope import restrict_request
 from agents.tools.executor import ToolExecutor
 from agents.tools.map_action import spatial_map_results
 from agents.tools.context import ToolContext
@@ -159,7 +160,12 @@ class AgentLoop:
             if input_budget_tokens == self.input_budget_tokens
             else TokenBudgetService(self.token_budget.counter, input_budget_tokens)
         )
-        tool_definitions = self.tools.definitions()
+        tools = self.tools
+        # 临时限制接入：移除此调用及导入即可恢复全量能力。
+        tools, history, enabled_skill_names, system_prompt = restrict_request(
+            question, tools, history, enabled_skill_names, system_prompt,
+        )
+        tool_definitions = tools.definitions()
         skill_summaries = self.skills.summaries() if self.skills else ()
         history = self.context_service.filter_rag_history(history)
         if enabled_skill_names is not None:
@@ -465,7 +471,7 @@ class AgentLoop:
                     tool_call["id"],
                     tool_call["args"],
                 )
-                registered_tool = self.tools.get(name)
+                registered_tool = tools.get(name)
                 yield AgentEvent(
                     type="tool_started",
                     round_number=round_number,
@@ -493,7 +499,7 @@ class AgentLoop:
                         execute_kwargs = {"enabled_skill_names": enabled_skill_names}
                         if registered_tool and registered_tool.contextual:
                             execute_kwargs["context"] = ToolContext(on_progress=on_progress)
-                        observation, client_events = await self.tools.execute_with_events(
+                        observation, client_events = await tools.execute_with_events(
                             name, tool_call["args"], **execute_kwargs
                         )
                     finally:
