@@ -111,7 +111,7 @@ business_scenarios:
           name: "海洋图书与文献"
           recall_top_n: 15
           top_n: 3
-        - knowledge_id: "${RAG_XIAMEN_KNOWLEDGE_ID:KLB_bc6985d4abfb4e79b80e5e7b1e0926a3}"
+        - knowledge_id: "${RAG_XIAMEN_KNOWLEDGE_ID:KLB_84c70ad7cd404a1ca8fa35132ba4aad9}"
           name: "厦门局业务"
           recall_top_n: 50
           top_n: 15
