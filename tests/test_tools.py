@@ -233,7 +233,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rag_result["chunks"][0]["page"], 2)
         self.assertEqual(
             rag_tool.backend.arguments,
-            ("赤潮", [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in get_settings().tools.rag.general.knowledge_bases], {"tags": ["赤潮"]}),
+            ("赤潮", [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in get_settings().business_scenarios.general.rag.knowledge_bases], {"tags": ["赤潮"]}),
         )
         self.assertEqual(database_result["question"], "E2 平均盐度")
         self.assertEqual(
@@ -267,27 +267,29 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         for enabled in (False, True):
             with self.subTest(rerank_enabled=enabled):
-                settings = get_settings().tools.rag.model_copy(deep=True)
-                for library in settings.general.knowledge_bases:
+                application = get_settings().model_copy(deep=True)
+                settings = application.tools.rag
+                scenarios = application.business_scenarios
+                for library in scenarios.general.rag.knowledge_bases:
                     library.recall_top_n = 20
-                settings.general.knowledge_bases[0].recall_top_n = 25
-                settings.general.knowledge_bases[0].top_n = 3
+                scenarios.general.rag.knowledge_bases[0].recall_top_n = 25
+                scenarios.general.rag.knowledge_bases[0].top_n = 3
                 settings.rerank.enabled = enabled
                 with patch(
                     "agents.tools.rag_search.get_settings",
-                    return_value=SimpleNamespace(tools=SimpleNamespace(rag=settings)),
+                    return_value=application,
                 ), patch("agents.tools.rag_search.RagSearchBackend") as factory:
                     factory.return_value.search_all = AsyncMock(return_value=[])
                     tool = RagSearchTool()
                     await tool.execute("赤潮")
                     factory.return_value.search_all.assert_awaited_once_with(
-                        "赤潮", [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in settings.general.knowledge_bases], {"tags": []},
-                        score=settings.general.score, result_score_threshold=settings.general.result_score_threshold,
+                        "赤潮", [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in scenarios.general.rag.knowledge_bases], {"tags": []},
+                        score=scenarios.general.rag.score, result_score_threshold=scenarios.general.rag.result_score_threshold,
                     )
                     arguments = factory.call_args.kwargs
                     self.assertEqual(arguments["candidate_top_n"], 25)
                     self.assertEqual(arguments["knowledge_ids"], tuple(dict.fromkeys(
-                        b.knowledge_id.strip() for b in settings.general.knowledge_bases + settings.xiamen.knowledge_bases
+                        b.knowledge_id.strip() for b in scenarios.general.rag.knowledge_bases + scenarios.xiamen.rag.knowledge_bases
                     )))
                     self.assertEqual(arguments["dept_ids"], tuple(settings.dept_ids))
 

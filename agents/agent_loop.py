@@ -21,8 +21,9 @@ from agents.tools.map_action import spatial_map_results
 from agents.tools.context import ToolContext
 from agents.tools.registry import build_skill_catalog, build_tool_executor
 from config.settings import get_settings
-from schemas.chat import ChatMessage, FrontendContext
+from schemas.chat import ChatMessage, FrontContext, FrontendContext
 from services.context_service import ContextService, SYSTEM_PROMPT
+from services.business_scenario import resolve_rag_scenario
 from services.token_budget_service import (
     DeepSeekV4TokenCounter,
     TOKENIZER_NAME,
@@ -134,6 +135,7 @@ class AgentLoop:
         run_id: str = "-",
         *,
         frontend_context: FrontendContext | None = None,
+        front_context: FrontContext | None = None,
         audit_recorder: ToolAuditRecorder | None = None,
         system_prompt: str = SYSTEM_PROMPT,
         enabled_skill_names: frozenset[str] | None = None,
@@ -160,6 +162,11 @@ class AgentLoop:
             if input_budget_tokens == self.input_budget_tokens
             else TokenBudgetService(self.token_budget.counter, input_budget_tokens)
         )
+        rag_scenario = resolve_rag_scenario(front_context)
+        logger.info(
+            "agent_submodule_selected run_id=%s front_context=%r base_rag_scenario=%s",
+            run_id, front_context.model_dump() if front_context is not None else None, rag_scenario,
+        )
         tools = self.tools
         # 临时限制接入：移除此调用及导入即可恢复全量能力。
         tools, history, enabled_skill_names, system_prompt = restrict_request(
@@ -185,6 +192,7 @@ class AgentLoop:
             skills=skill_summaries,
             max_history_messages=limit,
             system_prompt=system_prompt,
+            rag_scenario=rag_scenario,
         )
         input_message_count = len(messages)
         cumulative_input_tokens = 0
@@ -498,7 +506,7 @@ class AgentLoop:
 
                         execute_kwargs = {"enabled_skill_names": enabled_skill_names}
                         if registered_tool and registered_tool.contextual:
-                            execute_kwargs["context"] = ToolContext(on_progress=on_progress)
+                            execute_kwargs["context"] = ToolContext(on_progress=on_progress, rag_scenario=rag_scenario)
                         observation, client_events = await tools.execute_with_events(
                             name, tool_call["args"], **execute_kwargs
                         )
@@ -682,6 +690,7 @@ class AgentLoop:
                             skills=skill_summaries,
                             max_history_messages=limit,
                             system_prompt=system_prompt,
+                            rag_scenario=rag_scenario,
                         )
                         history_group_sizes = tuple(
                             len(group)

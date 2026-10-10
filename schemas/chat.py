@@ -234,6 +234,13 @@ class FrontendContext(BaseModel):
         return value
 
 
+class FrontContext(BaseModel):
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    module_l1: str = Field(default="", max_length=100)
+    module_l2: str = Field(default="", max_length=100)
+
+
 class AgentRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -258,6 +265,10 @@ class AgentRequest(BaseModel):
         default=None,
         validation_alias=AliasChoices("context", "map_context", "mapContext"),
         description="省略时继承会话选区；有效几何替换选区；显式 null、空对象或空几何清除选区",
+    )
+    front_context: Optional[FrontContext] = Field(
+        default=None,
+        description="本轮所处业务子板块；按 module_l2 选择后端配置的 RAG 场景和专属提示词",
     )
 
     @field_validator("chat_history", mode="before")

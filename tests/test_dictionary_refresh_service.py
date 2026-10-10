@@ -56,9 +56,9 @@ class DictionaryRefreshServiceTest(unittest.IsolatedAsyncioTestCase):
             expanded = expand_query_synonyms("DO")
             self.assertEqual(expanded, "DO（溶解氧浓度）")
             await rag.execute(expanded)
-            backend.search_all.assert_awaited_with(expanded, [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in get_settings().tools.rag.general.knowledge_bases], {"tags": []}, score=get_settings().tools.rag.general.score, result_score_threshold=get_settings().tools.rag.general.result_score_threshold)
+            backend.search_all.assert_awaited_with(expanded, [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in get_settings().business_scenarios.general.rag.knowledge_bases], {"tags": []}, score=get_settings().business_scenarios.general.rag.score, result_score_threshold=get_settings().business_scenarios.general.rag.result_score_threshold)
             await rag.execute("DO")
-            backend.search_all.assert_awaited_with(expanded, [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in get_settings().tools.rag.general.knowledge_bases], {"tags": []}, score=get_settings().tools.rag.general.score, result_score_threshold=get_settings().tools.rag.general.result_score_threshold)
+            backend.search_all.assert_awaited_with(expanded, [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in get_settings().business_scenarios.general.rag.knowledge_bases], {"tags": []}, score=get_settings().business_scenarios.general.rag.score, result_score_threshold=get_settings().business_scenarios.general.rag.result_score_threshold)
 
     def service(self, store, synonyms, sensitive, *, enabled=False):
         return DictionaryRefreshService(

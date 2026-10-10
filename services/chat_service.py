@@ -390,6 +390,8 @@ class ChatService:
                 run_stream_kwargs["run_id"] = run_id
             if "frontend_context" in run_stream_parameters:
                 run_stream_kwargs["frontend_context"] = active_context
+            if "front_context" in run_stream_parameters:
+                run_stream_kwargs["front_context"] = request.front_context
             if "audit_recorder" in run_stream_parameters:
                 run_stream_kwargs["audit_recorder"] = PersistentToolAuditRecorder(
                     run_id,

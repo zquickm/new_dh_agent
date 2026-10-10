@@ -246,15 +246,23 @@ class RagScenarioSettings(BaseModel):
     result_score_threshold: float = Field(default=0.3, ge=0, le=1)
 
 
+class BusinessScenarioSettings(BaseModel):
+    prompt: str = ""
+    rag: RagScenarioSettings = Field(default_factory=RagScenarioSettings)
+
+
+class BusinessScenariosSettings(BaseModel):
+    general: BusinessScenarioSettings = Field(default_factory=BusinessScenarioSettings)
+    xiamen: Optional[BusinessScenarioSettings] = None
+    三新技术适用评估: BusinessScenarioSettings = Field(default_factory=BusinessScenarioSettings)
+
+
 class RagToolSettings(BaseModel):
     base_url: str = ""
     recall_path: str = "/rag-platform-default/zsgl/knowledgeRecall"
     recall_url: str = ""
     api_token: SecretStr = SecretStr("")
     tenant_id: str = ""
-    general: RagScenarioSettings = Field(default_factory=RagScenarioSettings)
-    xiamen: Optional[RagScenarioSettings] = None
-    三新技术适用评估: RagScenarioSettings = Field(default_factory=RagScenarioSettings)
     dept_ids: list[str] = Field(default_factory=list)
     faq_score: float = Field(default=0.8, ge=0, le=1)
     search_method: int = 3
@@ -342,6 +350,7 @@ class Settings(BaseSettings):
     stream: StreamSettings = Field(default_factory=StreamSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     tools: ToolSettings = Field(default_factory=ToolSettings)
+    business_scenarios: BusinessScenariosSettings = Field(default_factory=BusinessScenariosSettings)
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_DIR / ".env",

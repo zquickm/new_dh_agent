@@ -81,6 +81,7 @@ def build_tool_executor(
         RAG_TOOL_DESCRIPTION,
         rag_tool.execute,
         RAG_TOOL_PARAMETERS,
+        contextual=True,
     )
     executor.register(
         DATABASE_TOOL_NAME,

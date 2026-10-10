@@ -26,9 +26,9 @@ class RagXiamenTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(matcher.stop)
 
     async def test_query_routes_and_process_names_without_changing_agent_loop(self):
-        settings = get_settings().tools.rag
-        default_ids = [b.knowledge_id for b in settings.general.knowledge_bases]
-        xiamen_ids = [b.knowledge_id for b in settings.xiamen.knowledge_bases]
+        settings = get_settings()
+        default_ids = [b.knowledge_id for b in settings.business_scenarios.general.rag.knowledge_bases]
+        xiamen_ids = [b.knowledge_id for b in settings.business_scenarios.xiamen.rag.knowledge_bases]
         session = FakeSession(*(
             [FakeResponse({"code": 200, "data": {"records": []}})] * 19
             + [RuntimeError("厦门库不可用")]
@@ -55,7 +55,7 @@ class RagXiamenTest(unittest.IsolatedAsyncioTestCase):
                          [[kid] for kid in default_ids + xiamen_ids * 4 + default_ids[:1]])
         self.assertEqual(session.calls[15]["json"]["query"], ["鹭岛（厦门）业务"])
         self.assertEqual([call["json"]["top_n"] for call in session.calls],
-                         [20, 50, 20] + [15, 15, 15, 30] * 4 + [15])
+                         [20, 50, 20] + [15, 15, 15, 50] * 4 + [15])
         self.assertTrue(all(call["json"]["score"] == 0.6 for call in session.calls))
         for i in range(len(queries)):
             name = "东溟知识库检索" if i == 0 else "厦门局业务知识库"
@@ -68,12 +68,10 @@ class RagXiamenTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(process[1]["summary"], f"{name}执行完成")
 
     async def test_missing_xiamen_config_and_unauthorized_library_send_no_requests(self):
-        settings = get_settings().tools.rag.model_copy(deep=True)
-        settings.xiamen = None
+        settings = get_settings().model_copy(deep=True)
+        settings.business_scenarios.xiamen = None
         backend = SimpleNamespace(search_all=AsyncMock())
-        with patch("agents.tools.rag_search.get_settings", return_value=SimpleNamespace(
-            tools=SimpleNamespace(rag=settings),
-        )):
+        with patch("agents.tools.rag_search.get_settings", return_value=settings):
             with self.assertRaisesRegex(ValueError, "当前场景"):
                 await RagSearchTool(backend).execute("鹭岛业务")
         backend.search_all.assert_not_awaited()
@@ -85,10 +83,11 @@ class RagXiamenTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.calls, [])
 
     async def test_scenario_thresholds_are_local_to_concurrent_requests(self):
-        settings = get_settings().tools.rag.model_copy(deep=True)
-        settings.xiamen.score = 0.8  # Distinct values prove the selected scenario supplies the request score.
+        settings = get_settings().model_copy(deep=True)
+        settings.business_scenarios.xiamen.rag.score = 0.8  # Distinct values prove the selected scenario supplies the request score.
+        settings.business_scenarios.xiamen.rag.result_score_threshold = 0.2  # Keep thresholds distinct regardless of deployment tuning.
         backend = make_backend(FakeSession(), FakeReranker())
-        backend.knowledge_ids = tuple(b.knowledge_id for b in settings.xiamen.knowledge_bases)
+        backend.knowledge_ids = tuple(b.knowledge_id for b in settings.business_scenarios.xiamen.rag.knowledge_bases)
         payloads = []
 
         async def recall(url, payload, headers, **kwargs):
@@ -100,9 +99,7 @@ class RagXiamenTest(unittest.IsolatedAsyncioTestCase):
                 for score in (0.19, 0.2, 0.25, 0.3)
             ]}}
 
-        with patch("agents.tools.rag_search.get_settings", return_value=SimpleNamespace(
-            tools=SimpleNamespace(rag=settings),
-        )), patch.object(backend, "_post_json", side_effect=recall):
+        with patch("agents.tools.rag_search.get_settings", return_value=settings), patch.object(backend, "_post_json", side_effect=recall):
             tool = RagSearchTool(backend)
             general, xiamen = await asyncio.gather(tool.execute("海洋图书"), tool.execute("鹭岛业务"))
         self.assertEqual(general["count"], 3)
@@ -114,13 +111,13 @@ class RagXiamenTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((backend.score, backend.result_score_threshold), (0.6, 0.6))
 
     async def test_scenario_per_library_caps_and_default_configuration(self):
-        settings = get_settings().tools.rag
-        self.assertEqual((settings.general.score, settings.general.result_score_threshold), (0.6, 0.3))
-        self.assertEqual((settings.xiamen.score, settings.xiamen.result_score_threshold), (0.6, 0.2))
+        settings = get_settings()
+        self.assertEqual((settings.business_scenarios.general.rag.score, settings.business_scenarios.general.rag.result_score_threshold), (0.6, 0.3))
+        self.assertEqual((settings.business_scenarios.xiamen.rag.score, settings.business_scenarios.xiamen.rag.result_score_threshold), (0.6, 0.3))
         backend = make_backend(FakeSession(FakeResponse({"code": 200, "data": {"records": [
             {"chunk_text": str(i), "fileName": "资料.pdf", "score": 0.9} for i in range(50)
         ]}})), FakeReranker())
-        backend.knowledge_ids = tuple(b.knowledge_id for b in settings.xiamen.knowledge_bases)
+        backend.knowledge_ids = tuple(b.knowledge_id for b in settings.business_scenarios.xiamen.rag.knowledge_bases)
         tool = RagSearchTool(backend)
         self.assertEqual((await tool.execute("海洋图书"))["count"], 22)
         self.assertEqual((await tool.execute("厦门业务"))["count"], 24)

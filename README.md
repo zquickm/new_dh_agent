@@ -148,16 +148,32 @@ Agent 已注册八个业务工具（括号内为协议调用标识）：
   `RAG_API_TOKEN`，各请求体的 `knowledge_ids` 仅包含一个库 ID。三个 ID 分别通过
   `RAG_POLICY_KNOWLEDGE_ID`、`RAG_BUSINESS_KNOWLEDGE_ID`、`RAG_LITERATURE_KNOWLEDGE_ID`
   配置；缺失或重复 ID 时拒绝检索，不回退到全库查询。
-  `tools.rag.general`、`tools.rag.xiamen`、`tools.rag.三新技术适用评估` 分别配置通用、厦门、三新技术适用评估场景，
-  三者格式一致，均包含 `knowledge_bases`、`score`、`result_score_threshold`，
-  共用服务地址、API Token、租户和部门范围。三新场景初始参数与通用完全一致，可独立调整；
-  当前仅预置三新参数，尚未接入 `front_context.module_l2` 场景路由。
-  `query` 同义词扩展后包含“厦门”“疑点疑区”或“图斑”时，使用厦门场景，否则使用通用场景。
+  `business_scenarios.general`、`business_scenarios.xiamen`、`business_scenarios.三新技术适用评估`
+  分别配置通用、厦门、三新技术适用评估场景，三者格式一致：`prompt` 为专属提示词，
+  `rag` 包含 `knowledge_bases`、`score`、`result_score_threshold`。
+  `tools.rag` 只配置共用服务地址、API Token、租户、部门范围和请求选项。
+  三新场景初始检索参数与通用完全一致，可独立调整；
+  请求可携带 `"front_context":{"module_l1":"海政协同赋能","module_l2":"政策协同分析评估"}`。
+  `module_l2` 精确等于“三新技术适用评估”时使用三新参数和专属提示词，其余子板块（包括
+  “政策协同分析评估”）、未传、空或未知板块均使用通用参数和通用提示词。`module_l1` 不参与选择。
+  专属提示词配置在对应场景的 `prompt` 中，追加到本次系统提示词，各轮持续生效；前端仅提交板块名称。
+  不从历史继承板块，切换板块以本次请求为准；前端不能指定提示词或直接覆盖 RAG 参数。
+  日志 `agent_submodule_selected` 记录本次请求的 `front_context` 与板块对应的基础场景；
+  `prompt_scenario_selected`、`rag_scenario_selected` 分别记录实际提示词场景与检索场景，
+  其中厦门关键词匹配可以覆盖基础场景。不新增数据库字段或提示词快照。
+  原 `tools.rag.<场景>` 配置已移除；部署覆盖配置及环境变量须改用新路径，例如
+  `NEW_DH_BUSINESS_SCENARIOS__GENERAL__PROMPT`、`NEW_DH_BUSINESS_SCENARIOS__GENERAL__RAG__SCORE`。
+  板块映射与厦门关键词优先规则统一维护在 `services/business_scenario.py`；提示词按本轮问题选择，
+  RAG 按实际检索词选择，分别在同义词扩展后调用共享规则。
+  厦门保持原有例外规则：`query` 同义词扩展后包含“厦门”“疑点疑区”或“图斑”时，优先使用厦门
+  检索参数，与子板块无关。本轮问题同义词扩展后命中这些关键词时，优先使用 `business_scenarios.xiamen.prompt`
+  厦门专属提示词，替代通用或三新提示词；无需调用 RAG 即可在第一轮模型输入中生效。
   通用场景三个库的召回/保留数量依次为 20/4、50/14、20/4，接口分数阈值 0.6，
-  本地结果阈值 0.3，合计最多 22 条。厦门场景前三库均为 15/3，另加厦门局业务库 30/15
-  （`RAG_XIAMEN_KNOWLEDGE_ID`），接口分数阈值 0.6，本地结果阈值 0.2，合计最多 24 条。
+  本地结果阈值 0.3，合计最多 22 条。厦门场景前三库均为 15/3，另加厦门局业务库 50/15
+  （`RAG_XIAMEN_KNOWLEDGE_ID`），接口分数阈值 0.6，本地结果阈值 0.3，合计最多 24 条。
   所有参数按本次调用传入，共用客户端不修改全局阈值，并发问答不会相互覆盖。
-  对应 process 名称及 retrieval 的 `tool_name` 为“厦门局业务知识库”。
+  process 名称及 retrieval 的 `tool_name` 保持原有展示规则：检索词命中厦门关键词时为
+  “厦门局业务知识库”，否则为“东溟知识库检索”，不随通用或三新子板块切换。
   场景未配置或任一库请求失败时本次工具报错，不切换场景；无结果时返回实际空结果。
   工具 Schema 保持 `query`、`tags`。每库 `recall_top_n` 控制接口召回数量，
   `top_n` 控制按返回 `score` 降序筛选后的保留数量（均可独立调整）。同分保持原顺序，

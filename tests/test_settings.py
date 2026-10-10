@@ -19,6 +19,19 @@ class SettingsTest(unittest.TestCase):
     def tearDown(self):
         clear_settings_cache()
 
+    def test_scenario_prompt_and_retrieval_have_separate_environment_overrides(self):
+        with patch.dict(os.environ, {
+            "APP_PROFILE": "dev",
+            "NEW_DH_BUSINESS_SCENARIOS__GENERAL__PROMPT": "场景配置提示",
+            "NEW_DH_BUSINESS_SCENARIOS__GENERAL__RAG__SCORE": "0.85",
+        }):
+            clear_settings_cache()
+            settings = get_settings()
+            self.assertEqual(settings.business_scenarios.general.prompt, "场景配置提示")
+            self.assertEqual(settings.business_scenarios.general.rag.score, 0.85)
+            self.assertNotIn("prompt", settings.business_scenarios.general.rag.model_fields)
+            self.assertNotIn("general", settings.tools.rag.model_fields)
+
     def test_prod_dotenv_placeholders_load_without_becoming_extra_settings(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"

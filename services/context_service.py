@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import json
+import logging
 from textwrap import dedent
 from typing import Any
 
 from agents.citations import strip_citation_markers
 from agents.skills import SkillSummary
 from agents.tools.current_server_time import get_current_server_time
+from config.settings import get_settings
 from schemas.chat import ChatMessage, FrontendContext
+from services.business_scenario import resolve_query_scenario
 from services.request_context_adapter import enrich_question_with_frontend_context
 from services.synonym_service import expand_query_synonyms
+
+
+logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = dedent(
@@ -76,7 +82,12 @@ CITATION_PROTOCOL_PROMPT = dedent(
 def build_system_prompt(
     skills: tuple[SkillSummary, ...],
     system_prompt: str = SYSTEM_PROMPT,
+    *, rag_scenario: str = "general",
 ) -> str:
+    scenario = getattr(get_settings().business_scenarios, rag_scenario)
+    submodule_prompt = scenario.prompt.strip() if scenario is not None else ""
+    if submodule_prompt:
+        system_prompt += f"\n\n[当前子板块专属提示词]\n{submodule_prompt}"
     skill_lines = [f"- {skill.name}: {skill.description}" for skill in skills]
     skill_index = "\n".join(skill_lines) or "- （无）"
     return (
@@ -189,8 +200,14 @@ class ContextService:
         skills: tuple[SkillSummary, ...],
         max_history_messages: int,
         system_prompt: str = SYSTEM_PROMPT,
+        rag_scenario: str = "general",
     ) -> list[dict[str, Any]]:
         expanded_question = expand_query_synonyms(question)
+        prompt_scenario = resolve_query_scenario(expanded_question, rag_scenario)
+        logger.info(
+            "prompt_scenario_selected base_rag_scenario=%s prompt_scenario=%s question=%r",
+            rag_scenario, prompt_scenario, expanded_question,
+        )
         agent_question = enrich_question_with_frontend_context(
             expanded_question, frontend_context
         )
@@ -199,7 +216,9 @@ class ContextService:
         return [
             {
                 "role": "system",
-                "content": build_system_prompt(skills, system_prompt),
+                "content": build_system_prompt(
+                    skills, system_prompt, rag_scenario=prompt_scenario,
+                ),
             },
             *[
                 {

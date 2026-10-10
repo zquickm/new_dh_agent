@@ -71,23 +71,12 @@ logging:
   directory: logs
   retention_days: 14
 
-tools:
-  execution_timeout: 300
-  spatial:
-    base_url: "http://71.10.60.143:6022"
-    api_key: "${SPATIAL_API_KEY:}"
-    timeout: 30
-    connect_timeout: 5
-    verify_ssl: true
-    max_retries: 1
-    retry_backoff: 0.3
-  rag:
-    base_url: "http://71.10.60.34:18000"
-    recall_path: "/rag-platform-default/zsgl/knowledgeRecall"
-    recall_url: ""
-    api_token: "${RAG_API_TOKEN:}"
-    tenant_id: "c3d03091-026c-413a-974e-081a4bbfe8c0"
-    general: # 通用（三库）
+business_scenarios:
+  general: # 通用（三库）
+    prompt: |
+      当前为通用业务场景。围绕用户实际问题综合分析，明确业务范围、时间与适用条件，
+      区分内部资料事实、分析判断和建议；涉及内部业务事实时引用检索依据，资料不足时说明缺口。
+    rag:
       knowledge_bases:
         - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
           name: "政策法规与标准规范"
@@ -103,7 +92,12 @@ tools:
           top_n: 4
       score: 0.6
       result_score_threshold: 0.3
-    xiamen: # 厦门
+  xiamen: # 厦门
+    prompt: |
+      当前为厦门业务场景。围绕厦门局业务、海洋监测、生态修复或疑点疑区研判回答，
+      优先结合对应报告、规则服务和用户指定范围，明确年份、批次与评价口径，
+      区分监测事实、正式结果、试算结论和建议；不将其他地区资料直接作为厦门的事实依据。
+    rag:
       knowledge_bases:
         - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
           name: "政策法规与标准规范"
@@ -123,7 +117,11 @@ tools:
           top_n: 15
       score: 0.6
       result_score_threshold: 0.3
-    三新技术适用评估: # 初始参数与通用一致，可独立调整
+  三新技术适用评估: # 初始参数与通用一致，可独立调整
+    prompt: |
+      当前子板块为三新技术适用评估。围绕用户指定技术和业务需求，分析适用条件、数据要求、
+      预期效果、实施成本及局限，区分已有验证与待验证判断；缺少依据时不编造效果或评估结论。
+    rag:
       knowledge_bases:
         - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
           name: "政策法规与标准规范"
@@ -139,6 +137,23 @@ tools:
           top_n: 4
       score: 0.6
       result_score_threshold: 0.3
+
+tools:
+  execution_timeout: 300
+  spatial:
+    base_url: "http://71.10.60.143:6022"
+    api_key: "${SPATIAL_API_KEY:}"
+    timeout: 30
+    connect_timeout: 5
+    verify_ssl: true
+    max_retries: 1
+    retry_backoff: 0.3
+  rag:
+    base_url: "http://71.10.60.34:18000"
+    recall_path: "/rag-platform-default/zsgl/knowledgeRecall"
+    recall_url: ""
+    api_token: "${RAG_API_TOKEN:}"
+    tenant_id: "c3d03091-026c-413a-974e-081a4bbfe8c0"
     dept_ids:
       - "c3d03091-026c-413a-974e-081a4bbfe8c0"
     faq_score: 0.8

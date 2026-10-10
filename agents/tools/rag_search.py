@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
+from agents.tools.context import ToolContext
 from config.settings import get_settings
+from services.business_scenario import is_xiamen_query, resolve_query_scenario
 from services.synonym_service import expand_query_synonyms
 from tool_backends.rag_backend import RagSearchBackend
 
 
+logger = logging.getLogger(__name__)
+
+
 TOOL_NAME = "rag_search"
 TOOL_DESCRIPTION = (
-    "检索内部知识库中的文档、制度、报告或说明，返回相关片段及来源。"
+    "检索东海局和厦门局内部知识库中的文档、制度、报告或说明，返回相关片段及来源。"
     "当问题需要非结构化文档依据时使用。"
 )
 TOOL_PARAMETERS: dict[str, Any] = {
@@ -42,10 +48,6 @@ TOOL_PARAMETERS: dict[str, Any] = {
 }
 
 
-def is_xiamen_query(query: str) -> bool:
-    return any(word in query for word in ("厦门", "疑点疑区", "图斑"))
-
-
 def rag_display_name(query: str) -> str:
     query = expand_query_synonyms(query) if isinstance(query, str) else ""
     return "厦门局业务知识库" if is_xiamen_query(query) else "东溟知识库检索"
@@ -60,11 +62,13 @@ class RagSearchTool:
     @property
     def backend(self) -> RagSearchBackend:
         if self._backend is None:
-            settings = get_settings().tools.rag
+            application = get_settings()
+            settings = application.tools.rag
+            scenarios = application.business_scenarios
             rerank = settings.rerank
-            libraries = settings.general.knowledge_bases + (
-                settings.xiamen.knowledge_bases if settings.xiamen else []
-            )
+            libraries = scenarios.general.rag.knowledge_bases + (
+                scenarios.xiamen.rag.knowledge_bases if scenarios.xiamen else []
+            ) + scenarios.三新技术适用评估.rag.knowledge_bases
             self._backend = RagSearchBackend(
                 recall_url=settings.resolved_recall_url(),
                 api_token=settings.api_token.get_secret_value(),
@@ -73,9 +77,9 @@ class RagSearchTool:
                     library.knowledge_id.strip() for library in libraries if library.knowledge_id.strip()
                 )),
                 dept_ids=tuple(settings.dept_ids),
-                score=settings.general.score,
-                result_score_threshold=settings.general.result_score_threshold,
-                candidate_top_n=max((library.recall_top_n for library in settings.general.knowledge_bases), default=20),
+                score=scenarios.general.rag.score,
+                result_score_threshold=scenarios.general.rag.result_score_threshold,
+                candidate_top_n=max((library.recall_top_n for library in scenarios.general.rag.knowledge_bases), default=20),
                 faq_score=settings.faq_score,
                 search_method=settings.search_method,
                 search_scope=settings.search_scope,
@@ -100,6 +104,7 @@ class RagSearchTool:
         self,
         query: str,
         tags: Optional[list[str]] = None,
+        *, context: ToolContext = ToolContext(),
     ) -> dict[str, Any]:
         query = query.strip()
         if not query:
@@ -111,10 +116,16 @@ class RagSearchTool:
         ):
             raise ValueError("tags 必须是不超过 50 项的字符串数组")
         query = expand_query_synonyms(query)
-        settings = get_settings().tools.rag
-        scenario = settings.xiamen if is_xiamen_query(query) else settings.general
-        if scenario is None or not scenario.knowledge_bases:
+        settings = get_settings().business_scenarios
+        scenario_name = resolve_query_scenario(query, context.rag_scenario or "general")
+        logger.info(
+            "rag_scenario_selected base_rag_scenario=%s rag_scenario=%s query=%r",
+            context.rag_scenario or "general", scenario_name, query,
+        )
+        business_scenario = getattr(settings, scenario_name, None)
+        if business_scenario is None or not business_scenario.rag.knowledge_bases:
             raise ValueError("请配置当前场景的 RAG 知识库参数")
+        scenario = business_scenario.rag
         chunks = await self.backend.search_all(
             query, [(library.knowledge_id.strip(), library.recall_top_n, library.top_n)
                     for library in scenario.knowledge_bases],
