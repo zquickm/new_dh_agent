@@ -251,12 +251,6 @@ class BusinessScenarioSettings(BaseModel):
     rag: RagScenarioSettings = Field(default_factory=RagScenarioSettings)
 
 
-class BusinessScenariosSettings(BaseModel):
-    general: BusinessScenarioSettings = Field(default_factory=BusinessScenarioSettings)
-    xiamen: Optional[BusinessScenarioSettings] = None
-    三新技术适用评估: BusinessScenarioSettings = Field(default_factory=BusinessScenarioSettings)
-
-
 class RagToolSettings(BaseModel):
     base_url: str = ""
     recall_path: str = "/rag-platform-default/zsgl/knowledgeRecall"
@@ -350,7 +344,18 @@ class Settings(BaseSettings):
     stream: StreamSettings = Field(default_factory=StreamSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     tools: ToolSettings = Field(default_factory=ToolSettings)
-    business_scenarios: BusinessScenariosSettings = Field(default_factory=BusinessScenariosSettings)
+    business_scenarios: dict[str, BusinessScenarioSettings] = Field(
+        default_factory=lambda: {"general": BusinessScenarioSettings()}
+    )
+
+    @field_validator("business_scenarios")
+    @classmethod
+    def require_general_scenario(
+        cls, value: dict[str, BusinessScenarioSettings]
+    ) -> dict[str, BusinessScenarioSettings]:
+        if "general" not in value:
+            raise ValueError("business_scenarios 必须配置 general 通用场景")
+        return value
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_DIR / ".env",

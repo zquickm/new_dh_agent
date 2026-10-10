@@ -95,46 +95,66 @@ business_scenarios:
   xiamen: # 厦门
     prompt: |
       当前为厦门业务场景。围绕厦门局业务、海洋监测、生态修复或疑点疑区研判回答，
-      优先结合对应报告、规则服务和用户指定范围，明确年份、批次与评价口径，
-      区分监测事实、正式结果、试算结论和建议；不将其他地区资料直接作为厦门的事实依据。
+      优先结合对应报告、规则服务和用户指定范围，明确年份、批次与评价口径，默认使用最新资料；
+      不将其他地区资料直接作为厦门的事实依据。
     rag:
       knowledge_bases:
         - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
           name: "政策法规与标准规范"
-          recall_top_n: 15
+          recall_top_n: 12
           top_n: 3
         - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
           name: "核心业务"
-          recall_top_n: 15
-          top_n: 3
+          recall_top_n: 12
+          top_n: 4
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
-          recall_top_n: 15
+          recall_top_n: 12
           top_n: 3
         - knowledge_id: "${RAG_XIAMEN_KNOWLEDGE_ID:KLB_84c70ad7cd404a1ca8fa35132ba4aad9}"
           name: "厦门局业务"
           recall_top_n: 50
-          top_n: 15
+          top_n: 12
       score: 0.6
       result_score_threshold: 0.3
-  三新技术适用评估: # 初始参数与通用一致，可独立调整
+  三新技术适用评估:
     prompt: |
-      当前子板块为三新技术适用评估。围绕用户指定技术和业务需求，分析适用条件、数据要求、
-      预期效果、实施成本及局限，区分已有验证与待验证判断；缺少依据时不编造效果或评估结论。
+      当前子板块为三新技术适用评估。围绕用户指定技术和业务需求，分析适用条件、数据要求、预期效果、实施成本及局限。
+      回答风格采取“现有哪些常用技术，检索文献中有哪些技术，中间进行丰富分析评价，最后得出结论”。
     rag:
       knowledge_bases:
         - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
           name: "政策法规与标准规范"
-          recall_top_n: 20
-          top_n: 4
+          recall_top_n: 25
+          top_n: 5
         - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
           name: "核心业务"
-          recall_top_n: 50
-          top_n: 14
+          recall_top_n: 25
+          top_n: 5
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
-          recall_top_n: 20
-          top_n: 4
+          recall_top_n: 40
+          top_n: 12
+      score: 0.6
+      result_score_threshold: 0.3
+  海洋断面数据分析:
+    prompt: |
+      当前子板块为海洋断面数据分析。较多的数据使用表格展示。知识库检索结果中的数据不可信，其他内容可信；数据使用数据库查询返回的数据。
+      回答风格采取“先分析数据，后结合知识库内容进行分析，最后得出结论”。
+    rag:
+      knowledge_bases:
+        - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
+          name: "政策法规与标准规范"
+          recall_top_n: 25
+          top_n: 5
+        - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
+          name: "核心业务"
+          recall_top_n: 25
+          top_n: 5
+        - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
+          name: "海洋图书与文献"
+          recall_top_n: 40
+          top_n: 12
       score: 0.6
       result_score_threshold: 0.3
 

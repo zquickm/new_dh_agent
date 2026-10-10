@@ -1,11 +1,13 @@
 """业务场景规则；不依赖具体工具或提示词组装。"""
 from __future__ import annotations
 
+from config.settings import get_settings
 from schemas.chat import FrontContext
 
 
 def resolve_rag_scenario(context: FrontContext | None) -> str:
-    return "三新技术适用评估" if context and context.module_l2 == "三新技术适用评估" else "general"
+    module_l2 = context.module_l2 if context else ""
+    return module_l2 if module_l2 and module_l2 in get_settings().business_scenarios else "general"
 
 
 def is_xiamen_query(query: str) -> bool:

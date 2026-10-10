@@ -84,7 +84,7 @@ def build_system_prompt(
     system_prompt: str = SYSTEM_PROMPT,
     *, rag_scenario: str = "general",
 ) -> str:
-    scenario = getattr(get_settings().business_scenarios, rag_scenario)
+    scenario = get_settings().business_scenarios.get(rag_scenario)
     submodule_prompt = scenario.prompt.strip() if scenario is not None else ""
     if submodule_prompt:
         system_prompt += f"\n\n[当前子板块专属提示词]\n{submodule_prompt}"

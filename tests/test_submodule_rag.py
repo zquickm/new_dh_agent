@@ -7,7 +7,7 @@ from pydantic import SecretStr, ValidationError
 from agents.agent_loop import AgentLoop
 from agents.tools.context import ToolContext
 from agents.tools.registry import build_skill_catalog, build_tool_executor
-from config.settings import RagKnowledgeBaseSettings, get_settings
+from config.settings import BusinessScenarioSettings, RagKnowledgeBaseSettings, get_settings
 from schemas.chat import AgentRequest, FrontContext
 from services.chat_service import ChatService
 from services.context_service import ContextService
@@ -24,16 +24,21 @@ class SubmoduleRagTest(unittest.IsolatedAsyncioTestCase):
         rag = self.settings.tools.rag
         rag.api_token = SecretStr("test-token")
         rag.rerank.enabled = False
-        self.settings.business_scenarios.general.prompt = "通用专属提示"
-        self.settings.business_scenarios.xiamen.prompt = "厦门专属提示"
-        self.settings.business_scenarios.三新技术适用评估.prompt = "三新专属提示"
-        self.settings.business_scenarios.三新技术适用评估.rag.score = 0.85
-        self.settings.business_scenarios.三新技术适用评估.rag.result_score_threshold = 0.8
-        self.settings.business_scenarios.三新技术适用评估.rag.knowledge_bases = [
+        self.settings.business_scenarios["general"].prompt = "通用专属提示"
+        self.settings.business_scenarios["xiamen"].prompt = "厦门专属提示"
+        self.settings.business_scenarios["三新技术适用评估"].prompt = "三新专属提示"
+        self.settings.business_scenarios["三新技术适用评估"].rag.score = 0.85
+        self.settings.business_scenarios["三新技术适用评估"].rag.result_score_threshold = 0.8
+        self.settings.business_scenarios["三新技术适用评估"].rag.knowledge_bases = [
             RagKnowledgeBaseSettings(knowledge_id="sanxin-only", recall_top_n=4, top_n=2),
         ]
+        self.settings.business_scenarios["海洋生态评估"] = BusinessScenarioSettings.model_validate({
+            "prompt": "生态评估专属提示",
+            "rag": {"score": 0.85, "result_score_threshold": 0.8,
+                    "knowledge_bases": [{"knowledge_id": "ecology-only", "recall_top_n": 6, "top_n": 2}]},
+        })
         for target in ("agents.agent_loop.get_settings", "agents.tools.rag_search.get_settings",
-                       "services.context_service.get_settings"):
+                       "services.context_service.get_settings", "services.business_scenario.get_settings"):
             mock = patch(target, return_value=self.settings)
             mock.start()
             self.addCleanup(mock.stop)
@@ -68,6 +73,14 @@ class SubmoduleRagTest(unittest.IsolatedAsyncioTestCase):
             with self.subTest(value=value), self.assertRaises(ValidationError):
                 AgentRequest(question="查询", front_context=value)
 
+    def test_board_selection_uses_current_config_keys(self):
+        for board in ("海洋生态评估", "三新技术适用评估", "xiamen", "general"):
+            with self.subTest(board=board):
+                context = AgentRequest(question="查询", front_context={"module_l2": f" {board} "}).front_context
+                self.assertEqual(resolve_rag_scenario(context), board)
+        self.settings.business_scenarios.pop("三新技术适用评估")
+        self.assertEqual(resolve_rag_scenario(FrontContext(module_l2="三新技术适用评估")), "general")
+
     def test_prompt_rebuilds_use_the_current_scenario_without_accumulating(self):
         context = ContextService()
         for scenario, question, wanted in (
@@ -97,6 +110,8 @@ class SubmoduleRagTest(unittest.IsolatedAsyncioTestCase):
         cases = [
             ("政策协同分析评估", "业务资料", "general", 9, "东溟知识库检索"),
             ("三新技术适用评估", "业务资料", "三新技术适用评估", 1, "东溟知识库检索"),
+            ("海洋生态评估", "业务资料", "海洋生态评估", 1, "东溟知识库检索"),
+            ("海洋生态评估", "鹭岛资料", "xiamen", 12, "厦门局业务知识库"),
             ("政策协同分析评估", "业务资料", "general", 9, "东溟知识库检索"),
             ("未知板块", "业务资料", "general", 9, "东溟知识库检索"),
             (None, "业务资料", "general", 9, "东溟知识库检索"),
@@ -131,7 +146,7 @@ class SubmoduleRagTest(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(any(f"rag_scenario={expected} query=" in line for line in logs.output))
                     self.assertFalse(any(e["event"] == "error" for e in events))
                     conversation_id = events[0]["data"]["conversation_id"]
-                    business_scenario = getattr(self.settings.business_scenarios, expected)
+                    business_scenario = self.settings.business_scenarios[expected]
                     scenario = business_scenario.rag
                     payloads = [c["json"] for c in self.session.calls[before:]]
                     self.assertEqual([p["knowledge_ids"] for p in payloads],
@@ -151,7 +166,7 @@ class SubmoduleRagTest(unittest.IsolatedAsyncioTestCase):
                     wanted = business_scenario.prompt.strip()
                     for messages, _ in llm.calls:
                         self.assertEqual(messages[0]["content"].count(wanted), 1)
-                        for unwanted in {"通用专属提示", "三新专属提示", "厦门专属提示"} - {wanted}:
+                        for unwanted in {"通用专属提示", "三新专属提示", "厦门专属提示", "生态评估专属提示"} - {wanted}:
                             self.assertNotIn(unwanted, messages[0]["content"])
 
     async def test_prompt_and_retrieval_select_scenarios_from_their_own_input(self):
@@ -164,11 +179,11 @@ class SubmoduleRagTest(unittest.IsolatedAsyncioTestCase):
                     question=question, history=[], frontend_context=None, skills=(),
                     max_history_messages=0, rag_scenario="三新技术适用评估",
                 )[0]["content"]
-                self.assertIn(getattr(self.settings.business_scenarios, prompt_scene).prompt, prompt)
-                self.assertNotIn(getattr(self.settings.business_scenarios, retrieval_scene).prompt, prompt)
+                self.assertIn(self.settings.business_scenarios[prompt_scene].prompt, prompt)
+                self.assertNotIn(self.settings.business_scenarios[retrieval_scene].prompt, prompt)
                 before = len(self.session.calls)
                 await self.rag.execute(query, context=ToolContext(rag_scenario="三新技术适用评估"))
-                scenario = getattr(self.settings.business_scenarios, retrieval_scene).rag
+                scenario = self.settings.business_scenarios[retrieval_scene].rag
                 self.assertEqual(
                     [call["json"]["knowledge_ids"] for call in self.session.calls[before:]],
                     [[library.knowledge_id] for library in scenario.knowledge_bases],

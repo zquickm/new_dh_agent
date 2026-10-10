@@ -4,10 +4,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
 from pydantic import ValidationError
 
 from config.settings import (
     ApplicationDotEnvSettingsSource,
+    CONFIG_DIR,
     Settings,
     clear_settings_cache,
     get_active_profile,
@@ -19,6 +21,33 @@ class SettingsTest(unittest.TestCase):
     def tearDown(self):
         clear_settings_cache()
 
+    def test_new_scenarios_load_from_yaml_and_validate_nested_overrides(self):
+        values = yaml.safe_load((CONFIG_DIR / "application.yaml").read_text(encoding="utf-8"))
+        values["business_scenarios"]["政策协同分析评估"] = {
+            "prompt": "政策协同专属提示",
+            "rag": {"score": 0.7, "result_score_threshold": 0.4,
+                    "knowledge_bases": [{"knowledge_id": "policy-only", "recall_top_n": 8, "top_n": 2}]},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            config_dir = Path(directory)
+            (config_dir / "application.yaml").write_text(yaml.safe_dump(values, allow_unicode=True), encoding="utf-8")
+            with patch("config.settings.CONFIG_DIR", config_dir), patch.dict(os.environ, {"APP_PROFILE": "dev"}):
+                settings = Settings()
+                scenario = settings.business_scenarios["政策协同分析评估"]
+                self.assertEqual(scenario.prompt, "政策协同专属提示")
+                self.assertEqual(scenario.rag.knowledge_bases[0].knowledge_id, "policy-only")
+                self.assertEqual(scenario.rag.knowledge_bases[0].recall_top_n, 8)
+                self.assertEqual(scenario.rag.result_score_threshold, 0.4)
+                with patch.dict(os.environ, {"NEW_DH_BUSINESS_SCENARIOS__政策协同分析评估__RAG__SCORE": "0.85"}):
+                    self.assertEqual(Settings().business_scenarios["政策协同分析评估"].rag.score, 0.85)
+                with patch.dict(os.environ, {"NEW_DH_BUSINESS_SCENARIOS__政策协同分析评估__RAG__SCORE": "1.5"}):
+                    with self.assertRaises(ValidationError):
+                        Settings()
+                values["business_scenarios"].pop("general")
+                (config_dir / "application.yaml").write_text(yaml.safe_dump(values, allow_unicode=True), encoding="utf-8")
+                with self.assertRaisesRegex(ValidationError, "general 通用场景"):
+                    Settings()
+
     def test_scenario_prompt_and_retrieval_have_separate_environment_overrides(self):
         with patch.dict(os.environ, {
             "APP_PROFILE": "dev",
@@ -27,9 +56,9 @@ class SettingsTest(unittest.TestCase):
         }):
             clear_settings_cache()
             settings = get_settings()
-            self.assertEqual(settings.business_scenarios.general.prompt, "场景配置提示")
-            self.assertEqual(settings.business_scenarios.general.rag.score, 0.85)
-            self.assertNotIn("prompt", settings.business_scenarios.general.rag.model_fields)
+            self.assertEqual(settings.business_scenarios["general"].prompt, "场景配置提示")
+            self.assertEqual(settings.business_scenarios["general"].rag.score, 0.85)
+            self.assertNotIn("prompt", settings.business_scenarios["general"].rag.model_fields)
             self.assertNotIn("general", settings.tools.rag.model_fields)
 
     def test_prod_dotenv_placeholders_load_without_becoming_extra_settings(self):

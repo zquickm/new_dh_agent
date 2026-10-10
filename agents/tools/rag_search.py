@@ -66,9 +66,10 @@ class RagSearchTool:
             settings = application.tools.rag
             scenarios = application.business_scenarios
             rerank = settings.rerank
-            libraries = scenarios.general.rag.knowledge_bases + (
-                scenarios.xiamen.rag.knowledge_bases if scenarios.xiamen else []
-            ) + scenarios.三新技术适用评估.rag.knowledge_bases
+            libraries = [
+                library for scenario in scenarios.values()
+                for library in scenario.rag.knowledge_bases
+            ]
             self._backend = RagSearchBackend(
                 recall_url=settings.resolved_recall_url(),
                 api_token=settings.api_token.get_secret_value(),
@@ -77,9 +78,9 @@ class RagSearchTool:
                     library.knowledge_id.strip() for library in libraries if library.knowledge_id.strip()
                 )),
                 dept_ids=tuple(settings.dept_ids),
-                score=scenarios.general.rag.score,
-                result_score_threshold=scenarios.general.rag.result_score_threshold,
-                candidate_top_n=max((library.recall_top_n for library in scenarios.general.rag.knowledge_bases), default=20),
+                score=scenarios["general"].rag.score,
+                result_score_threshold=scenarios["general"].rag.result_score_threshold,
+                candidate_top_n=max((library.recall_top_n for library in scenarios["general"].rag.knowledge_bases), default=20),
                 faq_score=settings.faq_score,
                 search_method=settings.search_method,
                 search_scope=settings.search_scope,
@@ -122,7 +123,7 @@ class RagSearchTool:
             "rag_scenario_selected base_rag_scenario=%s rag_scenario=%s query=%r",
             context.rag_scenario or "general", scenario_name, query,
         )
-        business_scenario = getattr(settings, scenario_name, None)
+        business_scenario = settings.get(scenario_name)
         if business_scenario is None or not business_scenario.rag.knowledge_bases:
             raise ValueError("请配置当前场景的 RAG 知识库参数")
         scenario = business_scenario.rag
