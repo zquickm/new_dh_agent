@@ -482,8 +482,6 @@ class AgentLoop:
                 registered_tool = tools.get(name)
                 yield AgentEvent(
                     type="tool_started",
-                    data={"query": tool_call["args"].get("query", "")}
-                    if name == "rag_search" and isinstance(tool_call["args"], dict) else None,
                     round_number=round_number,
                     tool_name=name,
                     tool_call_id=tool_call["id"],

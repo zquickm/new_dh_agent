@@ -117,7 +117,6 @@ class RagSearchTool:
             or any(not isinstance(tag, str) for tag in tags)
         ):
             raise ValueError("tags 必须是不超过 50 项的字符串数组")
-        original_query = query
         query = expand_query_synonyms(query)
         settings = get_settings().business_scenarios
         scenario_name = resolve_query_scenario(query, context.rag_scenario or "general")
@@ -138,7 +137,6 @@ class RagSearchTool:
         )
         return {
             "query": query,
-            "original_query": original_query,
             "library_count": len(scenario.knowledge_bases),
             "libraries": [
                 {

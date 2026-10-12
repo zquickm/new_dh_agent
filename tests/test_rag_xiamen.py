@@ -64,14 +64,15 @@ class RagXiamenTest(unittest.IsolatedAsyncioTestCase):
             process = [event["data"] for event in events
                        if event["event"] == "process" and event["data"]["step_id"] == str(i)]
             self.assertEqual([item["title"] for item in process], [f"算法工具箱：{name}"] * 2)
-            self.assertEqual(process[0]["summary"], f"正在查询：“{queries[i]}”")
+            self.assertEqual(process[0]["summary"], f"{name}正在执行")
             self.assertEqual(process[1]["status"], "failed" if i == 5 else "success")
             if i != 5:
                 libraries = settings.business_scenarios["general" if i == 0 else "xiamen"].rag.knowledge_bases
                 counts = "、".join(f"{library.name} 0 份" for library in libraries)
                 self.assertEqual(process[1]["summary"],
-                    f"查询：“{queries[i]}”；已检索 {len(libraries)} 个知识库，最终筛选后文件数量（各库内去重）：{counts}。")
-                self.assertEqual(process[1]["details"]["original_query"], queries[i])
+                    f"已检索 {len(libraries)} 个知识库，最终筛选后文件数量（各库内去重）：{counts}。")
+                self.assertNotIn("查询：“", process[1]["summary"])
+                self.assertNotIn("original_query", process[1]["details"])
                 self.assertEqual(process[1]["details"]["library_count"], len(libraries))
             else:
                 self.assertNotIn("最终筛选后", process[1]["summary"])

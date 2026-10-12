@@ -168,16 +168,16 @@ class SubmoduleRagTest(unittest.IsolatedAsyncioTestCase):
                         f"{b.name or b.knowledge_id} {min(b.top_n, 1 if expected in ('三新技术适用评估', '海洋生态评估') else 3)} 份"
                         for b in scenario.knowledge_bases
                     )
-                    completed = f"查询：“{query}”；已检索 {len(scenario.knowledge_bases)} 个知识库，最终筛选后文件数量（各库内去重）：{counts}。"
+                    completed = f"已检索 {len(scenario.knowledge_bases)} 个知识库，最终筛选后文件数量（各库内去重）：{counts}。"
                     self.assertEqual([p["summary"] for p in processes],
-                                     [f"正在查询：“{query}”", completed] * 2)
+                                     [f"{display_name}正在执行", completed] * 2)
                     wanted = business_scenario.prompt.strip()
                     for messages, _ in llm.calls:
                         self.assertEqual(messages[0]["content"].count(wanted), 1)
                         for unwanted in {"通用专属提示", "三新专属提示", "厦门专属提示", "生态评估专属提示"} - {wanted}:
                             self.assertNotIn(unwanted, messages[0]["content"])
 
-    async def test_rag_process_counts_final_files_and_preserves_original_queries(self):
+    async def test_rag_process_counts_final_files_without_query_display(self):
         self.settings.business_scenarios["general"].rag.knowledge_bases = [
             RagKnowledgeBaseSettings(knowledge_id=kid, name=name, recall_top_n=10, top_n=keep)
             for kid, name, keep in (("policy", "政策库", 2), ("business", "业务库", 3), ("literature", "文献库", 2))
@@ -214,16 +214,19 @@ class SubmoduleRagTest(unittest.IsolatedAsyncioTestCase):
         completed = [e["data"] for e in events if e["event"] == "process" and e["data"]["status"] == "success"]
         self.assertEqual([p["step_id"] for p in completed], ["first", "second"])
         self.assertEqual(completed[0]["summary"],
-            "查询：“海洋业务”；已检索 3 个知识库，最终筛选后文件数量（各库内去重）：政策库 1 份、业务库 2 份、文献库 0 份。")
+            "已检索 3 个知识库，最终筛选后文件数量（各库内去重）：政策库 1 份、业务库 2 份、文献库 0 份。")
         self.assertEqual(completed[0]["details"]["result_count"], 5)
         self.assertEqual([b["file_count"] for b in completed[0]["details"]["libraries"]], [1, 2, 0])
         self.assertEqual(completed[1]["details"]["library_count"], 4)
         self.assertEqual([b["file_count"] for b in completed[1]["details"]["libraries"]], [0] * 4)
-        self.assertIn('查询：“鹭岛业务”', completed[1]["summary"])
-        self.assertNotIn("（厦门）", completed[1]["summary"])
+        for event in events:
+            if event["event"] == "process":
+                self.assertNotIn("海洋业务", str(event["data"]))
+                self.assertNotIn("鹭岛", str(event["data"]))
+                self.assertNotIn("original_query", event["data"]["details"])
         self.assertEqual(session.calls[3]["json"]["query"], ["鹭岛（厦门）业务"])
         retrievals = [e["data"] for e in events if e["event"] == "retrieval"]
-        self.assertEqual(retrievals[1]["original_query"], "鹭岛业务")
+        self.assertNotIn("original_query", retrievals[1])
         self.assertEqual(retrievals[1]["query"], "鹭岛（厦门）业务")
 
     async def test_prompt_and_retrieval_select_scenarios_from_their_own_input(self):

@@ -441,12 +441,6 @@ class ChatService:
                 if event.type == "tool_started":
                     if get_settings().stream.include_process:
                         tool_display_name = rag_display_names.get(event.tool_call_id) or self._tool_display_name(event.tool_name)
-                        query = (event.data or {}).get("query")
-                        summary = (
-                            f"正在查询：“{query.strip()}”"
-                            if event.tool_name == "rag_search" and isinstance(query, str) and query.strip()
-                            else f"{tool_display_name}正在执行"
-                        )
                         await emit({
                             "event": "process",
                             "data": self._process_data(
@@ -455,7 +449,7 @@ class ChatService:
                                 "tool",
                                 "running",
                                 f"算法工具箱：{tool_display_name}",
-                                summary,
+                                f"{tool_display_name}正在执行",
                                 sequence,
                                 step_id=event.tool_call_id,
                             ),
@@ -471,7 +465,7 @@ class ChatService:
                     ):
                         retrieval_details[event.tool_call_id] = {
                             key: data[key]
-                            for key in ("result_count", "original_query", "library_count", "libraries")
+                            for key in ("result_count", "library_count", "libraries")
                             if key in data
                         }
                     await emit({"event": "retrieval", "data": data})
@@ -515,8 +509,8 @@ class ChatService:
                                 for library in details["libraries"]
                             )
                             summary = (
-                                f"查询：“{details['original_query']}”；已检索 {details['library_count']} 个知识库，"
-                                f"最终筛选后文件数量（各库内去重）：{library_summary}。"
+                                f"已检索 {details['library_count']} 个知识库，"
+                                f"筛选后文件数量：{library_summary}。"
                             )
                         await emit({
                             "event": "process",

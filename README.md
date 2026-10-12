@@ -203,10 +203,10 @@ Agent 已注册八个业务工具（括号内为协议调用标识）：
   所有参数按本次调用传入，共用客户端不修改全局阈值，并发问答不会相互覆盖。
   process 名称及 retrieval 的 `tool_name` 保持原有展示规则：检索词命中厦门关键词时为
   “厦门局业务知识库”，否则为“东溟知识库检索”，不随子板块切换。
-  RAG 的 process.summary 在开始时展示同义词扩展前的工具查询语句，成功完成时展示该语句、
-  本次检索库数及各库最终筛选后按来源文件名去重的文件数（同名文件合并，空库为 0）。
+  RAG 的 process.summary 在开始时展示工具正在执行，成功完成时仅展示本次检索库数及各库
+  最终筛选后按来源文件名去重的文件数（同名文件合并，空库为 0），不展示查询语句。
   文件统计在本地分数过滤及每库 top_n 截断之后计算，各库独立计数，不累加历史调用。
-  process.details 与 retrieval 补充 original_query、library_count、libraries（库 ID、name、file_count）；
+  process.details 与 retrieval 补充 library_count、libraries（库 ID、name、file_count）；
   retrieval.query 仍为扩展后的实际检索语句，result_count 仍表示最终片段数。
   选中场景未配置知识库、厦门关键词命中但未配置 `xiamen`，或任一库请求失败时本次工具报错，
   不切换场景；无结果时返回实际空结果。
