@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterable, Optional
+
+
+def unique_file_sources(sources: Iterable[str]) -> list[str]:
+    """按来源文件名去重，保留首次出现顺序；展示截断由调用方处理。"""
+    return list(dict.fromkeys(sources))
 
 
 class RagToolError(RuntimeError):

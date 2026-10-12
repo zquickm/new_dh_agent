@@ -8,6 +8,7 @@ from config.settings import get_settings
 from services.business_scenario import is_xiamen_query, resolve_query_scenario
 from services.synonym_service import expand_query_synonyms
 from tool_backends.rag_backend import RagSearchBackend
+from tool_backends.rag_models import unique_file_sources
 
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ class RagSearchTool:
             or any(not isinstance(tag, str) for tag in tags)
         ):
             raise ValueError("tags 必须是不超过 50 项的字符串数组")
+        original_query = query
         query = expand_query_synonyms(query)
         settings = get_settings().business_scenarios
         scenario_name = resolve_query_scenario(query, context.rag_scenario or "general")
@@ -136,6 +138,19 @@ class RagSearchTool:
         )
         return {
             "query": query,
+            "original_query": original_query,
+            "library_count": len(scenario.knowledge_bases),
+            "libraries": [
+                {
+                    "knowledge_id": library.knowledge_id.strip(),
+                    "name": library.name or library.knowledge_id.strip(),
+                    "file_count": len(unique_file_sources(
+                        chunk.source for chunk in chunks
+                        if chunk.knowledge_id == library.knowledge_id.strip()
+                    )),
+                }
+                for library in scenario.knowledge_bases
+            ],
             "count": len(chunks),
             "chunks": [
                 {

@@ -9,6 +9,8 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI as BaseChatOpenAI
 
+from tool_backends.rag_models import unique_file_sources
+
 
 logger = logging.getLogger(__name__)
 _active: ContextVar[Any] = ContextVar("llm_diagnostics", default=None)
@@ -118,8 +120,8 @@ def observation_log_summary(observation: str) -> dict:
         summary["row_count"] = len(value["rows"])
     if isinstance(value.get("chunks"), list):
         summary["chunk_count"] = len(value["chunks"])
-        summary["articles"] = list(dict.fromkeys(
-            str(chunk.get("source", ""))[:200]
+        summary["articles"] = [source[:200] for source in unique_file_sources(
+            str(chunk.get("source", ""))
             for chunk in value["chunks"] if isinstance(chunk, dict)
-        ))[:20]
+        )[:20]]
     return summary

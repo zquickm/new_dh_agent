@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from dataclasses import replace
 from typing import Any, Optional
 
 import aiohttp
@@ -318,7 +319,7 @@ class RagSearchBackend:
                 knowledge_id, recalled_count, len(chunks), min(keep, len(chunks)),
                 threshold,
             )
-            results.extend(chunks[:keep])
+            results.extend(replace(chunk, knowledge_id=knowledge_id) for chunk in chunks[:keep])
         return results
 
     async def close(self) -> None:

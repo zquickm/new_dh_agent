@@ -177,6 +177,7 @@ class CitationRegistry:
             "query": query,
             "result_count": len(retrieval_chunks),
             "chunks": retrieval_chunks,
+            **{key: result[key] for key in ("original_query", "library_count", "libraries") if key in result},
         }
         model_result = {**result, "chunks": model_chunks}
         return retrieval, json.dumps(model_result, ensure_ascii=False, default=str)

@@ -310,7 +310,7 @@ class ChatService:
         answer_parts: list[str] = []
         emoji_filter = EmojiStreamFilter()
         registered_sources: list[dict] = []
-        retrieval_counts: dict[str, int] = {}
+        retrieval_details: dict[str, dict] = {}
         latest_context_usage: dict = {}
         sequence = 0
         latest_token_event_sequence = 0
@@ -441,6 +441,12 @@ class ChatService:
                 if event.type == "tool_started":
                     if get_settings().stream.include_process:
                         tool_display_name = rag_display_names.get(event.tool_call_id) or self._tool_display_name(event.tool_name)
+                        query = (event.data or {}).get("query")
+                        summary = (
+                            f"正在查询：“{query.strip()}”"
+                            if event.tool_name == "rag_search" and isinstance(query, str) and query.strip()
+                            else f"{tool_display_name}正在执行"
+                        )
                         await emit({
                             "event": "process",
                             "data": self._process_data(
@@ -449,7 +455,7 @@ class ChatService:
                                 "tool",
                                 "running",
                                 f"算法工具箱：{tool_display_name}",
-                                f"{tool_display_name}正在执行",
+                                summary,
                                 sequence,
                                 step_id=event.tool_call_id,
                             ),
@@ -463,7 +469,11 @@ class ChatService:
                     if isinstance(result_count, int) and not isinstance(
                         result_count, bool
                     ):
-                        retrieval_counts[event.tool_call_id] = result_count
+                        retrieval_details[event.tool_call_id] = {
+                            key: data[key]
+                            for key in ("result_count", "original_query", "library_count", "libraries")
+                            if key in data
+                        }
                     await emit({"event": "retrieval", "data": data})
                 elif event.type == "map_action":
                     data = event.data or {}
@@ -498,6 +508,16 @@ class ChatService:
                             or get_settings().stream.include_tool_result
                             else f"{tool_display_name}执行{'完成' if event.success else '失败'}"
                         )
+                        details = retrieval_details.pop(event.tool_call_id, {}) if event.success else {}
+                        if event.tool_name == "rag_search" and event.success and "libraries" in details:
+                            library_summary = "、".join(
+                                f"{library['name']} {library['file_count']} 份"
+                                for library in details["libraries"]
+                            )
+                            summary = (
+                                f"查询：“{details['original_query']}”；已检索 {details['library_count']} 个知识库，"
+                                f"最终筛选后文件数量（各库内去重）：{library_summary}。"
+                            )
                         await emit({
                             "event": "process",
                             "data": self._process_data(
@@ -510,12 +530,7 @@ class ChatService:
                                 sequence,
                                 step_id=event.tool_call_id,
                                 recoverable=True,
-                                details=(
-                                    {"result_count": retrieval_counts[event.tool_call_id]}
-                                    if event.success
-                                    and event.tool_call_id in retrieval_counts
-                                    else {}
-                                ),
+                                details=details,
                             ),
                         })
                 elif event.type == "answer_delta":
