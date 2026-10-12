@@ -159,6 +159,90 @@ business_scenarios:
       score: 0.6
       result_score_threshold: 0.3
 
+  局地生物爆发分析:
+    prompt: |
+      当前子板块为局地生物爆发分析，主要关注海洋生物灾害的监测、风险研判与防控，包括水母聚集等异常增殖或聚集现象。
+      围绕用户指定海域、时间和生物对象，分析发生范围、强度、持续时间、扩散条件，以及对核电冷源安全、海洋生态、养殖渔业、滨海设施和公众活动的影响。
+      回答风格采用防控研判简报，按“现状与风险结论—诱发因素与扩散研判—防控措施—监测与复核要点”组织。
+    rag:
+      knowledge_bases:
+        - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
+          name: "政策法规与标准规范"
+          recall_top_n: 20
+          top_n: 4
+        - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
+          name: "核心业务"
+          recall_top_n: 50
+          top_n: 14
+        - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
+          name: "海洋图书与文献"
+          recall_top_n: 20
+          top_n: 4
+      score: 0.6
+      result_score_threshold: 0.3
+  海域空间管控优化:
+    prompt: |
+      当前子板块为海域空间管控优化。围绕用户指定海域、用海活动和管理目标，综合分析开发利用、生态保护、资源承载与空间冲突，提出可比较、可实施的优化建议。
+      回答风格采用规划决策建议，按“管控目标与现状矛盾—约束条件与冲突识别—备选方案比较—推荐方案与实施步骤”组织，突出方案选择的理由与代价。
+    rag:
+      knowledge_bases:
+        - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
+          name: "政策法规与标准规范"
+          recall_top_n: 30 
+          top_n: 6
+        - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
+          name: "核心业务"
+          recall_top_n: 50
+          top_n: 13
+        - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
+          name: "海洋图书与文献"
+          recall_top_n: 20
+          top_n: 3
+      score: 0.6
+      result_score_threshold: 0.3
+  生态环境变化分析:
+    prompt: |
+      当前子板块为生态环境变化分析。
+      回答风格采用监测评估报告，按“总体变化结论—关键指标与时空差异分析—可能驱动因素—生态影响与管理建议”组织，以可核验的数据和比较口径支撑结论。
+      结合展示检索到的图片。
+    rag:
+      knowledge_bases:
+        - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
+          name: "政策法规与标准规范"
+          recall_top_n: 20 # 接口召回数量
+          top_n: 4 # 库内按返回分数降序保留数量
+        - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
+          name: "核心业务"
+          recall_top_n: 50
+          top_n: 14
+        - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
+          name: "海洋图书与文献"
+          recall_top_n: 20
+          top_n: 4
+      score: 0.6
+      result_score_threshold: 0.3
+  多类灾害关联分析:
+    prompt: |
+      当前子板块为多类灾害关联分析。围绕用户指定海域、时间和灾害组合，分析赤潮、绿潮、马尾藻爆发、溢油污染扩散、台风、风暴潮、海浪等的复合影响和灾害链。
+      回答按“灾害强度-环境变化-人为活动”综合关联分析。
+      展示检索到的图片。
+    rag:
+      knowledge_bases:
+        - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
+          name: "政策法规与标准规范"
+          recall_top_n: 20 # 接口召回数量
+          top_n: 4 # 库内按返回分数降序保留数量
+        - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
+          name: "核心业务"
+          recall_top_n: 50
+          top_n: 14
+        - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
+          name: "海洋图书与文献"
+          recall_top_n: 20
+          top_n: 4
+      score: 0.6
+      result_score_threshold: 0.3
+
 tools:
   execution_timeout: 300
   spatial:
