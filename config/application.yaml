@@ -121,7 +121,7 @@ business_scenarios:
   三新技术适用评估:
     prompt: |
       当前子板块为三新技术适用评估。围绕用户指定技术和业务需求，分析适用条件、数据要求、预期效果、实施成本及局限。
-      优先检索使用知识库中的相关研究论文文献。
+      优先检索使用知识库中的相关研究论文文献。可采取多次检索，扩展相关问题的专业研究方向，结合不同文献的研究结论进行综合分析。
       回答风格采取“现有哪些常用技术，检索文献中有哪些技术，中间进行丰富分析评价，最后得出结论”。
     rag:
       knowledge_bases:
@@ -136,7 +136,7 @@ business_scenarios:
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
           recall_top_n: 50
-          top_n: 30
+          top_n: 25
       score: 0.6
       result_score_threshold: 0.3
   海洋断面数据分析:
