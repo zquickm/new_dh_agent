@@ -97,6 +97,7 @@ business_scenarios:
       当前为厦门业务场景。围绕厦门局业务、海洋监测、生态修复或疑点疑区研判回答，
       优先结合对应报告、规则服务和用户指定范围，明确年份、批次与评价口径，默认使用最新资料；
       不将其他地区资料直接作为厦门的事实依据。
+      展示检索到的图片。
     rag:
       knowledge_bases:
         - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
