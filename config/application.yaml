@@ -159,7 +159,6 @@ business_scenarios:
           top_n: 4
       score: 0.6
       result_score_threshold: 0.3
-
   局地生物爆发分析:
     prompt: |
       当前子板块为局地生物爆发分析，主要关注海洋生物灾害的监测、风险研判与防控，包括水母聚集等异常增殖或聚集现象。
@@ -185,6 +184,7 @@ business_scenarios:
     prompt: |
       当前子板块为海域空间管控优化。围绕用户指定海域、用海活动和管理目标，综合分析开发利用、生态保护、资源承载与空间冲突，提出可比较、可实施的优化建议。
       回答风格采用规划决策建议，按“管控目标与现状矛盾—约束条件与冲突识别—备选方案比较—推荐方案与实施步骤”组织，突出方案选择的理由与代价。
+      以下为默认规则：杭州湾海域不是江苏省的管辖范围。
     rag:
       knowledge_bases:
         - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
