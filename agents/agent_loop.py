@@ -168,12 +168,13 @@ class AgentLoop:
             run_id, front_context.model_dump() if front_context is not None else None, rag_scenario,
         )
         tools = self.tools
+        skill_summaries = self.skills.summaries() if self.skills else ()
         # 临时限制接入：移除此调用及导入即可恢复全量能力。
         tools, history, enabled_skill_names, system_prompt = restrict_request(
             question, tools, history, enabled_skill_names, system_prompt,
+            available_skill_names=frozenset(skill.name for skill in skill_summaries),
         )
         tool_definitions = tools.definitions()
-        skill_summaries = self.skills.summaries() if self.skills else ()
         history = self.context_service.filter_rag_history(history)
         if enabled_skill_names is not None:
             enabled_skill_names = frozenset(enabled_skill_names)

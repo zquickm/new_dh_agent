@@ -150,7 +150,12 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
                                     for message in llm.calls[1][0]),
                                 name in enabled,
                             )
-                        self.assertEqual(llm.calls[0][1], definitions)
+                        self.assertEqual(llm.calls[0][1], [
+                            item for item in definitions
+                            if item["function"]["name"] not in {
+                                "analyze_suspicion", "query_suspicion_results", "summarize_suspicion_results",
+                            }
+                        ])
                         self.assertEqual(tools.definitions(), definitions)
                         finished = [event for event in events if event.type == "tool_finished"]
                         self.assertEqual([event.success for event in finished],
