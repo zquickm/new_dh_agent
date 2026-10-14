@@ -97,7 +97,7 @@ business_scenarios:
           recall_top_n: 20
           top_n: 4
       score: 0.6
-      result_score_threshold: 0.3
+      result_score_threshold: 0.4
   xiamen: # 厦门
     prompt: |
       当前为厦门业务场景。围绕厦门局业务、海洋监测、生态修复或疑点疑区研判回答，
@@ -144,7 +144,7 @@ business_scenarios:
           recall_top_n: 50
           top_n: 25
       score: 0.6
-      result_score_threshold: 0.3
+      result_score_threshold: 0.4
   海岛高质量发展与高水平保护:
     prompt: |
       当前子板块为海岛高质量发展与高水平保护。围绕用户指定的海岛、省市及保护发展需求回答，明确数据范围，区分业务事实、分析判断和建议。
@@ -163,7 +163,7 @@ business_scenarios:
           recall_top_n: 20
           top_n: 4
       score: 0.6
-      result_score_threshold: 0.3
+      result_score_threshold: 0.4
   海洋断面数据分析:
     prompt: |
       当前子板块为海洋断面数据分析。数据使用表格展示。知识库检索结果中的数据不可信，其他内容可信；断面一览统计使用 spatial_query_service 的 dm_duanmian_overview 返回数据，历史要素与跨期指标分析使用数据库查询返回的数据。
@@ -183,7 +183,7 @@ business_scenarios:
           recall_top_n: 20
           top_n: 4
       score: 0.6
-      result_score_threshold: 0.3
+      result_score_threshold: 0.4
   局地生物爆发分析:
     prompt: |
       当前子板块为局地生物爆发分析，主要关注海洋生物灾害的监测、风险研判与防控，包括水母聚集等异常增殖或聚集现象。
@@ -204,7 +204,7 @@ business_scenarios:
           recall_top_n: 20
           top_n: 4
       score: 0.6
-      result_score_threshold: 0.3
+      result_score_threshold: 0.4
   海域空间管控优化:
     prompt: |
       当前子板块为海域空间管控优化。围绕用户指定海域、用海活动和管理目标，综合分析开发利用、生态保护、资源承载与空间冲突，提出可比较、可实施的优化建议。
@@ -225,7 +225,7 @@ business_scenarios:
           recall_top_n: 20
           top_n: 3
       score: 0.6
-      result_score_threshold: 0.3
+      result_score_threshold: 0.4
   生态环境变化分析:
     prompt: |
       当前子板块为生态环境变化分析。
@@ -246,7 +246,7 @@ business_scenarios:
           recall_top_n: 20
           top_n: 4
       score: 0.6
-      result_score_threshold: 0.3
+      result_score_threshold: 0.4
   多类灾害关联分析:
     prompt: |
       当前子板块为多类灾害关联分析。围绕用户指定海域、时间和灾害组合，分析赤潮、绿潮、马尾藻爆发、溢油污染扩散、台风、风暴潮、海浪等的复合影响和灾害链。
@@ -267,7 +267,7 @@ business_scenarios:
           recall_top_n: 20
           top_n: 4
       score: 0.6
-      result_score_threshold: 0.3
+      result_score_threshold: 0.4
 
 tools:
   execution_timeout: 300
