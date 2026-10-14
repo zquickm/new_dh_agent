@@ -7,12 +7,22 @@ from agents.agent_loop import AgentLoop
 from agents.skills import SkillSummary
 from agents.tools.executor import ToolExecutor
 from schemas.chat import ChatMessage, FrontendContext
-from services.context_service import ContextService, build_system_prompt
+from services.context_service import ContextService, OVERVIEW_DATA_PROMPT, build_system_prompt
 from services.synonym_service import build_synonym_matcher
 from tests.test_agent_loop import FakeLlm
 
 
 class ContextServiceTest(unittest.IsolatedAsyncioTestCase):
+    def test_overview_rules_apply_to_published_prompts_and_submodule_overrides(self):
+        for scenario in ("general", "海洋断面数据分析"):
+            prompt = build_system_prompt((), "旧发布提示：统计数据查询数据库", rag_scenario=scenario)
+            self.assertTrue(prompt.startswith("旧发布提示：统计数据查询数据库"))
+            self.assertEqual(prompt.count(OVERVIEW_DATA_PROMPT), 1)
+            self.assertIn('operation="island_overview"', prompt)
+            self.assertIn('operation="dm_duanmian_overview"', prompt)
+            self.assertIn("优先于已有提示词、Skill 和历史", prompt)
+            self.assertIn("接口未覆盖的历史要素、跨期指标统计", prompt)
+
     def test_each_request_refreshes_time_with_custom_system_prompt(self):
         timestamps = ["2026-09-20T23:59:59+08:00", "2026-09-21T00:00:01+08:00"]
         with patch(

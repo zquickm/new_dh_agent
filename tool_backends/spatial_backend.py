@@ -45,6 +45,14 @@ class SpatialServiceClient:
             "GET", "/api/spatial/v2/elements/list", data_type=list,
         )
 
+    async def get_island_overview(self, **params: Any) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/api/spatial/islands/overview", params=params,
+        )
+
+    async def get_duanmian_overview(self) -> dict[str, Any]:
+        return await self._request("GET", "/api/spatial/v2/duanmian/overview")
+
     async def get_spatial_element_detail(self, data_key: str) -> dict[str, Any]:
         return await self._request(
             "GET", "/api/spatial/v2/elements/detail", params={"dataKey": data_key},

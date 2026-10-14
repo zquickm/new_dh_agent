@@ -87,6 +87,7 @@ class SpatialQueryServiceToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(props["operation"]["enum"]), {
             "list_spatial_elements", "get_spatial_element_detail", "query_spatial_element",
             "station_status", "observation_summary", "observation_trend", "observation_range",
+            "island_overview", "dm_duanmian_overview",
         })
         self.assertFalse({"query_type", "bbox", "center", "radius", "polygon",
                           "station_types", "station_name"} & props.keys())

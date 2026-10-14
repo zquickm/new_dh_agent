@@ -141,7 +141,7 @@ business_scenarios:
       result_score_threshold: 0.3
   海洋断面数据分析:
     prompt: |
-      当前子板块为海洋断面数据分析。数据使用表格展示。知识库检索结果中的数据不可信，其他内容可信；数据使用数据库查询返回的数据。
+      当前子板块为海洋断面数据分析。数据使用表格展示。知识库检索结果中的数据不可信，其他内容可信；断面一览统计使用 spatial_query_service 的 dm_duanmian_overview 返回数据，历史要素与跨期指标分析使用数据库查询返回的数据。
       回答风格采取“先分析数据，后结合知识库内容进行分析，最后得出结论”。
     rag:
       knowledge_bases:
