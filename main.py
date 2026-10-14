@@ -9,6 +9,7 @@ from common.logging_config import configure_logging
 from common.json_result import JsonResult
 from config.settings import get_settings
 from controller.agent_controller import router as agent_router
+from controller.admin_conversation_controller import router as admin_conversation_router
 from controller.conversation_controller import router as conversation_router
 from controller.health_controller import router as health_router
 from controller.feedback_controller import admin_router as admin_feedback_router
@@ -66,6 +67,7 @@ app.include_router(agent_router)
 app.include_router(system_prompt_router)
 app.include_router(skill_router)
 app.include_router(admin_feedback_router)
+app.include_router(admin_conversation_router)
 
 
 @app.exception_handler(HTTPException)
