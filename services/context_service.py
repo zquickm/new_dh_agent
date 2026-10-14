@@ -80,28 +80,6 @@ CITATION_PROTOCOL_PROMPT = dedent(
 ).strip()
 
 
-OVERVIEW_DATA_PROMPT = dedent(
-    """
-    海岛与断面一览统计取数规则（优先于已有提示词、Skill 和历史中的同类取数规则）：
-    - 海岛数量、按省/分类分布和面积排序列表，必须在本轮调用
-      spatial_query_service(operation="island_overview")，完整传递用户要求的省、市、分类、名称或矩形范围。
-      total、byProvince、byClass 是过滤后的全量统计；items 仅为当前页，不用列表长度或本页分组重算统计。
-      未指定筛选条件的海岛一览可无参数查询；不猜坐标，不用外接矩形替代多边形选区。
-      用户条件超出接口支持范围时说明限制，不删除条件后冒充原范围统计。
-    - 断面一览、东海区断面情况概览、断面数、测点数、监测要素及数量、数据总量、最近航次，必须在本轮调用
-      spatial_query_service(operation="dm_duanmian_overview")，该操作无其他参数，口径为 E1/E2/E3。
-      总体统计用 overview，单断面统计用 sections，要素清单用 chemistryElements/hydrometElements；
-      不累加各断面重新生成总体统计，不自行合并站位编码重算测点数。
-      最新航次采用 latestObservedAt，不把当前日期当作最新观测日期。
-      该接口不支持时间、站位或空间筛选，不将总体统计声称为筛选后的统计。
-    - 上述统计只能采用本轮成功接口的返回值；不得使用知识库数值、固定数字、历史回答或 database_query 替代。
-      失败或缺字段时如实说明未取得对应统计，缺失值不补零；成功返回的 0 才表示统计为零。
-      仅查询一览统计不强制检索知识库、查询数据库或打开专题图；位置展示仍使用通用空间查询与 map_action。
-      接口未覆盖的历史要素、跨期指标统计与专题分析沿用已有断面业务流程。
-    """
-).strip()
-
-
 def build_system_prompt(
     skills: tuple[SkillSummary, ...],
     system_prompt: str = SYSTEM_PROMPT,
@@ -115,7 +93,6 @@ def build_system_prompt(
     skill_index = "\n".join(skill_lines) or "- （无）"
     return (
         f"{system_prompt}\n\n"
-        f"{OVERVIEW_DATA_PROMPT}\n\n"
         f"本轮当前时间（服务器本地时间，含时区与 UTC 偏移）：{get_current_server_time()}\n"
         f"{CITATION_PROTOCOL_PROMPT}\n\n"
         "理解“今天”“今年”“最近”等相对时间时，以本轮当前时间为准。\n\n"

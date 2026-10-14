@@ -6,22 +6,34 @@ from unittest.mock import patch
 from agents.agent_loop import AgentLoop
 from agents.skills import SkillSummary
 from agents.tools.executor import ToolExecutor
-from schemas.chat import ChatMessage, FrontendContext
-from services.context_service import ContextService, OVERVIEW_DATA_PROMPT, build_system_prompt
+from schemas.chat import ChatMessage, FrontContext, FrontendContext
+from services.business_scenario import resolve_rag_scenario
+from services.context_service import ContextService, build_system_prompt
 from services.synonym_service import build_synonym_matcher
 from tests.test_agent_loop import FakeLlm
 
 
 class ContextServiceTest(unittest.IsolatedAsyncioTestCase):
-    def test_overview_rules_apply_to_published_prompts_and_submodule_overrides(self):
-        for scenario in ("general", "海洋断面数据分析"):
-            prompt = build_system_prompt((), "旧发布提示：统计数据查询数据库", rag_scenario=scenario)
+    def test_overview_rules_are_loaded_only_for_the_matching_configured_scene(self):
+        for board, question, operation, other in (
+            ("海岛高质量发展与高水平保护", "东海区有多少个海岛？", "island_overview", "dm_duanmian_overview"),
+            ("海洋断面数据分析", "东海区断面情况概览", "dm_duanmian_overview", "island_overview"),
+        ):
+            scenario = resolve_rag_scenario(FrontContext(module_l2=board))
+            self.assertEqual(scenario, board)
+            prompt = self.service.build_messages(
+                question=question, history=[], frontend_context=None, skills=(),
+                max_history_messages=0, system_prompt="旧发布提示：统计数据查询数据库",
+                rag_scenario=scenario,
+            )[0]["content"]
             self.assertTrue(prompt.startswith("旧发布提示：统计数据查询数据库"))
-            self.assertEqual(prompt.count(OVERVIEW_DATA_PROMPT), 1)
-            self.assertIn('operation="island_overview"', prompt)
-            self.assertIn('operation="dm_duanmian_overview"', prompt)
+            self.assertEqual(prompt.count(f'operation="{operation}"'), 1)
+            self.assertNotIn(other, prompt)
             self.assertIn("优先于已有提示词、Skill 和历史", prompt)
-            self.assertIn("接口未覆盖的历史要素、跨期指标统计", prompt)
+        for scenario in ("general", "xiamen", "海域空间管控优化"):
+            prompt = build_system_prompt((), rag_scenario=scenario)
+            self.assertNotIn("island_overview", prompt)
+            self.assertNotIn("dm_duanmian_overview", prompt)
 
     def test_each_request_refreshes_time_with_custom_system_prompt(self):
         timestamps = ["2026-09-20T23:59:59+08:00", "2026-09-21T00:00:01+08:00"]

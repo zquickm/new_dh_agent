@@ -714,7 +714,7 @@ class ChatService:
                             )
                             summary = (
                                 f"已检索 {details['library_count']} 个知识库，"
-                                f"筛选后文件数量：{library_summary}。"
+                                f"筛选后文件数量：{library_summary}。我将基于检索知识库结果进行再次精细化筛选，结合用户问题收敛信息，最终输出精准匹配的有效资料。"
                             )
                         await emit({
                             "event": "process",

@@ -365,7 +365,7 @@ SPATIAL_API_KEY=
 - `island_overview`：`GET /api/spatial/islands/overview`。可传 `page`（默认 1）、`size`（默认 20，上限 100）、`keyword`、`province`、`city`、`islandClass`、`minLng/minLat/maxLng/maxLat`（矩形四坐标必须同时传）。保留全部筛选条件；`total/byProvince/byClass` 为过滤后的全量统计，`items` 仅为当前页，不能按列表长度或本页分组重算统计。
 - `dm_duanmian_overview`：`GET /api/spatial/v2/duanmian/overview`，无其他参数。断面情况概览、断面数、测点数、要素数、数据量、最近航次直接采用 `overview`，单断面统计采用 `sections`，要素清单采用 `chemistryElements/hydrometElements`。不自行归并站位编码重算测点数量，也不把总体统计当成时间或选区筛选结果。
 
-统计取数规则每轮动态加入系统消息，适用于数据库中已有的发布提示词和历史 Skill 说明；部署后重启服务即可生效，无需重新发布主提示词。统计只采用本轮成功接口返回值；失败或缺字段时如实说明，不用 RAG、固定数字、历史回答或数据库替代，不补零。仅查询一览统计不强制检索文档、查数据库或打开专题图；历史要素和跨期指标分析沿用现有流程。两个一览操作只返回数据，地图展示继续使用通用空间查询和 `map_action`。
+统计取数规则配置在 `config/application.yaml` 的两个场景提示词中：海岛规则使用 `business_scenarios.海岛高质量发展与高水平保护.prompt`，断面规则使用 `business_scenarios.海洋断面数据分析.prompt`。前端通过 `front_context.module_l2` 传对应场景名称，后端按现有场景选择逻辑加载本轮提示词；通用系统提示不再全局附加这两类规则。已有的厦门问题优先规则仍然适用。部署后重启服务即可生效，无需重新发布主提示词。统计只采用本轮成功接口返回值；失败或缺字段时如实说明，不用 RAG、固定数字、历史回答或数据库替代，不补零。仅查询一览统计不强制检索文档、查数据库或打开专题图；历史要素和跨期指标分析沿用现有流程。两个一览操作只返回数据，地图展示继续使用通用空间查询和 `map_action`。
 
 观测站也是注册空间要素，位置、基础详情、名称和类型筛选统一使用以下三个 operation：
 

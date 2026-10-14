@@ -145,6 +145,25 @@ business_scenarios:
           top_n: 25
       score: 0.6
       result_score_threshold: 0.3
+  海岛高质量发展与高水平保护:
+    prompt: |
+      当前子板块为海岛高质量发展与高水平保护。围绕用户指定的海岛、省市及保护发展需求回答，明确数据范围，区分业务事实、分析判断和建议。
+    rag:
+      knowledge_bases:
+        - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
+          name: "政策法规与标准规范"
+          recall_top_n: 20
+          top_n: 4
+        - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
+          name: "核心业务"
+          recall_top_n: 50
+          top_n: 14
+        - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
+          name: "海洋图书与文献"
+          recall_top_n: 20
+          top_n: 4
+      score: 0.6
+      result_score_threshold: 0.3
   海洋断面数据分析:
     prompt: |
       当前子板块为海洋断面数据分析。数据使用表格展示。知识库检索结果中的数据不可信，其他内容可信；断面一览统计使用 spatial_query_service 的 dm_duanmian_overview 返回数据，历史要素与跨期指标分析使用数据库查询返回的数据。
