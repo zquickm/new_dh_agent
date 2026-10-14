@@ -111,9 +111,28 @@ reasoning_event_sequence。历史加载返回 reasoning_event_id，正文继续�
 `exact_qa.enabled` 默认 YAML 配置为 true；可以设置
 `NEW_DH_EXACT_QA__ENABLED=false` 禁用精确查询。
 `exact_qa.timeout` 默认 5 秒，`exact_qa.chunk_chars` 默认 80。
+`exact_qa.chars_per_second` 默认 40 字符/秒，可用
+`NEW_DH_EXACT_QA__CHARS_PER_SECOND=40` 配置为其他正有限数值。
+正文与思维文本共用此速率；按约 100 毫秒的粒度分块，单块不超过 chunk_chars。
+每次分块发送前异步等待对应字符数/速率的时间，数据库与网络延迟可能降低实际显示速度。
 复用 dictionaries.base_url、TLS 设置及 internal_request.token，无新增依赖。
 
 建议先更新 dh-knowledge（启动执行 Flyway V5），再更新 new_dh_agent（启动执行 Alembic 0019），
-最后更新两个前端。0019 可以在 MySQL 部分 DDL 已完成时安全重试。
+最后更新管理前端；用户端 dh-frontend 使用旧版即可。0019 可以在 MySQL 部分 DDL 已完成时安全重试。
 Gateway 与 dh-auth 无需新增路由或权限。数据库迁移应在发布前备份并验证；本次源码修改
 不会自动连接生产环境或执行生产迁移。
+
+## 旧版用户前端兼容
+
+正文使用原 token/done 事件，引用仍由 done.sources 返回。
+固定问答和普通模型问答的 reasoning 文本块额外投影为 process 事件：
+agent_id=reasoning，step_id=reasoning:<block_id>，title 标记轮次，summary 为累计原文。
+同一 step_id 持续覆盖 summary，结束时将状态改为 success、failed 或 skipped。
+工具步骤继续发送原 process 事件，固定答案保留思维与工具块的原始顺序。
+投影事件标记 display_only=true；它们存入 Run 事件日志用于断线重放，
+但不写入 reasoning 快照，避免与原始 reasoning 块重复。原 reasoning_delta、
+reasoning_block 和 done.reasoning 仍然保留。
+
+此适配无需修改 dh-frontend。旧版组件会折叠文本空白，引用可能归并或重新编号；
+旧版历史加载不会恢复过程面板，且发送问题前会去除首尾空白。后端仍按收到的问题
+严格匹配并保存原始答案、思维及引用。普通模型问答保持模型实际输出速度。

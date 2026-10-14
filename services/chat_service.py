@@ -354,6 +354,27 @@ class ChatService:
         finally:
             sink.close()
 
+    async def _paced_exact_qa_chunks(self, text):
+        settings = get_settings().exact_qa
+        rate = settings.chars_per_second
+        size = min(settings.chunk_chars, max(1, int(rate / 10)))
+        for start in range(0, len(text), size):
+            chunk = text[start:start + size]
+            await asyncio.sleep(len(chunk) / rate)
+            yield chunk
+
+    @staticmethod
+    def _reasoning_process_data(block, sequence):
+        return {
+            "agent_id": "reasoning", "step_id": f"reasoning:{block['id']}",
+            "parent_id": None, "round_number": block["round_number"],
+            "stage": "reasoning", "kind": "reasoning", "severity": "info",
+            "status": {"streaming": "running", "completed": "success", "cancelled": "skipped"}.get(block["status"], "failed"),
+            "title": f"第 {block['round_number']} 轮思考", "summary": block["content"],
+            "sequence": sequence, "recoverable": False, "retryable": False,
+            "details": {}, "display_only": True,
+        }
+
     async def _run_exact_qa(self, request, snapshot: ExactQaSnapshot, conversation_id, run_id,
                             message_id, user_id, sink):
         answer = ""
@@ -370,35 +391,41 @@ class ChatService:
                 data = {**data, "reasoning": reasoning}
             stored = await self._persist_event(run_id, user_id, {"event": event, "data": data})
             last_sequence = int(stored["id"])
-            if event in {"reasoning_delta", "reasoning_block", "process"}:
+            if event in {"reasoning_delta", "reasoning_block", "process"} and not data.get("display_only"):
                 reasoning = apply_reasoning_event(reasoning, event, data)
                 reasoning_sequence = last_sequence
                 await conversation_repository.save_reasoning(message_id, reasoning,
                     event_sequence=reasoning_sequence, user_id=user_id)
             sink.publish(stored)
+            if event in {"reasoning_delta", "reasoning_block"}:
+                block_id = data.get("block_id") or data["block"]["id"]
+                block = next(b for b in reasoning["blocks"] if b["id"] == block_id)
+                if block["type"] == "reasoning":
+                    await emit("process", self._reasoning_process_data(block, last_sequence))
 
         async def save_reasoning_status(status):
             nonlocal reasoning
             reasoning = finish_reasoning(reasoning, status)
             await conversation_repository.save_reasoning(message_id, reasoning,
                 event_sequence=reasoning_sequence, user_id=user_id)
+            for block in reasoning["blocks"]:
+                if block["type"] == "reasoning":
+                    await emit("process", self._reasoning_process_data(block, last_sequence))
 
         try:
             if "context" in request.model_fields_set:
                 await conversation_repository.save_map_context(conversation_id,
                     request.context or FrontendContext(), user_id=user_id, run_id=run_id)
             await emit("sources", {"sources": snapshot.sources, "answer_origin": "exact_qa"})
-            size = get_settings().exact_qa.chunk_chars
             for block in snapshot.reasoning.model_dump()["blocks"]:
                 if block["type"] == "reasoning":
-                    for start in range(0, len(block["content"]), size):
+                    async for content in self._paced_exact_qa_chunks(block["content"]):
                         await emit("reasoning_delta", {"block_id": block["id"],
-                            "round_number": block["round_number"], "content": block["content"][start:start + size]})
+                            "round_number": block["round_number"], "content": content})
                 else:
                     await emit("process", block["data"])
                 await emit("reasoning_block", {"block": block})
-            for start in range(0, len(snapshot.answer), size):
-                content = snapshot.answer[start:start + size]
+            async for content in self._paced_exact_qa_chunks(snapshot.answer):
                 answer += content
                 await emit("token", {"content": content})
                 await conversation_repository.update_assistant_message(message_id, answer, snapshot.sources,
@@ -481,12 +508,18 @@ class ChatService:
             if event["event"] == "error":
                 event = {**event, "data": {**event["data"], "reasoning": reasoning}}
             stored = await self._persist_event(run_id, user_id, event)
-            if event["event"] in {"process", "reasoning_delta", "reasoning_block"}:
+            if event["event"] in {"process", "reasoning_delta", "reasoning_block"} and not event["data"].get("display_only"):
                 reasoning = apply_reasoning_event(reasoning, event["event"], event["data"])
                 reasoning_sequence = int(stored["id"])
                 await conversation_repository.save_reasoning(assistant_message_id, reasoning,
                     event_sequence=reasoning_sequence, user_id=user_id)
             event_sink.publish(stored)
+            if event["event"] in {"reasoning_delta", "reasoning_block"}:
+                data = event["data"]
+                block_id = data.get("block_id") or data["block"]["id"]
+                block = next(b for b in reasoning["blocks"] if b["id"] == block_id)
+                if block["type"] == "reasoning":
+                    await emit({"event": "process", "data": self._reasoning_process_data(block, int(stored["id"]))})
             return int(stored["id"])
 
         async def finish_snapshot(status):
@@ -494,6 +527,9 @@ class ChatService:
             reasoning = finish_reasoning(reasoning, status)
             await conversation_repository.save_reasoning(assistant_message_id, reasoning,
                 event_sequence=reasoning_sequence, user_id=user_id)
+            for block in reasoning["blocks"]:
+                if block["type"] == "reasoning":
+                    await emit({"event": "process", "data": self._reasoning_process_data(block, reasoning_sequence)})
 
         try:
             # The authenticated conversation is the sole source of history.

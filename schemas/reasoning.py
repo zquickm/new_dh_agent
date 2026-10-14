@@ -40,6 +40,8 @@ def empty_reasoning() -> dict:
 
 def apply_reasoning_event(snapshot: dict, event: str, data: dict) -> dict:
     result = deepcopy(snapshot)
+    if event == "process" and data.get("display_only"):
+        return result
     blocks = result["blocks"]
     if event == "reasoning_delta":
         block_id = data["block_id"]

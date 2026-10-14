@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
-from config.settings import InternalRequestSettings
+from config.settings import InternalRequestSettings, ExactQaSettings
 from langchain_core.messages import AIMessageChunk
 
 from agents.events import AgentEvent
@@ -73,6 +73,16 @@ class ExactQaChatTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(assistant.answer_origin, "exact_qa")
         self.assertEqual(assistant.exact_qa, snapshot().provenance())
         self.assertGreater(assistant.reasoning_event_id, 0)
+        # Emulate the old frontend: ignore new events, overwrite each process
+        # step with its latest cumulative summary and append token content.
+        steps = {}
+        for event in events:
+            if event["event"] == "process":
+                data = event["data"]
+                steps[(data.get("agent_id"), data["step_id"])] = data
+        self.assertEqual(steps[("reasoning", "reasoning:r1")]["summary"], " 原思考\n🌊  ")
+        self.assertEqual(steps[("reasoning", "reasoning:r2")]["status"], "success")
+        self.assertEqual([step[1] for step in steps], ["reasoning:r1", "p1", "reasoning:r2"])
 
     async def test_saved_events_replay_same_answer_and_reasoning(self):
         events = await self.events()
@@ -83,7 +93,7 @@ class ExactQaChatTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([e.id for e in replay], sorted(e.id for e in replay))
         rebuilt = empty_reasoning()
         for event in replay:
-            if event.event in {"reasoning_delta", "reasoning_block"}:
+            if event.event in {"reasoning_delta", "reasoning_block", "process"}:
                 rebuilt = apply_reasoning_event(rebuilt, event.event, event.data)
         self.assertEqual(rebuilt, snapshot().reasoning.model_dump())
         self.assertEqual("".join(e.data["content"] for e in replay if e.event == "token"), snapshot().answer)
@@ -138,6 +148,9 @@ class ExactQaChatTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(done["reasoning"]["blocks"][0]["status"], "completed")
         saved = await self.repository.get(done["conversation_id"], user_id="101")
         self.assertEqual(saved.messages[-1].reasoning.model_dump(), done["reasoning"])
+        steps = [e["data"] for e in events if e["event"] == "process" and e["data"].get("display_only")]
+        self.assertEqual([step["summary"] for step in steps], ["思考\n", "思考\n续段", "思考\n续段"])
+        self.assertEqual(steps[-1]["status"], "success")
 
     async def test_fixed_answer_can_be_cancelled_with_partial_reasoning(self):
         original = self.repository.save_reasoning
@@ -159,6 +172,23 @@ class ExactQaChatTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(remaining[-1]["event"], "cancelled")
         self.assertEqual(remaining[-1]["data"]["reasoning"]["blocks"][0]["status"], "cancelled")
         self.assertFalse(any(e["event"] == "done" for e in remaining))
+        steps = [e["data"] for e in remaining if e["event"] == "process"]
+        self.assertEqual(steps[-1]["status"], "skipped")
+
+    async def test_pacing_uses_configured_character_rate_and_preserves_text(self):
+        self.assertEqual(ExactQaSettings().chars_per_second, 40)
+        for invalid in (0, -1, float("inf"), float("nan")):
+            with self.assertRaises(ValueError):
+                ExactQaSettings(chars_per_second=invalid)
+        for rate in (40, 20):
+            settings = SimpleNamespace(exact_qa=ExactQaSettings(chars_per_second=rate))
+            text = " 原文🌊\r\n末尾  "
+            with patch("services.chat_service.get_settings", return_value=settings), \
+                 patch("services.chat_service.asyncio.sleep", new_callable=AsyncMock) as sleep:
+                chunks = [chunk async for chunk in self.service._paced_exact_qa_chunks(text)]
+            self.assertEqual("".join(chunks), text)
+            self.assertEqual([call.args[0] for call in sleep.await_args_list], [len(chunk) / rate for chunk in chunks])
+            self.assertAlmostEqual(sum(call.args[0] for call in sleep.await_args_list), len(text) / rate)
 
 
 class ExactQaClientTest(unittest.IsolatedAsyncioTestCase):

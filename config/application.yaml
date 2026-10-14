@@ -63,6 +63,7 @@ exact_qa:
   enabled: true
   timeout: 5
   chunk_chars: 80
+  chars_per_second: 40
 
 skills:
   directory: skills

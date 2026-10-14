@@ -213,6 +213,7 @@ class ExactQaSettings(BaseModel):
     enabled: bool = False
     timeout: float = Field(default=5, gt=0)
     chunk_chars: int = Field(default=80, ge=1, le=4096)
+    chars_per_second: float = Field(default=40, gt=0, allow_inf_nan=False)
 
 
 class StreamSettings(BaseModel):
