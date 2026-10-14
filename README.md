@@ -330,7 +330,7 @@ description: 查询或分析业务观测站时使用。
 项目内置“空间联动”和“断面业务”两个 Skill。业务路由、查询步骤和可视化时机放在
 各自独立的 Skill 中，Skill 不互相加载；主模型按任务选择对应 Skill。工具描述说明能力、输入输出和副作用，Schema 保留参数校验，
 通用工具不按业务类别限制复用；断面专题出图工具保留先加载“断面业务”的前置提示。空间位置、基础属性和分布（含断面）使用通用空间查询；
-断面历史观测和统计使用 `database_query`，指标分析默认结合 `dm_duanmian_analysis` 出图。
+断面一览统计使用 `spatial_query_service` 的 `dm_duanmian_overview`，接口未覆盖的历史观测和跨期指标统计使用 `database_query`，指标分析默认结合 `dm_duanmian_analysis` 出图。
 
 RAG、重排、数据库和 SQL 生成模型的地址、超时、重试、知识库 ID、数据库账号等
 普通参数统一配置在 `config/application.yaml`，不同环境的差异写入对应的
@@ -358,6 +358,13 @@ SPATIAL_API_KEY=
 
 ### 通用空间要素查询（同一个 spatial_query_service 工具）
 
+海岛与断面一览统计复用同一工具及 `tools.spatial` 地址、`SPATIAL_API_KEY`：
+
+- `island_overview`：`GET /api/spatial/islands/overview`。可传 `page`（默认 1）、`size`（默认 20，上限 100）、`keyword`、`province`、`city`、`islandClass`、`minLng/minLat/maxLng/maxLat`（矩形四坐标必须同时传）。保留全部筛选条件；`total/byProvince/byClass` 为过滤后的全量统计，`items` 仅为当前页，不能按列表长度或本页分组重算统计。
+- `dm_duanmian_overview`：`GET /api/spatial/v2/duanmian/overview`，无其他参数。断面情况概览、断面数、测点数、要素数、数据量、最近航次直接采用 `overview`，单断面统计采用 `sections`，要素清单采用 `chemistryElements/hydrometElements`。不自行归并站位编码重算测点数量，也不把总体统计当成时间或选区筛选结果。
+
+统计取数规则每轮动态加入系统消息，适用于数据库中已有的发布提示词和历史 Skill 说明；部署后重启服务即可生效，无需重新发布主提示词。统计只采用本轮成功接口返回值；失败或缺字段时如实说明，不用 RAG、固定数字、历史回答或数据库替代，不补零。仅查询一览统计不强制检索文档、查数据库或打开专题图；历史要素和跨期指标分析沿用现有流程。两个一览操作只返回数据，地图展示继续使用通用空间查询和 `map_action`。
+
 观测站也是注册空间要素，位置、基础详情、名称和类型筛选统一使用以下三个 operation：
 
 - `list_spatial_elements`：无其他参数，调用 `/api/spatial/v2/elements/list`，结果放在 `elements`。
@@ -380,7 +387,7 @@ Agent 任务内请求 `includeGeometry=true` 后，查询结果额外返回 `res
 复用 `tools.spatial` 和 `SPATIAL_API_KEY`，base_url 继续只配置主机与端口，不附加 v2 路径。
 
 框选区域询问“有什么要素”时，加载“空间联动” Skill，先发现目录，再按同一范围逐类查询，包括 `dm_duanmian`；目录本身不代表区域内存在该类别。断面位置、基础属性和分布通过通用查询返回后调用 `map_action` 展示，不打开断面专题图。某类别无法完成空间查询时说明限制，不静默跳过，也不放宽为全库查询。
-断面历史观测和统计按“断面业务” Skill 使用 `database_query`，涉及指标、变化或分析时默认调用 `dm_duanmian_analysis`。历史航次的实际测点坐标由数据库查询后使用 `map_action(MARKER_ADD)` 展示，使用独立图层 `transect-stations`，保留选区和其他类别图层。专题分析浮层不代替地图测点分布。
+一览接口未覆盖的断面历史观测和跨期指标统计按“断面业务” Skill 使用 `database_query`，涉及指标、变化或分析时默认调用 `dm_duanmian_analysis`。历史航次的实际测点坐标由数据库查询后使用 `map_action(MARKER_ADD)` 展示，使用独立图层 `transect-stations`，保留选区和其他类别图层。专题分析浮层不代替地图测点分布。
 工具标识统一为 `spatial_query_service`，中文显示名为“通用空间查询服务”；对接方按工具名处理的逻辑及已发布提示词中的引用也需同步更新。
 已有环境需同步发布更新后的系统提示词，将具体业务路由交给当前 Skill；代码只更新默认提示词，不覆盖数据库中已发布的版本。工具代码更新后需重启服务；Skill 文件按次读取，历史对话中已加载的旧说明应在新会话中重新加载。
 

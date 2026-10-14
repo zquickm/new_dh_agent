@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import uuid4
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from agents.tools.executor import ToolOutput
 from agents.tools.map_action import spatial_map_results
 from agents.tools.spatial_query_schema import QUERY_PARAMETERS, SpatialElementQuery
@@ -12,9 +14,37 @@ from config.settings import get_settings
 from tool_backends.spatial_backend import SpatialServiceClient
 
 
+class IslandOverviewQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True, allow_inf_nan=False)
+
+    page: int = Field(default=1, ge=1, description="海岛列表页码，从 1 开始。")
+    size: int = Field(default=20, ge=1, le=100, description="海岛每页条数，上限 100。")
+    keyword: Optional[str] = Field(default=None, min_length=1, description="标准名称或现用名称关键字，模糊匹配。")
+    province: Optional[str] = Field(default=None, min_length=1, description="省全称，精确匹配，如浙江省。")
+    city: Optional[str] = Field(default=None, min_length=1, description="市全称，精确匹配，如舟山市。")
+    islandClass: Optional[str] = Field(default=None, min_length=1, description="海岛分类，模糊匹配，如无居民海岛。")
+    minLng: Optional[float] = Field(default=None, ge=-180, le=180, description="矩形最小经度，须同时传四个坐标。")
+    minLat: Optional[float] = Field(default=None, ge=-90, le=90, description="矩形最小纬度，须同时传四个坐标。")
+    maxLng: Optional[float] = Field(default=None, ge=-180, le=180, description="矩形最大经度，须同时传四个坐标。")
+    maxLat: Optional[float] = Field(default=None, ge=-90, le=90, description="矩形最大纬度，须同时传四个坐标。")
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "IslandOverviewQuery":
+        bounds = (self.minLng, self.minLat, self.maxLng, self.maxLat)
+        if any(value is not None for value in bounds):
+            if any(value is None for value in bounds):
+                raise ValueError("海岛矩形范围须同时传 minLng/minLat/maxLng/maxLat")
+            if self.minLng > self.maxLng or self.minLat > self.maxLat:
+                raise ValueError("海岛矩形最小坐标不能大于最大坐标")
+        return self
+
+
 TOOL_NAME = "spatial_query_service"
 TOOL_DESCRIPTION = (
     "查询已注册空间要素的目录、字段定义、属性和几何，以及观测站在线状态、最新观测和时序数据。"
+    "海岛一览数量、按省/分类分布及面积排序列表必须用 island_overview；"
+    "断面一览/东海区断面情况概览、断面数、测点数、要素清单、数据量及最近航次必须用 dm_duanmian_overview（无参数）。"
+    "这两类统计与前端使用同一接口，直接采用返回值，不从文档、历史回答、分页列表或数据库重算；失败时说明未取得统计。"
     "使用 query.fields、conditions 或 orderBy 前，缺少当前类别字段定义时须先调用 get_spatial_element_detail，"
     "收到定义后再查询；字段名、用途和运算符以定义为准，不猜测。"
     "通用查询按 limit/offset 返回一页 GeoJSON；需要几何时设置 includeGeometry=true。"
@@ -34,6 +64,8 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "list_spatial_elements",
                 "get_spatial_element_detail",
                 "query_spatial_element",
+                "island_overview",
+                "dm_duanmian_overview",
             ],
             "description": "通用空间或观测数据查询操作；list_spatial_elements 无需其他参数。",
         },
@@ -107,6 +139,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "default": 2000,
             "description": "observation_range 最多返回的观测记录数。",
         },
+        **IslandOverviewQuery.model_json_schema()["properties"],
     },
     "required": ["operation"],
     "$defs": QUERY_PARAMETERS["$defs"],
@@ -193,6 +226,8 @@ class SpatialQueryServiceTool:
             "list_spatial_elements": set(),
             "get_spatial_element_detail": {"dataKey"},
             "query_spatial_element": {"query"},
+            "island_overview": set(IslandOverviewQuery.model_fields),
+            "dm_duanmian_overview": set(),
             "station_status": {"tznos"},
             "observation_summary": {"tzno"},
             "observation_trend": {"tzno", "element", "hours"},
@@ -207,6 +242,13 @@ class SpatialQueryServiceTool:
             raise ValueError(f"{operation} 仅接受参数：{', '.join(sorted(allowed)) or '无'}")
         if operation == "list_spatial_elements":
             data = {"elements": await self.client.list_spatial_elements()}
+        elif operation == "island_overview":
+            params = IslandOverviewQuery.model_validate(arguments).model_dump(
+                exclude_unset=True, exclude_none=True,
+            )
+            data = await self.client.get_island_overview(**params)
+        elif operation == "dm_duanmian_overview":
+            data = await self.client.get_duanmian_overview()
         elif operation == "get_spatial_element_detail":
             data_key = self._required_text(arguments.get("dataKey"), "dataKey")
             data = await self.client.get_spatial_element_detail(data_key)
