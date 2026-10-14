@@ -99,9 +99,17 @@ class DiagnosticChatOpenAI(BaseChatOpenAI):
         diagnostic = _active.get()
         if diagnostic is not None:
             diagnostic.upstream(chunk)
-        return super()._convert_chunk_to_generation_chunk(
+        result = super()._convert_chunk_to_generation_chunk(
             chunk, default_chunk_class, base_generation_info
         )
+        # Compatible Chat Completions servers may return this extension, which
+        # LangChain otherwise drops. Retain it independently of diagnostics.
+        choices = chunk.get("choices") or []
+        if result is not None and choices:
+            reasoning = (choices[0].get("delta") or {}).get("reasoning_content")
+            if isinstance(reasoning, str):
+                result.message.additional_kwargs["reasoning_content"] = reasoning
+        return result
 
 
 def observation_log_summary(observation: str) -> dict:

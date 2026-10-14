@@ -296,11 +296,17 @@ class AgentLoop:
             upstream_usage: dict[str, int] = {}
             if "usage_callback" in stream_parameters:
                 stream_kwargs["usage_callback"] = upstream_usage.update
+            reasoning_chunks: list[str] = []
+            if "reasoning_callback" in stream_parameters:
+                stream_kwargs["reasoning_callback"] = reasoning_chunks.append
             async for content, calls in self.llm.stream(
                 round_messages,
                 available_tools,
                 **stream_kwargs,
             ):
+                for reasoning_content in reasoning_chunks:
+                    yield AgentEvent(type="reasoning_delta", content=reasoning_content, round_number=round_number)
+                reasoning_chunks.clear()
                 if content:
                     has_answer_content = has_answer_content or bool(content.strip())
                     content_parts.append(content)

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from schemas.chat import FrontendContext
 from schemas.citation import RagBufferEntry
+from schemas.reasoning import ReasoningSnapshot, finish_reasoning
 from schemas.conversation import (
     ConversationDetail,
     ConversationMessage,
@@ -179,6 +180,7 @@ class MemoryConversationRepository:
                 "model_messages": None,
                 "sources": [],
                 "status": "cancelled",
+                "reasoning": ReasoningSnapshot.model_validate(finish_reasoning(message.reasoning.model_dump(), "cancelled")),
                 "stream_event_id": max(message.stream_event_id, stream_event_sequence),
                 "error_code": "USER_CANCELLED",
                 "updated_at": now,
@@ -215,6 +217,9 @@ class MemoryConversationRepository:
                 "run_id": run.id,
                 "assistant_message_id": message.id,
                 "answer": answer,
+                "reasoning": updated_message.reasoning.model_dump(),
+                "answer_origin": updated_message.answer_origin,
+                "exact_qa": updated_message.exact_qa,
                 "reason": "user_requested",
                 "context_usage": context_usage,
             })
@@ -521,6 +526,19 @@ class MemoryConversationRepository:
             self._runs[(user_id, effective_run_id)] = run
         return user.model_copy(deep=True), assistant.model_copy(deep=True)
 
+    async def save_reasoning(self, message_id: str, reasoning: dict, *, event_sequence: int, user_id: str) -> None:
+        async with self._lock:
+            for (owner, _), item in self._items.items():
+                if owner != user_id:
+                    continue
+                for index, message in enumerate(item.messages):
+                    if message.id == message_id:
+                        item.messages[index] = message.model_copy(update={
+                            "reasoning": ReasoningSnapshot.model_validate(reasoning), "reasoning_event_id": event_sequence,
+                        }, deep=True)
+                        return
+            raise KeyError(message_id)
+
     async def update_assistant_message(
         self,
         message_id: str,
@@ -536,6 +554,9 @@ class MemoryConversationRepository:
         error_message: Optional[str] = None,
         model_messages: Optional[list[dict]] = None,
         stream_event_sequence: Optional[int] = None,
+        reasoning: Optional[dict] = None,
+        answer_origin: Optional[str] = None,
+        exact_qa: Optional[dict] = None,
     ) -> ConversationMessage:
         now = _now()
         async with self._lock:
@@ -557,6 +578,9 @@ class MemoryConversationRepository:
                         updated = message.model_copy(
                             update={
                                 "content": content,
+                                "reasoning": message.reasoning if reasoning is None else ReasoningSnapshot.model_validate(reasoning),
+                                "answer_origin": answer_origin or message.answer_origin,
+                                "exact_qa": exact_qa if exact_qa is not None else message.exact_qa,
                                 "model_messages": model_messages if model_messages is not None else message.model_messages,
                                 "sources": sources,
                                 "status": status,

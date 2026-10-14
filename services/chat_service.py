@@ -23,6 +23,8 @@ from services.emoji_filter import EmojiStreamFilter
 from services.recommendation_service import generate_recommendations
 from services.sensitive_word_service import SensitiveWordMatcher
 from services.tool_audit_service import PersistentToolAuditRecorder
+from services.exact_qa_service import ExactQaService, ExactQaSnapshot
+from schemas.reasoning import empty_reasoning, apply_reasoning_event, finish_reasoning
 
 
 logger = logging.getLogger(__name__)
@@ -90,7 +92,7 @@ class _LiveEventSink:
 
 
 class ChatService:
-    def __init__(self, prompt_provider=None, skill_provider=None) -> None:
+    def __init__(self, prompt_provider=None, skill_provider=None, exact_qa_service=None) -> None:
         self._agent: Optional[AgentLoop] = None
         self._sensitive_word_matcher: Optional[SensitiveWordMatcher] = None
         self._background_tasks: dict[str, asyncio.Task] = {}
@@ -98,6 +100,7 @@ class ChatService:
         self._instance_id = str(uuid4())
         self._prompt_provider = prompt_provider or _StaticPromptProvider()
         self._skill_provider = skill_provider
+        self._exact_qa_service = exact_qa_service or ExactQaService()
 
     async def start(self) -> None:
         if self._maintenance_task is not None:
@@ -238,6 +241,34 @@ class ChatService:
             yield done_event
             return
 
+        try:
+            fixed_answer = await self._exact_qa_service.match(request.question)
+        except Exception as exc:
+            logger.warning("exact_qa_lookup_failed exception_type=%s", type(exc).__name__)
+            _, assistant_message = await conversation_repository.begin_exchange(
+                conversation_id, request.question, run_id=run_id, user_id=user_id,
+                model="exact-qa-lookup", owner_instance_id=self._instance_id,
+                assistant_status="failed", run_status="failed",
+                assistant_content="固定问答查询失败，请稍后重试。", error_code="EXACT_QA_LOOKUP_FAILED",
+                error_type=type(exc).__name__, error_message="固定问答服务不可用或响应无效",
+            )
+            yield await self._persist_event(run_id, user_id, {
+                "event": "conversation", "data": {"conversation_id": conversation_id, "run_id": run_id},
+            })
+            yield await self._persist_event(run_id, user_id, {
+                "event": "error", "data": {"message": assistant_message.content,
+                    "error_code": "EXACT_QA_LOOKUP_FAILED", "retryable": True},
+            })
+            return
+        if fixed_answer is not None:
+            fixed_events = self._stream_exact_qa(request, fixed_answer, conversation_id, run_id, user_id)
+            try:
+                async for event in fixed_events:
+                    yield event
+            finally:
+                await fixed_events.aclose()
+            return
+
         prompt_snapshot = await self._prompt_provider.active_snapshot()
         # 应用启动时注入数据库服务；读取失败直接终止，不回退为全部启用。
         skill_snapshot = (
@@ -293,6 +324,122 @@ class ChatService:
         finally:
             event_sink.close()
 
+    async def _stream_exact_qa(self, request, snapshot, conversation_id, run_id, user_id):
+        _, assistant = await conversation_repository.begin_exchange(
+            conversation_id, request.question, run_id=run_id, user_id=user_id,
+            model="exact-qa", owner_instance_id=self._instance_id,
+        )
+        await conversation_repository.update_assistant_message(
+            assistant.id, "", [], status="streaming", user_id=user_id,
+            answer_origin="exact_qa", exact_qa=snapshot.provenance(),
+        )
+        sink = _LiveEventSink()
+        first = await self._persist_event(run_id, user_id, {
+            "event": "conversation", "data": {"conversation_id": conversation_id, "run_id": run_id},
+        })
+        task = asyncio.create_task(self._run_exact_qa(
+            request, snapshot, conversation_id, run_id, assistant.id, user_id, sink,
+        ), name=f"exact-qa-{run_id}")
+        self._background_tasks[run_id] = task
+        task.add_done_callback(lambda completed: self._discard_background_task(run_id, completed))
+        # Enter the producer's cancellation handler before exposing its run ID.
+        await asyncio.sleep(0)
+        yield first
+        try:
+            while True:
+                event = await sink.queue.get()
+                if event is None:
+                    return
+                yield event
+        finally:
+            sink.close()
+
+    async def _run_exact_qa(self, request, snapshot: ExactQaSnapshot, conversation_id, run_id,
+                            message_id, user_id, sink):
+        answer = ""
+        reasoning = empty_reasoning()
+        last_sequence = 0
+        reasoning_sequence = 0
+        heartbeat = asyncio.create_task(self._heartbeat_loop(run_id, user_id))
+        cancellation = asyncio.create_task(self._cancellation_loop(
+            conversation_id, run_id, user_id, asyncio.current_task()))
+
+        async def emit(event, data):
+            nonlocal last_sequence, reasoning, reasoning_sequence
+            if event == "error":
+                data = {**data, "reasoning": reasoning}
+            stored = await self._persist_event(run_id, user_id, {"event": event, "data": data})
+            last_sequence = int(stored["id"])
+            if event in {"reasoning_delta", "reasoning_block", "process"}:
+                reasoning = apply_reasoning_event(reasoning, event, data)
+                reasoning_sequence = last_sequence
+                await conversation_repository.save_reasoning(message_id, reasoning,
+                    event_sequence=reasoning_sequence, user_id=user_id)
+            sink.publish(stored)
+
+        async def save_reasoning_status(status):
+            nonlocal reasoning
+            reasoning = finish_reasoning(reasoning, status)
+            await conversation_repository.save_reasoning(message_id, reasoning,
+                event_sequence=reasoning_sequence, user_id=user_id)
+
+        try:
+            if "context" in request.model_fields_set:
+                await conversation_repository.save_map_context(conversation_id,
+                    request.context or FrontendContext(), user_id=user_id, run_id=run_id)
+            await emit("sources", {"sources": snapshot.sources, "answer_origin": "exact_qa"})
+            size = get_settings().exact_qa.chunk_chars
+            for block in snapshot.reasoning.model_dump()["blocks"]:
+                if block["type"] == "reasoning":
+                    for start in range(0, len(block["content"]), size):
+                        await emit("reasoning_delta", {"block_id": block["id"],
+                            "round_number": block["round_number"], "content": block["content"][start:start + size]})
+                else:
+                    await emit("process", block["data"])
+                await emit("reasoning_block", {"block": block})
+            for start in range(0, len(snapshot.answer), size):
+                content = snapshot.answer[start:start + size]
+                answer += content
+                await emit("token", {"content": content})
+                await conversation_repository.update_assistant_message(message_id, answer, snapshot.sources,
+                    status="streaming", user_id=user_id, stream_event_sequence=last_sequence)
+            message = await conversation_repository.update_assistant_message(message_id, snapshot.answer, snapshot.sources,
+                status="completed", run_status="completed", user_id=user_id, model="exact-qa")
+            await emit("done", {"conversation_id": conversation_id, "run_id": run_id,
+                "answer": snapshot.answer, "reasoning": snapshot.reasoning.model_dump(),
+                "sources": snapshot.sources, "images": [], "assistant_message_id": message.id,
+                "model": "exact-qa", "answer_origin": "exact_qa", "exact_qa": snapshot.provenance()})
+        except asyncio.CancelledError as exc:
+            run = await conversation_repository.get_run(conversation_id, run_id, user_id=user_id)
+            if "USER_CANCELLED" in exc.args or (run and run.status == "cancel_requested"):
+                await save_reasoning_status("cancelled")
+                await self._finalize_user_cancellation(run_id=run_id, user_id=user_id, answer=answer,
+                    context_usage={}, stream_event_sequence=last_sequence, event_sink=sink)
+            else:
+                await save_reasoning_status("failed")
+                await conversation_repository.update_assistant_message(message_id, answer, snapshot.sources,
+                    status="failed", run_status="interrupted", user_id=user_id,
+                    error_code="AGENT_INTERRUPTED", model="exact-qa")
+                raise
+        except Exception:
+            run = await conversation_repository.get_run(conversation_id, run_id, user_id=user_id)
+            if run and run.status == "cancel_requested":
+                await save_reasoning_status("cancelled")
+                await self._finalize_user_cancellation(run_id=run_id, user_id=user_id, answer=answer,
+                    context_usage={}, stream_event_sequence=last_sequence, event_sink=sink)
+            else:
+                logger.exception("exact_qa_stream_failed run_id=%s", run_id)
+                await save_reasoning_status("failed")
+                await conversation_repository.update_assistant_message(message_id, answer, snapshot.sources,
+                    status="failed", run_status="failed", user_id=user_id, error_code="EXACT_QA_STREAM_FAILED")
+                await emit("error", {"message": "固定答案返回失败，请稍后重试。",
+                    "error_code": "EXACT_QA_STREAM_FAILED", "retryable": True})
+        finally:
+            heartbeat.cancel()
+            cancellation.cancel()
+            await asyncio.gather(heartbeat, cancellation, return_exceptions=True)
+            sink.finish()
+
     async def _run_chat(
         self,
         request: AgentRequest,
@@ -316,6 +463,8 @@ class ChatService:
         latest_token_event_sequence = 0
         last_persisted_length = 0
         last_persisted_at = perf_counter()
+        reasoning = empty_reasoning()
+        reasoning_sequence = 0
         heartbeat_task = asyncio.create_task(
             self._heartbeat_loop(run_id, user_id),
             name=f"agent-heartbeat-{run_id}",
@@ -328,9 +477,23 @@ class ChatService:
         )
 
         async def emit(event: dict) -> int:
+            nonlocal reasoning, reasoning_sequence
+            if event["event"] == "error":
+                event = {**event, "data": {**event["data"], "reasoning": reasoning}}
             stored = await self._persist_event(run_id, user_id, event)
+            if event["event"] in {"process", "reasoning_delta", "reasoning_block"}:
+                reasoning = apply_reasoning_event(reasoning, event["event"], event["data"])
+                reasoning_sequence = int(stored["id"])
+                await conversation_repository.save_reasoning(assistant_message_id, reasoning,
+                    event_sequence=reasoning_sequence, user_id=user_id)
             event_sink.publish(stored)
             return int(stored["id"])
+
+        async def finish_snapshot(status):
+            nonlocal reasoning
+            reasoning = finish_reasoning(reasoning, status)
+            await conversation_repository.save_reasoning(assistant_message_id, reasoning,
+                event_sequence=reasoning_sequence, user_id=user_id)
 
         try:
             # The authenticated conversation is the sole source of history.
@@ -438,7 +601,12 @@ class ChatService:
                 sequence += 1
                 if event.sources is not None:
                     registered_sources = event.sources
-                if event.type == "tool_started":
+                if event.type == "reasoning_delta":
+                    await emit({"event": "reasoning_delta", "data": {
+                        "block_id": f"reasoning-{event.round_number}", "round_number": event.round_number,
+                        "content": event.content,
+                    }})
+                elif event.type == "tool_started":
                     if get_settings().stream.include_process:
                         tool_display_name = rag_display_names.get(event.tool_call_id) or self._tool_display_name(event.tool_name)
                         await emit({
@@ -564,6 +732,7 @@ class ChatService:
             answer, cited_sources = CitationService.finalize(
                 answer, registered_sources
             )
+            await finish_snapshot("completed")
             message = await conversation_repository.update_assistant_message(
                 assistant_message_id,
                 answer,
@@ -588,6 +757,8 @@ class ChatService:
                     "conversation_id": conversation_id,
                     "run_id": run_id,
                     "answer": answer,
+                    "reasoning": reasoning,
+                    "answer_origin": "model",
                     "model": self.agent.model_name,
                     "sources": cited_sources,
                     "images": [],
@@ -604,6 +775,7 @@ class ChatService:
                 or (run is not None and run.status == "cancel_requested")
             )
             if user_cancelled:
+                await finish_snapshot("cancelled")
                 tail = emoji_filter.feed("", final=True)
                 if tail:
                     answer_parts.append(tail)
@@ -622,6 +794,7 @@ class ChatService:
                     (perf_counter() - started_at) * 1000,
                 )
             else:
+                await finish_snapshot("failed")
                 await conversation_repository.update_assistant_message(
                     assistant_message_id,
                     "".join(answer_parts) or "服务重启导致回答中断，请重新发送。",
@@ -640,6 +813,7 @@ class ChatService:
                 conversation_id, run_id, user_id=user_id
             )
             if run is not None and run.status == "cancel_requested":
+                await finish_snapshot("cancelled")
                 await self._finalize_user_cancellation(
                     run_id=run_id,
                     user_id=user_id,
@@ -658,6 +832,7 @@ class ChatService:
                 request.question,
                 type(exc).__name__,
             )
+            await finish_snapshot("failed")
             await conversation_repository.update_assistant_message(
                 assistant_message_id,
                 "".join(answer_parts) or "对话生成失败，请重新发送。",
@@ -838,6 +1013,7 @@ class ChatService:
     ) -> dict:
         return {
             "agent_id": "agent-loop",
+            "round_number": round_number,
             "step_id": step_id or f"{kind}-{round_number}",
             "parent_id": None,
             "stage": stage,

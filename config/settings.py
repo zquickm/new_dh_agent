@@ -209,6 +209,12 @@ class SkillSettings(BaseModel):
         return path if path.is_absolute() else PROJECT_DIR / path
 
 
+class ExactQaSettings(BaseModel):
+    enabled: bool = False
+    timeout: float = Field(default=5, gt=0)
+    chunk_chars: int = Field(default=80, ge=1, le=4096)
+
+
 class StreamSettings(BaseModel):
     include_process: bool = True
     include_tool_result: bool = False
@@ -340,6 +346,7 @@ class Settings(BaseSettings):
         default_factory=SensitiveWordSettings
     )
     dictionaries: DictionarySettings = Field(default_factory=DictionarySettings)
+    exact_qa: ExactQaSettings = Field(default_factory=ExactQaSettings)
     skills: SkillSettings = Field(default_factory=SkillSettings)
     stream: StreamSettings = Field(default_factory=StreamSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)

@@ -3,6 +3,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from schemas.feedback import MessageFeedback
+from schemas.reasoning import ReasoningSnapshot
 
 
 class CreateConversationRequest(BaseModel):
@@ -13,6 +14,10 @@ class ConversationMessage(BaseModel):
     id: str
     role: Literal["system", "user", "assistant"]
     content: str
+    reasoning: ReasoningSnapshot = Field(default_factory=ReasoningSnapshot)
+    reasoning_event_id: int = 0
+    answer_origin: Literal["model", "exact_qa"] = "model"
+    exact_qa: Optional[dict] = None
     model_messages: Optional[list[dict]] = Field(default=None, exclude=True)
     created_at: str
     updated_at: Optional[str] = None

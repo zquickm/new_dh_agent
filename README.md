@@ -1,5 +1,7 @@
 # New DH AgentLoop
 
+固定问答、统一思维内容持久化与 SSE 协议见 [固定问答说明](docs/exact-qa.md)。
+
 精简的 FastAPI + AgentLoop 流式对话后端，接口兼容现有 `dh-frontend`。
 
 ## 上下文 Token 预算

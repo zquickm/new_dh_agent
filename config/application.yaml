@@ -59,6 +59,11 @@ dictionaries:
     interval_seconds: 300
     jitter_seconds: 30
 
+exact_qa:
+  enabled: true
+  timeout: 5
+  chunk_chars: 80
+
 skills:
   directory: skills
 

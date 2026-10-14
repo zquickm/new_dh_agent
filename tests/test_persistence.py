@@ -3,6 +3,7 @@ import importlib
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from sqlalchemy.orm import make_transient_to_detached
 
 from alembic import command
 from alembic.config import Config
@@ -188,6 +189,19 @@ class MySQLConversationRepositoryTest(unittest.IsolatedAsyncioTestCase):
         )
         runtime = MagicMock()
         runtime.session_factory.return_value.__aenter__.return_value = session
+        # MySQL without INSERT RETURNING leaves unset server defaults unloaded.
+        # Mark unassigned attributes expired on detached ORM instances, as they
+        # are after committing and closing the production session.
+        async def detach_messages(*args):
+            for message in session.add_all.call_args.args[0][:2]:
+                # INSERT materializes omitted nullable fields as NULL; only
+                # absent server-generated defaults should remain unloaded.
+                for column in message.__table__.columns:
+                    if column.nullable and column.key not in message.__dict__:
+                        setattr(message, column.key, None)
+                make_transient_to_detached(message)
+
+        runtime.session_factory.return_value.__aexit__.side_effect = detach_messages
         repository = MySQLConversationRepository(runtime)
 
         await repository.begin_exchange(
@@ -200,3 +214,6 @@ class MySQLConversationRepositoryTest(unittest.IsolatedAsyncioTestCase):
         user_message, assistant_message, _ = session.add_all.call_args.args[0]
         self.assertEqual(user_message.__dict__["stream_event_sequence"], 0)
         self.assertEqual(assistant_message.__dict__["stream_event_sequence"], 0)
+        for message in (user_message, assistant_message):
+            self.assertEqual(message.__dict__["reasoning_event_sequence"], 0)
+            self.assertEqual(message.__dict__["answer_origin"], "model")

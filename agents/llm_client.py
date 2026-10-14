@@ -44,6 +44,7 @@ class HelloAgentsLLM:
             return "".join(
                 str(item.get("text", "")) if isinstance(item, dict) else str(item)
                 for item in value
+                if not isinstance(item, dict) or item.get("type") not in {"reasoning", "thinking", "reasoning_content"}
             )
         return str(value or "")
 
@@ -72,6 +73,7 @@ class HelloAgentsLLM:
         run_id: str = "-",
         round_number: int = 0,
         usage_callback: Callable[[dict[str, int]], None] | None = None,
+        reasoning_callback: Callable[[str], None] | None = None,
     ) -> AsyncIterator[tuple[str, list[dict[str, Any]]]]:
         diagnostic = (
             StreamDiagnostics(
@@ -115,6 +117,16 @@ class HelloAgentsLLM:
                         chunk if tool_response is None else tool_response + chunk
                     )
                 content = self._content(chunk.content)
+                reasoning = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
+                if not reasoning and isinstance(chunk.content, list):
+                    reasoning = "".join(
+                        str(item.get("reasoning") or item.get("thinking") or item.get("text") or "")
+                        for item in chunk.content
+                        if isinstance(item, dict) and item.get("type") in {"reasoning", "thinking", "reasoning_content"}
+                    )
+                if isinstance(reasoning, str) and reasoning and reasoning_callback is not None:
+                    reasoning_callback(reasoning)
+                    yield "", []
                 if content:
                     yield content, []
             if tool_response is not None:

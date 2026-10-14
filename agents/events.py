@@ -6,6 +6,7 @@ from typing import Any, Literal, Optional
 class AgentEvent:
     type: Literal[
         "answer_delta",
+        "reasoning_delta",
         "map_action",
         "retrieval",
         "tool_started",

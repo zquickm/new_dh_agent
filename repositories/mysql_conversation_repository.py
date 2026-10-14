@@ -29,6 +29,7 @@ from schemas.conversation import (
 )
 from schemas.feedback import MessageFeedback
 from schemas.citation import RagBufferEntry
+from schemas.reasoning import empty_reasoning, finish_reasoning
 
 
 def _now() -> datetime:
@@ -76,6 +77,10 @@ def _message_schema(
         role=item.role,
         content=item.content,
         model_messages=item.model_messages,
+        reasoning=finish_reasoning(item.reasoning_json or empty_reasoning(), item.status) if item.status != "streaming" else item.reasoning_json or empty_reasoning(),
+        reasoning_event_id=item.reasoning_event_sequence or 0,
+        answer_origin=item.answer_origin or "model",
+        exact_qa=item.exact_qa_json,
         created_at=_iso(item.created_at),
         sources=list(item.sources or []),
         images=list(item.images or []),
@@ -511,6 +516,7 @@ class MySQLConversationRepository:
                 message.model_messages = None
                 message.sources = []
                 message.status = "cancelled"
+                message.reasoning_json = finish_reasoning(message.reasoning_json or empty_reasoning(), "cancelled")
                 message.stream_event_sequence = max(
                     message.stream_event_sequence or 0, stream_event_sequence
                 )
@@ -560,6 +566,9 @@ class MySQLConversationRepository:
                         "run_id": run.id,
                         "assistant_message_id": message.id,
                         "answer": answer,
+                        "reasoning": message.reasoning_json,
+                        "answer_origin": message.answer_origin,
+                        "exact_qa": message.exact_qa_json,
                         "reason": "user_requested",
                         "context_usage": context_usage,
                     },
@@ -931,6 +940,8 @@ class MySQLConversationRepository:
                     run_id=effective_run_id,
                     status="completed",
                     stream_event_sequence=0,
+                    reasoning_event_sequence=0,
+                    answer_origin="model",
                     error_code=None,
                     created_at=now,
                     updated_at=now,
@@ -948,6 +959,8 @@ class MySQLConversationRepository:
                     run_id=effective_run_id,
                     status=assistant_status,
                     stream_event_sequence=0,
+                    reasoning_event_sequence=0,
+                    answer_origin="model",
                     error_code=error_code,
                     created_at=now,
                     updated_at=now,
@@ -983,6 +996,20 @@ class MySQLConversationRepository:
                     conversation.title = question[:30]
         return _message_schema(user_message), _message_schema(assistant_message)
 
+    async def save_reasoning(self, message_id: str, reasoning: dict, *, event_sequence: int, user_id: str) -> None:
+        async with self._runtime.session_factory() as session:
+            async with session.begin():
+                message = (await session.execute(select(ConversationMessageModel).where(
+                    ConversationMessageModel.id == message_id,
+                    ConversationMessageModel.user_id == int(user_id),
+                    ConversationMessageModel.role == "assistant",
+                ).with_for_update())).scalar_one_or_none()
+                if message is None:
+                    raise KeyError(message_id)
+                message.reasoning_json = reasoning
+                message.reasoning_event_sequence = event_sequence
+                message.updated_at = _now()
+
     async def update_assistant_message(
         self,
         message_id: str,
@@ -998,6 +1025,9 @@ class MySQLConversationRepository:
         error_message: Optional[str] = None,
         model_messages: Optional[list[dict]] = None,
         stream_event_sequence: Optional[int] = None,
+        reasoning: Optional[dict] = None,
+        answer_origin: Optional[str] = None,
+        exact_qa: Optional[dict] = None,
     ) -> ConversationMessage:
         now = _now()
         async with self._runtime.session_factory() as session:
@@ -1016,6 +1046,12 @@ class MySQLConversationRepository:
                 if message is None:
                     raise KeyError(message_id)
                 message.content = content
+                if reasoning is not None:
+                    message.reasoning_json = reasoning
+                if answer_origin is not None:
+                    message.answer_origin = answer_origin
+                if exact_qa is not None:
+                    message.exact_qa_json = exact_qa
                 if model_messages is not None:
                     message.model_messages = model_messages
                 if stream_event_sequence is not None:
