@@ -22,7 +22,7 @@ llm:
   tokenizer_path: resources/tokenizers/deepseek-v4/deepseek_v4_tokenizer/tokenizer.json
 
 react:
-  max_rounds: 5
+  max_rounds: 20
   force_answer_on_last_round: true
 
 conversation:

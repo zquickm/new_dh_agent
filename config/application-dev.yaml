@@ -5,6 +5,3 @@ server:
 
 dictionaries:
   base_url: "http://127.0.0.1:9082"
-
-react:
-  max_rounds: 10
