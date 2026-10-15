@@ -17,7 +17,8 @@ TOOL_NAME = "map_action"
 TOOL_DESCRIPTION = (
     "向前端发送地图定位、点线面绘制、图层清除、弹窗、表格和播放等动作，不查询业务数据。"
     "空间查询返回 result_ref 时，优先 GEOJSON_ADD + payload.result_ref，直接复用原始点线面及完整属性，勿重写坐标或弹窗。"
-    "图层、分页 replace 和 fit_bounds 默认由后端补齐；MARKER_ADD 和内联 geojson 仍可用于其他数据来源。"
+    "引用模式只需 payload={result_ref:查询返回的引用}，不要同时传 geojson；图层、分页 replace 和 fit_bounds 由后端补齐。"
+    "其他数据来源可用 MARKER_ADD，或内联 geojson 并显式传 layer_id；内联模式不能省略 layer_id。"
     "CLEAR 可按 layer_ids 清除图层；顶层 clear_selection=true 配合空 payload 清除会话选区。"
     "FLY_TO 会清除旧站点和定位图层、添加目标 GeoJSON 并移动视野；"
     "定位站点时引用单点查询 result_ref 或传入完整单点 geojson，由几何自动确定 center。"
@@ -62,6 +63,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "type": "object",
             "description": (
                 "动作参数；坐标系为 CGCS2000（EPSG:4490），坐标格式为 [经度, 纬度]。"
+                "GEOJSON_ADD 二选一：{result_ref:查询返回的引用} 或 {layer_id:目标图层,geojson:完整FeatureCollection}，不得混用。"
                 "MARKER_ADD 的 markers 每项至少包含 id、name、coordinates；"
                 "各动作参数见 payload 字段说明。"
             ),
@@ -70,7 +72,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
                     "type": "string", "minLength": 1,
                     "description": (
                         "当前任务空间查询返回的 result_ref；GEOJSON_ADD 或单点 FLY_TO 可用，"
-                        "与 geojson 互斥。GEOJSON_ADD 仅传此字段即可：按类别分层、首分页替换后续页追加、"
+                        "与 geojson 互斥。默认引用合并后的全部查询结果；GEOJSON_ADD 仅传此字段即可：按类别分层、offset=0 替换否则追加、"
                         "fit_bounds=false；可显式覆盖展示参数。引用不跨任务保留，失效时重新查询。"
                     ),
                 },
@@ -275,6 +277,19 @@ TOOL_PARAMETERS: dict[str, Any] = {
         },
     },
     "required": ["action_type", "payload"],
+    "allOf": [
+        {
+            "if": {"properties": {"action_type": {"const": "GEOJSON_ADD"}}, "required": ["action_type"]},
+            "then": {"properties": {"payload": {"oneOf": [
+                {"required": ["result_ref"], "not": {"required": ["geojson"]}},
+                {"required": ["layer_id", "geojson"], "not": {"required": ["result_ref"]}},
+            ]}}},
+        },
+        {
+            "if": {"properties": {"action_type": {"const": "FLY_TO"}}, "required": ["action_type"]},
+            "then": {"properties": {"payload": {"not": {"required": ["result_ref", "geojson"]}}}},
+        },
+    ],
     "additionalProperties": False,
 }
 
@@ -311,19 +326,32 @@ def execute_map_action(
     if "clear_selection" in payload:
         raise ValueError("clear_selection 是顶层工具参数，不得放入前端 payload")
 
+    inline_geojson = payload.get("geojson")
+    if isinstance(inline_geojson, dict):
+        # Query counters and operation/result_ref metadata are not GeoJSON content.
+        inline_geojson = {key: inline_geojson.get(key) for key in ("type", "features")}
     if "result_ref" in payload:
         if normalized_type not in {"GEOJSON_ADD", "FLY_TO"}:
             raise ValueError("result_ref 只能用于 GEOJSON_ADD 或 FLY_TO")
-        if "geojson" in payload:
-            raise ValueError("result_ref 与 geojson 不能同时提供")
         result_ref = payload["result_ref"]
         results = spatial_map_results.get()
         if not isinstance(result_ref, str) or not results or result_ref not in results:
             raise ValueError("result_ref 无效或已过期，请在当前任务重新查询空间数据")
         cached = results[result_ref]
+        if inline_geojson is not None and inline_geojson != cached["geojson"]:
+            raise ValueError("result_ref 与 geojson 内容不一致；复用查询结果时请仅传 result_ref，不要重写 geojson")
         defaults = cached if normalized_type == "GEOJSON_ADD" else {"geojson": cached["geojson"]}
-        payload = {**defaults, **payload}
+        # A repeated copy (or null placeholder) must not override the original geometry.
+        payload = {**defaults, **payload, "geojson": cached["geojson"]}
         payload.pop("result_ref")
+    elif normalized_type == "GEOJSON_ADD" and "layer_id" not in payload and "geojson" in payload:
+        # Recover only an exact, unambiguous result from this run; never guess a layer.
+        matches = [
+            cached for cached in (spatial_map_results.get() or {}).values()
+            if cached["geojson"] == inline_geojson
+        ]
+        if len(matches) == 1:
+            payload = {**matches[0], **payload, "geojson": matches[0]["geojson"]}
 
     normalized_payload = payload
     if normalized_type == "FLY_TO":
@@ -360,8 +388,12 @@ def execute_map_action(
         if field not in normalized_payload or normalized_payload[field] is None
     ]
     if missing:
+        hint = (
+            "；复用空间查询结果请仅传 payload.result_ref，其他来源须同时提供 layer_id 和 geojson"
+            if normalized_type == "GEOJSON_ADD" else ""
+        )
         raise ValueError(
-            f"{normalized_type} 缺少必填参数：{', '.join(missing)}"
+            f"{normalized_type} 缺少必填参数：{', '.join(missing)}{hint}"
         )
 
     if normalized_type == "GEOJSON_ADD":

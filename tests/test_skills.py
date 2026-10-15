@@ -1,4 +1,6 @@
+import ast
 import json
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -9,6 +11,9 @@ from services.synonym_service import build_synonym_matcher
 from agents.agent_loop import AgentLoop
 from agents.skills import SkillCatalog
 from agents.tools.registry import build_tool_executor
+from agents.tools.duanmian_analysis import (
+    CHEMISTRY_ELEMENTS, HYDROMET_ELEMENTS, execute_duanmian_analysis,
+)
 
 
 class FakeLlm:
@@ -87,7 +92,7 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("observation_service", skill.instructions)
         self.assertIn("仅要求专题出图或打开分析浮层时使用 `dm_duanmian_analysis`", skill.instructions)
         self.assertIn("向用户综合展示全面的信息", skill.instructions)
-        self.assertIn("再用`map_action`标出E1断面站点", skill.instructions)
+        self.assertIn("再用 `map_action` 标出 E1 断面站点", skill.instructions)
         spatial = catalog.load("空间联动")
         self.assertIn("按返回的 `dataKey` 逐类调用", spatial.instructions)
         self.assertIn("再显式调用 `map_action`", spatial.instructions)
@@ -98,13 +103,15 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("空间联动", skill.instructions)
         self.assertNotIn("不查询 `dm_duanmian`", spatial.instructions)
         self.assertIn("E1、E2、E3", skill.instructions)
-        self.assertIn("东海断面口径为3条（E1、E2、E3），不包含 EL、EK", skill.instructions)
-        self.assertIn("按 E1、E2、E3 三条断面的全部站位处理，明确排除 EL、EK", skill.instructions)
-        self.assertIn("东海断面口径不包含 EL、EK", skill.description)
+        self.assertIn("共布设3条断面（E1、E2、E3）", skill.instructions)
+        self.assertIn("EK、EL断面不纳入此范围", skill.instructions)
+        self.assertIn("按三条断面的全部站位处理，不追问断面编号", skill.instructions)
+        self.assertIn("东海 E1、E2、E3 三条断面", skill.description)
         self.assertNotIn("5条", skill.instructions)
         sql_guide = (project_root / "database_information" / "数据库_AI_SQL查询指南.md").read_text(encoding="utf-8")
-        self.assertIn("东海断面口径为3条（E1、E2、E3），不包含 EL、EK", sql_guide)
-        self.assertIn("默认只查询 E1、E2、E3 三条断面，排除 EL、EK 和辅助点", sql_guide)
+        self.assertIn("东海断面为3条（E1、E2、E3）", sql_guide)
+        self.assertIn("EL、EK 记录仅在用户明确指定时查询", sql_guide)
+        self.assertIn("默认只查询三条断面", sql_guide)
         self.assertNotIn("五条断面", sql_guide)
         self.assertIn("E1001", skill.instructions)
         self.assertIn("E1-001", skill.instructions)
@@ -119,6 +126,28 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("当前数据只有观测日期", skill.instructions)
         self.assertNotIn("station_name", skill.instructions)
         self.assertNotIn("dwd_as_", skill.instructions)
+
+    def test_transect_chart_rules_and_examples_match_tool_contract(self):
+        skill = SkillCatalog(Path(__file__).resolve().parents[1] / "skills").load("断面业务")
+        self.assertIn("必须调用 `dm_duanmian_analysis`，无需用户额外说“画图”", skill.instructions)
+        self.assertIn("用户明确只要文字、只要表格或不要图时不出图", skill.instructions)
+        self.assertIn("数据库失败、空结果、缺少坐标均不阻止", skill.instructions)
+        self.assertIn("最新且该要素有有效观测的实际航次", skill.instructions)
+        self.assertNotIn("随机选一个", skill.instructions)
+        examples = re.findall(r"`(dm_duanmian_analysis\([^`\n]+\))`", skill.instructions)
+        self.assertTrue(examples)
+        element_options = {"chemistry": CHEMISTRY_ELEMENTS, "hydromet": HYDROMET_ELEMENTS}
+        element_types = set()
+        for example in examples:
+            with self.subTest(example=example):
+                call = ast.parse(example, mode="eval").body
+                arguments = {item.arg: ast.literal_eval(item.value) for item in call.keywords}
+                payload = execute_duanmian_analysis(**arguments).client_events[0]["payload"]
+                for name in ("analysis", "section", "voyage", "element"):
+                    self.assertEqual(payload[name], arguments[name])
+                self.assertIn(payload["element"], element_options[payload["elementType"]])
+                element_types.add(payload["elementType"])
+        self.assertEqual(element_types, {"chemistry", "hydromet"})
 
     def test_load_rejects_names_outside_the_catalog(self):
         with tempfile.TemporaryDirectory() as directory:

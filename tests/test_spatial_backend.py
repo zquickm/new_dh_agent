@@ -14,6 +14,7 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
         self.requests = []
         self.overview_status = 200
         self.overview_code = 0
+        self.paginate_islands = False
         self.overview_data = {
             "/api/spatial/islands/overview": {
                 "total": 123, "byProvince": [{"province": "浙江省", "count": 123}],
@@ -32,9 +33,15 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
 
         async def overview(request):
             self.requests.append(request)
+            data = self.overview_data[request.path]
+            if self.paginate_islands and request.path == "/api/spatial/islands/overview":
+                page = int(request.query.get("page", 1))
+                size = min(int(request.query.get("size", 20)), 20)
+                start = (page - 1) * size
+                data = {**data, "items": data["items"][start:start + size], "page": page, "size": size}
             return web.json_response({
                 "code": self.overview_code, "message": "统计服务结果",
-                "data": self.overview_data[request.path],
+                "data": data,
             }, status=self.overview_status)
 
         async def spatial_elements(request):
@@ -100,7 +107,8 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(operation=operation, arguments=arguments):
                 before = len(self.requests)
-                output = await tool.execute(operation, **arguments)
+                options = {"fetch_all": False} if operation == "island_overview" else {}
+                output = await tool.execute(operation, **arguments, **options)
                 self.assertEqual(len(self.requests), before + 1)
                 request = self.requests[-1]
                 self.assertEqual((request.method, request.path), ("GET", path))
@@ -112,8 +120,28 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
         # A successful zero is preserved; an absent statistic is never filled in.
         for data in ({"total": 0, "items": []}, {}):
             self.overview_data["/api/spatial/islands/overview"] = data
-            output = await tool.execute("island_overview")
+            output = await tool.execute("island_overview", fetch_all=False)
             self.assertEqual(output.content, {"operation": "island_overview", **data})
+
+    async def test_island_overview_automatically_collects_all_pages_without_recounting_statistics(self):
+        self.paginate_islands = True
+        items = [{"id": index, "stdName": f"测试岛{index}"} for index in range(45)]
+        original = {"total": 45, "items": items, "byProvince": [{"province": "浙江省", "count": 45}],
+                    "byClass": [{"islandClass": "无居民海岛", "count": 45}]}
+        self.overview_data["/api/spatial/islands/overview"] = original
+        filters = {"province": "浙江省", "islandClass": "无居民海岛", "keyword": "测试岛", "size": 100,
+                   "minLng": 121.0, "minLat": 29.0, "maxLng": 123.0, "maxLat": 31.0}
+        result = await SpatialQueryServiceTool(self.client).execute("island_overview", **filters)
+        self.assertEqual(result.content["items"], items)
+        self.assertEqual(result.content["byProvince"], original["byProvince"])
+        self.assertEqual(result.content["byClass"], original["byClass"])
+        self.assertEqual(result.content["pagination"], {
+            "complete": True, "pages": 3, "fetched": 45, "start_offset": 0, "next_page": None,
+        })
+        self.assertEqual([dict(request.query) for request in self.requests], [
+            {key: str(value) for key, value in params.items()}
+            for params in (filters, {**filters, "page": 2, "size": 20}, {**filters, "page": 3, "size": 20})
+        ])
 
     async def test_overview_validation_and_failures_do_not_return_fallback_statistics(self):
         tool = SpatialQueryServiceTool(self.client)

@@ -34,6 +34,29 @@ class FakeLlm:
 
 
 class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
+    async def test_default_round_budget_allows_nineteen_tool_rounds_then_forces_answer(self):
+        calls = []
+
+        async def echo(value):
+            calls.append(value)
+            return value
+
+        llm = FakeLlm([
+            ([], [{"id": f"call-{i}", "name": "Echo", "args": {"value": str(i)}}])
+            for i in range(19)
+        ] + [(["完成"], [])])
+        tools = ToolExecutor()
+        tools.register("Echo", "回显", echo)
+        agent = AgentLoop(llm, tools)
+        self.addAsyncCleanup(agent.close)
+        self.assertEqual(agent.max_rounds, 20)
+        events = [event async for event in agent.run_stream("执行多次查询", [])]
+        self.assertEqual(calls, [str(i) for i in range(19)])
+        self.assertEqual(len(llm.calls), 20)
+        self.assertIsNotNone(llm.calls[18][1])
+        self.assertIsNone(llm.calls[19][1])
+        self.assertEqual("".join(event.content for event in events if event.type == "answer_delta"), "完成")
+
     async def test_rag_evidence_is_local_to_user_turn_and_history_keeps_status(self):
         evidence = "仅本次检索可见的证据正文"
 

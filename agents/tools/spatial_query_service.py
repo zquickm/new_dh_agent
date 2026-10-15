@@ -17,8 +17,8 @@ from tool_backends.spatial_backend import SpatialServiceClient
 class IslandOverviewQuery(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True, allow_inf_nan=False)
 
-    page: int = Field(default=1, ge=1, description="海岛列表页码，从 1 开始。")
-    size: int = Field(default=20, ge=1, le=100, description="海岛每页条数，上限 100。")
+    page: int = Field(default=1, ge=1, description="海岛列表起始页，从 1 开始；获取全部信息保持 1。")
+    size: int = Field(default=20, ge=1, le=100, description="海岛每次接口请求的条数，上限 100；默认自动翻页，不限制合并总数。")
     keyword: Optional[str] = Field(default=None, min_length=1, description="标准名称或现用名称关键字，模糊匹配。")
     province: Optional[str] = Field(default=None, min_length=1, description="省全称，精确匹配，如浙江省。")
     city: Optional[str] = Field(default=None, min_length=1, description="市全称，精确匹配，如舟山市。")
@@ -45,10 +45,13 @@ TOOL_DESCRIPTION = (
     "海岛一览数量、按省/分类分布及面积排序列表必须用 island_overview；"
     "断面一览/东海区断面情况概览、断面数、测点数、要素清单、数据量及最近航次必须用 dm_duanmian_overview（无参数）。"
     "这两类统计与前端使用同一接口，直接采用返回值，不从文档、历史回答、分页列表或数据库重算；失败时说明未取得统计。"
+    "通用查询先取得 list_spatial_elements 返回的 dataKey，再调用详情或查询；已有目录可复用，类别未注册时刷新目录核对。"
     "使用 query.fields、conditions 或 orderBy 前，缺少当前类别字段定义时须先调用 get_spatial_element_detail，"
-    "收到定义后再查询；字段名、用途和运算符以定义为准，不猜测。"
-    "通用查询按 limit/offset 返回一页 GeoJSON；需要几何时设置 includeGeometry=true。"
-    "返回 result_ref 时，地图展示直接调用 map_action(action_type=GEOJSON_ADD, payload={result_ref:该引用})，无需重新组装 features。"
+    "收到定义后再查询；字段名、用途和运算符以定义为准，原样保留大小写及下划线，不自行转换命名。"
+    "query_spatial_element 和 island_overview 默认在一次工具调用内自动拉取并合并全部后续页，fetch_all=false 才只取一页；"
+    "分页始终保留类别、空间范围、过滤和排序条件。pagination.complete=false 表示未取全，必须说明 warning。"
+    "需要几何时设置 includeGeometry=true，result_ref 引用本次合并取得的全部要素。"
+    "返回 result_ref 时，地图展示直接调用 map_action(action_type=GEOJSON_ADD, payload={result_ref:该引用})，不要同时传 geojson，无需重新组装 features 或填写 layer_id。"
     "仅返回数据，不发送地图动作；地图展示使用 map_action。"
 )
 TOOL_PARAMETERS: dict[str, Any] = {
@@ -72,13 +75,22 @@ TOOL_PARAMETERS: dict[str, Any] = {
         "dataKey": {
             "type": "string",
             "minLength": 1,
-            "description": "get_spatial_element_detail 必填的目录要素标识。",
+            "description": "get_spatial_element_detail 必填；原样使用 list_spatial_elements 返回的 dataKey，不得传地图 layer_id。",
         },
         "query": {
             **{key: value for key, value in QUERY_PARAMETERS.items() if key != "$defs"},
             "description": (
                 "query_spatial_element 必填；对应 v2 /query 请求体，"
                 "要素标识和可查询字段以空间目录及字段定义为准。"
+            ),
+        },
+        "fetch_all": {
+            "type": "boolean",
+            "default": True,
+            "description": (
+                "仅 query_spatial_element 和 island_overview 使用；默认自动拉取并合并从指定 offset/page 开始的全部后续页。"
+                "通常从 offset=0/page=1 开始，获取全部匹配信息；仅用户明确只要某一页时设为 false。"
+                "limit/size 只是每次接口请求的批量大小，不限制合并总数；此参数不发送给空间服务。"
             ),
         },
         "tznos": {
@@ -225,8 +237,8 @@ class SpatialQueryServiceTool:
         allowed_arguments = {
             "list_spatial_elements": set(),
             "get_spatial_element_detail": {"dataKey"},
-            "query_spatial_element": {"query"},
-            "island_overview": set(IslandOverviewQuery.model_fields),
+            "query_spatial_element": {"query", "fetch_all"},
+            "island_overview": set(IslandOverviewQuery.model_fields) | {"fetch_all"},
             "dm_duanmian_overview": set(),
             "station_status": {"tznos"},
             "observation_summary": {"tzno"},
@@ -240,13 +252,19 @@ class SpatialQueryServiceTool:
         allowed = allowed_arguments[operation]
         if arguments.keys() - allowed:
             raise ValueError(f"{operation} 仅接受参数：{', '.join(sorted(allowed)) or '无'}")
+        fetch_all = arguments.pop("fetch_all", True)
+        if not isinstance(fetch_all, bool):
+            raise ValueError("fetch_all 必须为布尔值")
         if operation == "list_spatial_elements":
             data = {"elements": await self.client.list_spatial_elements()}
         elif operation == "island_overview":
             params = IslandOverviewQuery.model_validate(arguments).model_dump(
                 exclude_unset=True, exclude_none=True,
             )
-            data = await self.client.get_island_overview(**params)
+            data = (
+                await self._fetch_all_pages(operation, params) if fetch_all
+                else await self.client.get_island_overview(**params)
+            )
         elif operation == "dm_duanmian_overview":
             data = await self.client.get_duanmian_overview()
         elif operation == "get_spatial_element_detail":
@@ -256,7 +274,10 @@ class SpatialQueryServiceTool:
             query = SpatialElementQuery.model_validate(arguments.get("query"))
             payload = query.model_dump(exclude_unset=True, exclude_none=True)
             json.dumps(payload, allow_nan=False)
-            data = await self.client.query_spatial_element(payload)
+            data = (
+                await self._fetch_all_pages(operation, payload) if fetch_all
+                else await self.client.query_spatial_element(payload)
+            )
             results = spatial_map_results.get()
             if query.includeGeometry and results is not None:
                 result_ref = "spatial-" + uuid4().hex
@@ -281,7 +302,87 @@ class SpatialQueryServiceTool:
             )
         elif operation == "observation_range":
             data = await self._observation_range(arguments)
-        return ToolOutput(content={"operation": operation, **data})
+        # Keep the reference and completion status ahead of potentially large geometry.
+        return ToolOutput(content={
+            "operation": operation,
+            **{key: data[key] for key in ("result_ref", "pagination", "total", "returned") if key in data},
+            **data,
+        })
+
+    async def _fetch_all_pages(self, operation: str, parameters: dict[str, Any]) -> dict[str, Any]:
+        spatial = operation == "query_spatial_element"
+        items_key = "features" if spatial else "items"
+        params = dict(parameters)
+        page_size = params.get("limit" if spatial else "size", 20)
+        page_number = params.get("page", 1)
+        start = params.get("offset", 0) if spatial else (page_number - 1) * page_size
+        position = start
+        first = None
+        items: list[Any] = []
+        seen_pages: set[str] = set()
+        pages = 0
+        warning = ""
+        while True:
+            try:
+                data = (
+                    await self.client.query_spatial_element(params) if spatial
+                    else await self.client.get_island_overview(**params)
+                )
+                batch = data.get(items_key)
+                total = data.get("total")
+                if not isinstance(batch, list) or type(total) is not int or total < 0:
+                    raise ValueError(f"空间服务分页结果无效：需要 {items_key} 数组和非负整数 total")
+                if spatial and (type(data.get("returned", len(batch))) is not int or data.get("returned", len(batch)) != len(batch)):
+                    raise ValueError("空间服务分页计数无效：returned 与 features 数量不一致")
+                if first is not None and total != first["total"]:
+                    raise ValueError("分页期间 total 发生变化，请重新查询以核对完整结果")
+                if not spatial:
+                    actual_size = data.get("size", page_size)
+                    if type(actual_size) is not int or actual_size <= 0 or type(data.get("page", page_number)) is not int or data.get("page", page_number) != page_number:
+                        raise ValueError("海岛服务分页页码或每页条数无效")
+                    if first is None:
+                        page_size = actual_size
+                        start = position = (page_number - 1) * page_size
+                    elif actual_size != page_size:
+                        raise ValueError("分页期间 size 发生变化，无法保证结果完整")
+                if (batch and position + len(batch) > total) or (not batch and position < total):
+                    raise ValueError("空间服务分页计数无效：结果超出 total 或提前返回空页")
+                fingerprint = json.dumps(batch, sort_keys=True, ensure_ascii=False, allow_nan=False)
+                if batch and fingerprint in seen_pages:
+                    raise ValueError("空间服务重复返回已取得的页面，已停止翻页")
+                if not spatial and len(batch) < page_size and position + len(batch) < total:
+                    raise ValueError("海岛服务提前返回不足一页的数据，无法确认后续页范围")
+            except Exception as exc:
+                if first is None:
+                    raise
+                warning = str(exc).strip() or type(exc).__name__
+                break
+            if first is None:
+                first = data
+            items.extend(batch)
+            seen_pages.add(fingerprint)
+            pages += 1
+            position += len(batch)
+            if position >= total:
+                break
+            if spatial:
+                params = {**params, "offset": position}
+            else:
+                page_number += 1
+                params = {**params, "page": page_number, "size": page_size}
+        pagination = {
+            "complete": not warning and start == 0 and position == first["total"],
+            "pages": pages, "fetched": len(items), "start_offset": start,
+            "next_offset" if spatial else "next_page": (
+                (position if spatial else page_number) if position < first["total"] else None
+            ),
+        }
+        if warning or start:
+            pagination["warning"] = warning or f"本次从第 {start + 1} 条开始，未包含此前记录；查询全部信息请从 offset=0/page=1 开始"
+        result = {**first, items_key: items, "pagination": pagination}
+        if spatial:
+            result["returned"] = len(items)
+        return result
 
     async def close(self) -> None:
         if self._client is not None:

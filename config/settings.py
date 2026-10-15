@@ -136,7 +136,7 @@ class LLMSettings(BaseModel):
 
 
 class ReactSettings(BaseModel):
-    max_rounds: int = Field(default=5, ge=1, le=20)
+    max_rounds: int = Field(default=20, ge=1, le=20)
     force_answer_on_last_round: bool = True
 
 

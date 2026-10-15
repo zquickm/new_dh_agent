@@ -138,6 +138,8 @@ NEW_DH_LLM__API_KEY=your-key
 ```
 
 流式接口为 `POST /agent/chat/stream`。生产环境的会话保存在 MySQL 中。
+智能体最大模型轮次统一默认为 20（`react.max_rounds`），开发与生产环境继承公共配置；
+第 20 轮保留给最终回答。同一模型轮次可以提交多个独立工具调用。
 
 ## RAG、数据库、观测、地图与专题分析工具
 
@@ -146,7 +148,8 @@ Agent 已注册八个业务工具（括号内为协议调用标识）：
 - 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
 
   工具仅接受必填的 `query` 和可选的 `tags`（标签名称数组）。标签用于优先检索，
-  未命中时平台会在配置的授权范围内扩大检索。每次按场景配置顺序串行查询知识库，所有请求头共用
+  标签名称按字符串数组透传，带标签片段不足 `recall_top_n` 时平台在授权范围内补召回其他片段，
+  标签不是严格过滤条件。每次按场景配置顺序串行查询知识库，所有请求头共用
   `RAG_API_TOKEN`，各请求体的 `knowledge_ids` 仅包含一个库 ID。三个 ID 分别通过
   `RAG_POLICY_KNOWLEDGE_ID`、`RAG_BUSINESS_KNOWLEDGE_ID`、`RAG_LITERATURE_KNOWLEDGE_ID`
   配置；缺失或重复 ID 时拒绝检索，不回退到全库查询。
@@ -213,12 +216,29 @@ Agent 已注册八个业务工具（括号内为协议调用标识）：
   选中场景未配置知识库、厦门关键词命中但未配置 `xiamen`，或任一库请求失败时本次工具报错，
   不切换场景；无结果时返回实际空结果。
   工具 Schema 保持 `query`、`tags`。每库 `recall_top_n` 控制接口召回数量，
-  `top_n` 控制按返回 `score` 降序筛选后的保留数量（均可独立调整）。同分保持原顺序，
+  `top_n` 控制每库最终保留数量（均可独立调整）。没有时间标签时按返回 `score` 降序筛选；
+  有时间标签时先保留完整年月匹配片段，再保留年份匹配片段，各组内按分数降序，
+  其他片段补足剩余名额。接口没有返回可识别的时间标签时保留平台召回顺序，避免破坏平台标签优先级。
+  同分保持原顺序，
   缺失或无法解析的分数按 0 处理，不足时返回实际数量，不保证来自不同文件。
   不因结果少或为空而动态降低阈值。结果按配置库顺序
   合并，保留各片段的知识库和文档信息；此路径直接使用接口分数，不调用模型重排，
   不做跨库排序或全局 top_n 截断。
   任一库请求失败时本次工具报错，不将失败误报为无结果。
+  时间规划规则在 `services/context_service.py` 的通用 RAG 协议中，每轮动态注入，
+  已发布的自定义系统提示词也会获得这些规则。未指定时间时默认优先最新资料，先用当前年份标签，
+  不默认加当前月；有本轮已知最新年份时优先该年，资料不足时按实际资料年份补查。
+  明确年份使用如 `["2021年"]`，年月使用如 `["2021年", "3月"]`，月份不补零；
+  具体日期和单年多月范围保留在 `query` 中，回答时核验切片日期，不构造日级标签。
+  业务标签叠加，例如断面2021年3月使用 `["断面", "2021年", "3月"]`。
+  多年范围逐年分别调用；“近N年”包含当前年，“过去N个完整年度”不包含当前年。
+  例如当前为2026年，近五年对应2022—2026年五次检索，各年独立召回和保留，
+  支持在同一模型轮次提交多个调用。结果按实际年份汇总并引用，缺失和失败年份单独说明。
+  工具结果与 retrieval 事件的 `requested_tags` 表示请求条件，`chunks[].tags` 表示接口返回的实际标签；
+  两者不能混用，缺少实际标签时核验正文及来源日期，不能把其他年份的补召回资料归入请求年份。
+  接口文档定义请求 `tags` 为字符串数组，但召回响应未声明 `tags` 字段，客户端仅在实际返回时读取
+  字符串数组，不从请求条件推造切片标签；多标签组合的 AND/OR 语义需按实际平台联调验证。
+  时间标签仅影响文档检索，断面实测数据仍由空间服务或数据库提供。
 - 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
 - 通用空间查询服务（`spatial_query_service`）：查询注册空间要素的目录、基础属性和几何（含观测站），以及观测站在线状态、最新数据和时序数据。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
@@ -362,7 +382,7 @@ SPATIAL_API_KEY=
 
 海岛与断面一览统计复用同一工具及 `tools.spatial` 地址、`SPATIAL_API_KEY`：
 
-- `island_overview`：`GET /api/spatial/islands/overview`。可传 `page`（默认 1）、`size`（默认 20，上限 100）、`keyword`、`province`、`city`、`islandClass`、`minLng/minLat/maxLng/maxLat`（矩形四坐标必须同时传）。保留全部筛选条件；`total/byProvince/byClass` 为过滤后的全量统计，`items` 仅为当前页，不能按列表长度或本页分组重算统计。
+- `island_overview`：`GET /api/spatial/islands/overview`。可传 `page`（起始页，默认 1）、`size`（每批默认 20，上限 100）、`keyword`、`province`、`city`、`islandClass`、`minLng/minLat/maxLng/maxLat`（矩形四坐标必须同时传）。工具默认自动翻页并合并全部 `items`，显式传顶层 `fetch_all=false` 时保留原单页模式。保留全部筛选条件；`total/byProvince/byClass` 直接采用接口返回值，不按合并列表或单页分组重算统计。
 - `dm_duanmian_overview`：`GET /api/spatial/v2/duanmian/overview`，无其他参数。断面情况概览、断面数、测点数、要素数、数据量、最近航次直接采用 `overview`，单断面统计采用 `sections`，要素清单采用 `chemistryElements/hydrometElements`。不自行归并站位编码重算测点数量，也不把总体统计当成时间或选区筛选结果。
 
 统计取数规则配置在 `config/application.yaml` 的两个场景提示词中：海岛规则使用 `business_scenarios.海岛高质量发展与高水平保护.prompt`，断面规则使用 `business_scenarios.海洋断面数据分析.prompt`。前端通过 `front_context.module_l2` 传对应场景名称，后端按现有场景选择逻辑加载本轮提示词；通用系统提示不再全局附加这两类规则。已有的厦门问题优先规则仍然适用。部署后重启服务即可生效，无需重新发布主提示词。统计只采用本轮成功接口返回值；失败或缺字段时如实说明，不用 RAG、固定数字、历史回答或数据库替代，不补零。仅查询一览统计不强制检索文档、查数据库或打开专题图；历史要素和跨期指标分析沿用现有流程。两个一览操作只返回数据，地图展示继续使用通用空间查询和 `map_action`。
@@ -373,14 +393,20 @@ SPATIAL_API_KEY=
 - `get_spatial_element_detail`：传 `dataKey`，调用 `/api/spatial/v2/elements/detail`，获取字段、枚举及查询约束。
 - `query_spatial_element`：传 `query`，`query` 对应 `/api/spatial/v2/elements/query` 原始请求体。
 
+详情参数 `dataKey` 和查询参数 `query.element` 必须原样使用目录返回的类别标识；缺少目录结果时先单独查询目录并等待返回，已有结果可复用。地图 `layer_id` 仅用于展示，例如 `transect-stations` 不能作为断面测点的查询类别；目录返回 `dm_duanmian` 时使用该值。收到“要素/图层未注册”时重新获取目录，仅在能确定目标类别时保留原条件修正一次，否则说明限制。
+
 已删除重复的 `list_station_types`、`search_stations`、`station_detail` 及旧 HTTP 入口。
 类型枚举从字段定义读取，站名、站号和类型作为通用查询条件；不再本地猜测站点类型、改写站名、筛选去重或重算总数。
 通用文档未覆盖实时在线状态及观测数据，因此保留 `station_status`、`observation_summary`、`observation_trend`、`observation_range`。注册属性中的运行状态不能替代实时在线状态。
 
 `spatial_query_service` 的所有操作只返回查询数据，不清图、不标点、不定位，也不为了地图展示额外查询单站详情。已移除 `render_map` 参数和 `map_result` 绘图回执；旧调用传入该参数时返回迁移提示。
-通用查询保留 FeatureCollection、features、total、returned，每次调用只查询一页；需要绘图时请求 `includeGeometry=true`，使用 `limit/offset` 按原范围和条件补齐后续页，不在工具内部自动取全。
-Agent 任务内请求 `includeGeometry=true` 后，查询结果额外返回 `result_ref`。模型显式调用 `map_action(action_type="GEOJSON_ADD", payload={"result_ref":查询返回的引用})` 即可展示点线面；后端直接复用原始 GeoJSON，避免模型再次生成整批坐标和属性。默认图层为 `spatial-element:{dataKey}`（`obs_station` 使用 `observation-stations`），`offset=0` 时替换、后续页追加，`fit_bounds=false`；展示参数可显式覆盖。各页按顺序提交，首个展示页 offset 大于零时传 `replace=true`。引用按任务隔离，只在当前任务内有效；历史引用失效时重新查询。查询仍保留完整 features、total、returned，不自动绘图或翻页。
+通用查询保留 FeatureCollection、features、total、returned，默认在一次工具调用内自动翻页并合并全部后续页。`query.limit` 仅控制每次接口请求的数量，偏移按实际 `returned` 递增；类别、原始几何范围、字段、过滤和排序条件保持不变。通常使用 `query.offset=0`；显式从其他偏移开始只取后续记录，不会补取此前数据。需要原单页模式时传工具顶层 `fetch_all=false`，该参数不发给伙伴接口。
+自动翻页新增 `pagination`：`complete` 表示是否取得全部匹配结果，`pages` 为成功合并页数，`fetched` 为合并记录数，`start_offset` 为起始位置，`next_offset`/`next_page` 为未完成时的后续位置。`returned` 更新为通用查询合并后的条数；`total` 保留服务总匹配数。后续页失败、重复、计数异常或总数变化时停止，保留已取得数据并返回 `complete=false` 及 `warning`，不冒充全量、不补零、不放宽条件；首个请求失败仍按原逻辑报错。海岛一览采用同一机制，保留伙伴接口的统计值。
+Agent 任务内请求 `includeGeometry=true` 后，查询结果额外返回 `result_ref`，引用本次合并取得的全部几何和属性。模型显式调用一次 `map_action(action_type="GEOJSON_ADD", payload={"result_ref":查询返回的引用})` 即可提交全部已取要素；后端直接复用原始 GeoJSON，避免模型再次生成整批坐标和属性。默认图层为 `spatial-element:{dataKey}`（`obs_station` 使用 `observation-stations`），起始 `offset=0` 时替换，否则追加，`fit_bounds=false`；展示参数可显式覆盖。从非零偏移首次展示时传 `replace=true`。引用按任务隔离，只在当前任务内有效；历史引用失效时重新查询。查询仍只返回数据，地图操作由模型显式调用；`pagination.complete=false` 时必须说明展示范围。
 引用由后端展开，前端仍收到现有 `GEOJSON_ADD` 和完整 `payload.geojson`，不接收 `result_ref`；详情沿用 GeoJSON properties 拾取。没有引用的其他数据来源仍支持内联 GeoJSON、`MARKER_ADD`；清图和定位由地图工具完成。不同类别分层展示，保留选区；未取全或缺少几何时说明实际覆盖范围。单点查询引用同样可用于 `FLY_TO`。
+
+`GEOJSON_ADD` 的工具 Schema 明确两种输入：仅传 `result_ref`，或同时传 `layer_id` 与 `geojson`。为兼容模型的重复参数，有效引用附带相同 `geojson` 或 `geojson=null` 时复用后端原始结果；类型或要素内容不一致仍拒绝，比对时忽略查询计数等顶层元数据。内联 GeoJSON 遗漏 `layer_id` 时，仅在当前任务缓存中存在唯一、完整匹配的结果时补齐原图层及分页参数；没有匹配、匹配不唯一或引用过期时保留校验错误，不猜测图层。工具失败后模型可修正重试，已发出的失败过程记录不会因后续成功而撤回。
+
 地图动作回执仅代表指令已发送，不代表前端已经渲染。观测站搜索保留缺少坐标的业务记录，缺少坐标只影响后续绘图，不影响查询数量。
 工具错误统一标识“通用空间查询服务”，保留 operation、HTTP 路径及服务错误说明；查询失败不代表无匹配数据。
 `observation_range` 对应 `GET /api/spatial/stations/observation-range`，参数为 `tzno`、`data_type`、`start_time`、`end_time`、`order_by`、`max_records`。HTTP 500 表示上游服务未能完成请求；仅凭“服务内部错误”无法区分数据库、字段映射或时间处理异常。需结合智能体 `tool_failed` 日志中的 run_id、call_id、arguments 与同一时刻空间服务日志排查；不要把失败当成无数据，也不要盲目改日期或指标重复查询。

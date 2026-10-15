@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from dataclasses import replace
 from typing import Any, Optional
 
@@ -17,6 +18,7 @@ from tool_backends.rerank_backend import (
 
 
 logger = logging.getLogger(__name__)
+_TIME_TAG = re.compile(r"(?:[1-9][0-9]{3}年|(?:[1-9]|1[0-2])月)")
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -259,7 +261,19 @@ class RagSearchBackend:
         )
 
         if score_only:
-            return sorted(chunks, key=lambda chunk: chunk.score, reverse=True)[:top_k]
+            time_tags = {tag for tag in tags if _TIME_TAG.fullmatch(tag)}
+            if not time_tags:
+                return sorted(chunks, key=lambda chunk: chunk.score, reverse=True)[:top_k]
+            if any(_TIME_TAG.fullmatch(tag) for chunk in chunks for tag in chunk.tags):
+                year_tags = {tag for tag in time_tags if tag.endswith("年")}
+                # Match the whole year/month first, then the parent year, then fallback material.
+                chunks.sort(key=lambda chunk: (
+                    time_tags.issubset(chunk.tags),
+                    bool(year_tags.intersection(chunk.tags)),
+                    chunk.score,
+                ), reverse=True)
+            # Without returned time metadata, keep upstream tag priority rather than guessing dates.
+            return chunks[:top_k]
 
         if not chunks:
             return []
@@ -461,6 +475,10 @@ class RagSearchBackend:
                     page_index=page_index,
                     line=line,
                     page=page,
+                    tags=tuple(dict.fromkeys(
+                        tag.strip() for tag in record.get("tags", [])
+                        if isinstance(tag, str) and tag.strip()
+                    )) if isinstance(record.get("tags"), list) else (),
                 )
             )
             if len(chunks) >= limit:

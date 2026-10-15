@@ -26,3 +26,4 @@ class RagChunk:
     page_index: Optional[int] = None
     line: Optional[int] = None
     page: Optional[int] = None
+    tags: tuple[str, ...] = ()
