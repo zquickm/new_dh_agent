@@ -95,8 +95,8 @@ class SpatialElementQuery(QueryModel):
     geometryFormat: Literal["geojson"] = "geojson"
     orderBy: Optional[str] = Field(default=None, min_length=1, description="排序字段，须来自要素详情。")
     orderDirection: Literal["asc", "desc"] = Field(default="asc", description="排序方向。")
-    limit: int = Field(default=20, ge=1, description="每页条数上限，不超过要素 maxQueryLimit；每次调用只返回一页。")
-    offset: int = Field(default=0, ge=0, description="分页偏移；下一页使用当前 offset 加 returned。total 为总匹配数，returned 为本页数。")
+    limit: int = Field(default=20, ge=1, description="每次接口请求的条数上限，不超过要素 maxQueryLimit；默认由工具自动翻页并合并全部结果，不限制合并总数。")
+    offset: int = Field(default=0, ge=0, description="起始偏移，获取全部信息保持 0；默认自动取到末尾。total 为总匹配数，returned 为本次合并条数；fetch_all=false 时仅为单页。")
 
     @model_validator(mode="after")
     def validate_mode(self) -> SpatialElementQuery:

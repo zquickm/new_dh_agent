@@ -28,7 +28,7 @@ description: 查询区域空间要素（观测站、断面测点及线面）并�
 - 某类别查询失败或不支持所需空间关系时，说明该类未完成查询，不当成不存在，也不改成无范围的属性查询。
 - 通用选区查询使用 `query={"element": dataKey, "mode": "spatial", "spatial": selected_area.spatial, "includeGeometry": true}`。普通分布查询优先省略 `fields`，使用服务默认字段；自选 `fields`、`conditions` 或 `orderBy` 时复用当前类别的字段定义，缺少定义才调用 `get_spatial_element_detail(dataKey=类别标识)`。字段名、用途、运算符及枚举值均以实际定义为准，不猜测或套用其他类别的字段。
 - 观测站分布、位置、基础详情、名称或类型筛选统一使用 `query_spatial_element`。按目录选择观测站类别，类型筛选通过 `query.conditions` 表达，保留原有区域条件；类型编码以该类别的定义为准。
-- 收到字段校验错误时，先核对当前类别的最新字段定义，再据此修正，不猜字段名连续重试。仅返回字段选择有误且默认字段满足需求时可省略 `fields`，不得删除用户要求的过滤、排序或空间条件绕过错误。
+- 收到字段校验错误时，先核对当前类别的最新字段定义，再据此修正，不猜字段名连续重试。原样使用字段定义中的名称、大小写及下划线，不在驼峰和下划线命名间自行转换。仅返回字段选择有误且默认字段满足需求时可省略 `fields`，不得删除用户要求的过滤、排序或空间条件绕过错误。
 - 同阶段互不依赖的查询在同一轮提交；依赖目录、字段定义或前一步结果的调用，等待实际返回后再执行。
 
 ## 观测站业务查询
@@ -51,8 +51,8 @@ description: 查询区域空间要素（观测站、断面测点及线面）并�
 ## 地图联动
 
 - “杭州湾有哪些观测站点”等地点或选区查询默认同时需要文字回答和地图展示，无需用户另说“标点”。通用查询设置 `query.includeGeometry=true`，取得 `result_ref` 后，点线面统一调用 `map_action(action_type="GEOJSON_ADD", payload={"result_ref":查询返回的引用})`，再完成回答。后端直接复用原始 Feature.id、geometry 和完整 properties，前端按 properties 展示详情；不要重新抄写 features、坐标或逐个组装弹窗。用户明确只要文字或仅为内部候选查找时不绘图；缺少有效坐标时说明限制，不编造点位。
-- `result_ref` 仅在当前任务内有效，不从历史复用；失效时按当前真实条件重新查询。其他数据来源没有引用时，仍可使用内联 `geojson` 或 `MARKER_ADD`；后者保留真实 `id`、`name`、`coordinates` 和已有属性，按真实字段组装 `popup_content`，不编造缺失信息。
-- 通用查询每次只返回一页。需要完整结果时，保持类别、范围、过滤及稳定排序，通过 `query.limit`、`query.offset` 补取；下一页偏移为当前偏移加本页 `returned`。返回零条或分页结果异常时停止并说明未取全。每页取得后可直接用对应 `result_ref` 展示，按分页顺序提交；后端默认 `offset=0` 替换图层、后续页追加，无需模型合并整批几何。若首个展示页的 offset 大于零，显式传 `replace=true`，避免混入旧图层。
+- `result_ref` 仅在当前任务内有效，不从历史复用；失效时按当前真实条件重新查询。引用模式的 `payload` 只传 `result_ref` 及必要的展示覆盖参数，不同时提供 `geojson`。其他数据来源没有引用时，仍可使用内联 `geojson`（同时必填 `layer_id`）或 `MARKER_ADD`；后者保留真实 `id`、`name`、`coordinates` 和已有属性，按真实字段组装 `popup_content`，不编造缺失信息。
+- `query_spatial_element` 和 `island_overview` 默认在一次工具调用内自动拉取并合并全部后续页，保持原类别、范围、过滤及排序；获取全部信息时从 `query.offset=0` 或 `page=1` 开始。`query.limit`、`size` 仅控制接口每批数量，不限制总结果，不需要模型逐页补取。通用查询用合并结果的一个 `result_ref` 一次提交地图展示。仅用户明确只要某一页时传顶层 `fetch_all=false`，沿用原 `limit/offset` 或 `page/size`；首个展示页 offset 大于零时显式传 `replace=true`，避免混入旧图层。
 - 业务观测站使用 `layer_id="observation-stations"`，属于同一图层的不同类别结果合并提交；其他要素按稳定类别标识分层。保留其他图层和有效选区，有选区时 `fit_bounds=false`。查询成功为空时可清除对应图层，失败时保留已有结果。
 - 已有数据库等工具返回的真实点位或几何可直接调用 `map_action` 展示，无需重复查询。位置和弹窗信息均未变化的已展示对象无需重复绘制；缺少弹窗时用相同真实标识补齐。单站追问复用真实坐标，缺少时用通用查询按真实站号获取；不按站号或返回顺序自行连线。
 - 飞行定位某个站点时，使用 `FLY_TO`，优先传 `payload.result_ref` 引用仅包含目标站点的单点查询结果；没有引用时在 `payload.geojson` 中传入仅包含目标站点的 FeatureCollection，保留查询返回的真实 Feature.id、Point geometry 和完整 properties（包括站号、站名及已有详情）。缺少几何或详情时先按真实站号查询并设置 `includeGeometry=true`。由几何自动确定飞行中心，不再只传 center 和 marker_name 丢弃详情；不要另加重复 MARKER_ADD。前端通过 GeoJSON 要素拾取展示 properties 中的真实信息。
@@ -61,7 +61,7 @@ description: 查询区域空间要素（观测站、断面测点及线面）并�
 ## 结果解释
 
 - 通用查询返回 GeoJSON FeatureCollection，按目录中文名、`total`、`returned` 和实际 `features.properties` 汇总；几何取自 `features.geometry`。不同目录可能重叠，不将数量相加作为去重总数，也不把本页分类计数当作全部记录的分类统计。
-- `total` 表示总匹配数，`returned` 表示本页返回数。根据实际取回记录、有效几何和已提交的地图指令说明覆盖范围；未取全、缺少几何或查询失败时说明限制，不把部分结果称为全部。
+- `total` 表示总匹配数，`returned` 表示通用查询本次合并取得的条数；`fetch_all=false` 时才是单页返回数。自动翻页返回的 `pagination.complete=true` 才表示取齐全部匹配结果；为 false 时必须说明 `pagination.warning` 和已取得数量，不重复提交相同查询碰运气。根据实际取回记录、有效几何和已提交的地图指令说明覆盖范围；未取全、缺少几何或查询失败时说明限制，不把部分结果称为全部。
 - 查询成功不等于地图展示；只有调用 `map_action` 后才能说明已提交展示指令。工具回执不代表前端渲染完成，不声称已显示全部结果。
 - 仅成功查询的 `total=0` 表示无匹配；失败、未查或截断不等于不存在。空结果不自动放宽范围、类型或时间；失败只在参数可据已有信息纠正时重试，不擅换业务数据源。
 - 在线状态与观测新鲜度分开解释，说明观测时间，“最新”不等于实时。趋势和区间数据有采样或条数限制时说明覆盖范围；缺失值不补零。数据可用但坐标缺失时回答已有数据，不承诺已定位。

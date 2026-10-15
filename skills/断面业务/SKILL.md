@@ -16,7 +16,7 @@ description: 指导东海 E1、E2、E3 三条断面及辅助点的业务、数�
 - 调查断面及其站位、辅助点的位置、基础属性和分布，使用 `spatial_query_service` 的通用查询；历史观测、跨期统计和描述性评价使用 `database_query`。空间记录不能代替历史观测数据，不为查询基础信息重复调用数据库。
 - 通用查询通过 `spatial_query_service(operation=操作名, ...)` 调用：缺少目录结果时，先单独调用 `list_spatial_elements` 并等待返回，再选择目标类别并原样使用其 `dataKey`；已有目录结果可复用。默认字段满足需求时直接 `query_spatial_element(query=查询条件)`，自选字段、过滤或排序前复用该类别字段定义，缺少时调用 `get_spatial_element_detail(dataKey=类别标识)`。例如目录返回断面测点 `dataKey="dm_duanmian"`，则详情参数 `dataKey` 和查询参数 `query.element` 均用该值；`transect-stations` 仅为地图 `layer_id`，不得作为查询类别或据此推导类别。完整保留断面、站位及选区条件，不猜字段名或放宽为全库查询。
 - 收到“要素/图层未注册”时重新查询目录；仅在目录能确定目标类别时，保留原条件修正一次。目录无目标类别或修正后仍失败时说明限制，不猜别名重试。
-- 查询断面位置或分布时默认设置 `query.includeGeometry=true`，取得真实点位后调用 `map_action` 展示。测点使用 `layer_id="transect-stations"`，每项保留真实标识、名称、坐标和基于查询属性组装的 `popup_content`（`title`、`fields` 中的 `label/value`）；保留其他图层及有效选区。通用查询每次只返回一页，按实际 `total`、`returned` 使用 `query.limit/offset` 补取；同一图层点位合并提交，未取全或坐标缺失时说明展示范围。仅查询位置、基础属性或分布时不打开无关专题图。
+- 查询断面位置或分布时默认设置 `query.includeGeometry=true`，取得真实点位后调用 `map_action` 展示。测点使用 `layer_id="transect-stations"`，每项保留真实标识、名称、坐标和基于查询属性组装的 `popup_content`（`title`、`fields` 中的 `label/value`）；保留其他图层及有效选区。通用查询默认从 `query.offset=0` 自动翻页并合并全部结果，`limit` 仅控制每批数量，无需模型逐页补取；同一图层点位合并提交，`pagination.complete=false` 时说明未取全的 warning，坐标缺失时说明展示范围。仅查询位置、基础属性或分布时不打开无关专题图。
 - 仅要求专题出图或打开分析浮层时使用 `dm_duanmian_analysis`，由前端查询出图，无需额外查询数据库或调用 `map_action`。
 - 地图选区中的业务观测站，以及明确站名的状态、详情、最新观测、趋势或时间区间数据，使用 `spatial_query_service`。
 - 断面业务信息、报告、制度和其他非结构化资料，使用 `rag_search`，必须使用标签：`断面`优先查询相关文档。
