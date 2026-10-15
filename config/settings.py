@@ -269,6 +269,7 @@ class BusinessScenarioSettings(BaseModel):
 
 
 class RagToolSettings(BaseModel):
+    buffer_token_budget: int = Field(default=60000, gt=0)
     base_url: str = ""
     recall_path: str = "/rag-platform-default/zsgl/knowledgeRecall"
     recall_url: str = ""

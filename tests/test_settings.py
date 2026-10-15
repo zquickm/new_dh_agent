@@ -19,6 +19,15 @@ from config.settings import (
 
 
 class SettingsTest(unittest.TestCase):
+    def test_rag_buffer_budget_loads_and_validates_environment_overrides(self):
+        self.assertEqual(get_settings().tools.rag.buffer_token_budget, 60000)
+        with patch.dict(os.environ, {"NEW_DH_TOOLS__RAG__BUFFER_TOKEN_BUDGET": "32000"}):
+            self.assertEqual(Settings().tools.rag.buffer_token_budget, 32000)
+        for value in ("0", "-1"):
+            with patch.dict(os.environ, {"NEW_DH_TOOLS__RAG__BUFFER_TOKEN_BUDGET": value}):
+                with self.assertRaises(ValidationError):
+                    Settings()
+
     def test_react_defaults_and_all_profiles_use_twenty_rounds(self):
         self.assertEqual(ReactSettings().max_rounds, 20)
         common = yaml.safe_load((CONFIG_DIR / "application.yaml").read_text(encoding="utf-8"))

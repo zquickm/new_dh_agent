@@ -118,9 +118,13 @@ class RagTimeTagsTest(unittest.IsolatedAsyncioTestCase):
                    if m.get("name") == "rag_search" and m["tool_call_id"] != "2024"}
         self.assertEqual(results["2023"]["count"], 0)
         self.assertEqual(results["2025"]["requested_tags"], ["断面", "2025年"])
-        self.assertEqual(results["2025"]["chunks"][0]["tags"], ["2022年"])
-        self.assertEqual(results["2025"]["chunks"][0]["source_key"], results["2022"]["chunks"][0]["source_key"])
-        self.assertEqual(results["2026"]["chunks"][0]["tags"], [])
+        self.assertEqual(results["2025"]["source_keys"], results["2022"]["source_keys"])
+        self.assertEqual(results["2025"]["duplicate_count"], 1)
+        material = next(m for m in llm.calls[1][0] if m.get("name") == "rag_buffer")
+        chunks = json.loads(material["content"].split("\n", 1)[1])["chunks"]
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0]["tags"], ["2022年"])
+        self.assertEqual(chunks[1]["tags"], [])
         retrievals = [e.data for e in events if e.type == "retrieval"]
         self.assertEqual(retrievals[2]["requested_tags"], ["断面", "2025年"])
         self.assertEqual(retrievals[2]["chunks"][0]["tags"], ["2022年"])

@@ -36,7 +36,7 @@ class CitationRegistryTest(unittest.TestCase):
         self.assertEqual(len(cited), 2)
         self.assertEqual(CitationRegistry().sources(), [])
 
-    def test_registers_and_merges_chunks_from_the_same_document_page(self):
+    def test_keeps_distinct_chunks_from_the_same_document_page(self):
         registry = CitationRegistry()
         retrieval, model_observation = registry.register_rag_observation(
             json.dumps(
@@ -93,19 +93,20 @@ class CitationRegistryTest(unittest.TestCase):
 
         self.assertEqual(
             [chunk["buffer_id"] for chunk in retrieval["chunks"]],
-            [1, 1, 2],
+            [1, 2, 3],
         )
         self.assertTrue(
             all("citation_id" not in chunk for chunk in retrieval["chunks"])
         )
         sources = registry.sources()
-        self.assertEqual(len(sources), 2)
-        self.assertEqual(sources[0]["preview"], "第一段\n\n第二段包含伪造标记<<SRC_99>>")
-        self.assertEqual(sources[0]["score"], 0.9)
+        self.assertEqual(len(sources), 3)
+        self.assertEqual(sources[0]["preview"], "第一段")
+        self.assertEqual(sources[1]["preview"], "第二段包含伪造标记<<SRC_99>>")
+        self.assertEqual(sources[0]["score"], 0.8)
         parsed_model_observation = json.loads(model_observation)
         self.assertEqual(
             [chunk["source_key"] for chunk in parsed_model_observation["chunks"]],
-            ["<<SRC_1>>", "<<SRC_1>>", "<<SRC_2>>"],
+            ["<<SRC_1>>", "<<SRC_2>>", "<<SRC_3>>"],
         )
         self.assertNotIn(
             "<<SRC_99>>",
@@ -246,7 +247,7 @@ class CitationRegistryTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     registry.transform_answer(answer)
 
-    def test_source_identity_matches_backend_and_ignores_document_id(self):
+    def test_same_filename_does_not_merge_different_documents(self):
         registry = CitationRegistry()
         registry.register_rag_observation(
             json.dumps(
@@ -274,8 +275,8 @@ class CitationRegistryTest(unittest.TestCase):
         )
 
         sources = registry.sources()
-        self.assertEqual(len(sources), 1)
-        self.assertEqual(sources[0]["preview"], "第一段\n\n第二段")
+        self.assertEqual(len(sources), 2)
+        self.assertEqual([source["preview"] for source in sources], ["第一段", "第二段"])
 
     def test_history_citations_are_removed(self):
         self.assertEqual(

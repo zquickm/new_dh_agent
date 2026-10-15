@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any, Optional
@@ -42,7 +43,7 @@ class CitationRegistry:
 
     def __init__(self, sources: Optional[list[dict[str, Any]]] = None) -> None:
         self._sources: list[dict[str, Any]] = []
-        self._known: dict[tuple[str, Optional[int], str], dict[str, Any]] = {}
+        self._known: dict[tuple[Any, ...], dict[str, Any]] = {}
         self._display_ids: dict[int, int] = {}
         for source in sources or []:
             self._register_persisted_source(source)
@@ -309,12 +310,15 @@ class CitationRegistry:
     ) -> dict[str, Any]:
         page_index = _optional_int(item.get("page_index"))
         line = _optional_int(item.get("line"))
-        location = page_index if page_index is not None else line
-        document = str(
-            item.get("knowledge_id")
-            or source_name
-        ).strip().casefold()
-        identity = (document, location, source_name.strip().casefold())
+        knowledge_id = str(item.get("knowledge_id") or "").strip()
+        chunk_id = str(item.get("chunk_id") or "").strip()
+        document = str(item.get("document_id") or source_name).strip()
+        text_hash = hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+        identity = (
+            (knowledge_id, chunk_id, text_hash)
+            if chunk_id else
+            (knowledge_id, document, page_index, line, text_hash)
+        )
         source = self._known.get(identity)
         if source is None:
             existing_ids = [
@@ -330,6 +334,8 @@ class CitationRegistry:
                 "title": item.get("title"),
                 "url": item.get("url"),
                 "page_index": page_index,
+                "page": _optional_int(item.get("page")),
+                "document_id": item.get("document_id"),
                 "chunk_id": item.get("chunk_id"),
                 "knowledge_id": item.get("knowledge_id"),
             }

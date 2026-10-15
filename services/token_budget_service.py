@@ -134,6 +134,7 @@ class TokenBudgetService:
         history_group_sizes: tuple[int, ...],
         original_history_count: int,
         tools: list[dict[str, Any]] | None,
+        truncate_tools: bool = True,
     ) -> ContextBudgetResult:
         fitted = [dict(message) for message in messages]
         groups = list(history_group_sizes)
@@ -141,7 +142,7 @@ class TokenBudgetService:
             del fitted[1 : 1 + groups.pop(0)]
 
         truncated = 0
-        while self.counter.count_request(fitted, tools) > self.input_budget_tokens:
+        while truncate_tools and self.counter.count_request(fitted, tools) > self.input_budget_tokens:
             tool_index = next(
                 (
                     index

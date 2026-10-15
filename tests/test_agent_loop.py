@@ -84,8 +84,11 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             for messages, _ in llm.calls[1:3]:
                 self.assertNotIn(evidence, messages[0]["content"])
                 result = next(item for item in messages if item.get("tool_call_id") == "rag")
-                self.assertEqual(json.loads(result["content"])["chunks"][0]["text"], evidence)
-                self.assertEqual(json.loads(result["content"])["chunks"][0]["source_key"], "<<SRC_1>>")
+                self.assertNotIn(evidence, result["content"])
+                self.assertEqual(json.loads(result["content"])["source_keys"], ["<<SRC_1>>"])
+                material = next(item for item in messages if item.get("name") == "rag_buffer")
+                self.assertIn(evidence, material["content"])
+                self.assertEqual(sum(evidence in str(m.get("content")) for m in messages), 1)
             self.assertEqual("".join(event.content for event in events if event.type == "answer_delta"),
                              "报告结论[[cite:1]]")
             history = [ChatMessage(role="user", content="查询资料")]
@@ -467,14 +470,16 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
             item for item in final_messages
             if item.get("tool_call_id") == "call-rag"
         )
-        self.assertIn("报告依据", rag_tool_message["content"])
+        self.assertNotIn("报告依据", rag_tool_message["content"])
         self.assertNotIn("报告依据", final_messages[0]["content"])
-        self.assertEqual(json.loads(rag_tool_message["content"])["chunks"][0]["source_key"], "<<SRC_1>>")
+        self.assertEqual(json.loads(rag_tool_message["content"])["source_keys"], ["<<SRC_1>>"])
+        self.assertEqual(final_messages[-1]["name"], "rag_buffer")
         self.assertEqual(
             sum("报告依据" in str(item.get("content") or "") for item in final_messages),
             1,
         )
-        self.assertIn('"avg": 30.1', final_messages[-1]["content"])
+        database_result = next(item for item in final_messages if item.get("name") == "database_query")
+        self.assertIn('"avg": 30.1', database_result["content"])
 
     async def test_explicit_map_actions_are_not_suppressed_after_other_events(self):
         llm = FakeLlm(

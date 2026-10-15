@@ -95,7 +95,7 @@ business_scenarios:
         - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
           name: "核心业务"
           recall_top_n: 50
-          top_n: 14
+          top_n: 12
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
           recall_top_n: 20
@@ -138,11 +138,11 @@ business_scenarios:
         - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
           name: "政策法规与标准规范"
           recall_top_n: 25
-          top_n: 5
+          top_n: 4
         - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
           name: "核心业务"
           recall_top_n: 25
-          top_n: 5
+          top_n: 4
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
           recall_top_n: 50
@@ -161,7 +161,7 @@ business_scenarios:
         - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
           name: "核心业务"
           recall_top_n: 50
-          top_n: 14
+          top_n: 12
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
           recall_top_n: 20
@@ -181,7 +181,7 @@ business_scenarios:
         - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
           name: "核心业务"
           recall_top_n: 50
-          top_n: 14
+          top_n: 12
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
           recall_top_n: 20
@@ -202,7 +202,7 @@ business_scenarios:
         - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
           name: "核心业务"
           recall_top_n: 50
-          top_n: 14
+          top_n: 12
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
           recall_top_n: 20
@@ -219,11 +219,11 @@ business_scenarios:
         - knowledge_id: "${RAG_POLICY_KNOWLEDGE_ID:KLB_6f3b2a4e0182429fad6edfc91ebc0854}"
           name: "政策法规与标准规范"
           recall_top_n: 30 
-          top_n: 6
+          top_n: 5
         - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
           name: "核心业务"
           recall_top_n: 50
-          top_n: 13
+          top_n: 12
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
           recall_top_n: 20
@@ -244,7 +244,7 @@ business_scenarios:
         - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
           name: "核心业务"
           recall_top_n: 50
-          top_n: 14
+          top_n: 12
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
           recall_top_n: 20
@@ -265,7 +265,7 @@ business_scenarios:
         - knowledge_id: "${RAG_BUSINESS_KNOWLEDGE_ID:KLB_14a237908da04979b7f0154c15689f46}"
           name: "核心业务"
           recall_top_n: 50
-          top_n: 14
+          top_n: 12
         - knowledge_id: "${RAG_LITERATURE_KNOWLEDGE_ID:KLB_f0a1998795cf4b0c90b87b180da88162}"
           name: "海洋图书与文献"
           recall_top_n: 20
@@ -284,6 +284,7 @@ tools:
     max_retries: 1
     retry_backoff: 0.3
   rag:
+    buffer_token_budget: 70000 # 本轮共享切片区 token 上限
     base_url: "http://71.10.60.34:18000"
     recall_path: "/rag-platform-default/zsgl/knowledgeRecall"
     recall_url: ""
@@ -301,7 +302,7 @@ tools:
     max_retries: 1
     retry_backoff: 0.5
     rerank:
-      enabled: false
+      enabled: true # 切片区超限时统一重排；每库召回路径不变
       base_url: "http://71.10.60.34:18000"
       path: "/maas-712f5806/v1/rerank"
       url: ""
