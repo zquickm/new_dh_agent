@@ -73,3 +73,12 @@ async def get_events(
 ):
     result = await service.get_events(conversation_id, run_id, after_sequence=after_sequence, page_size=page_size)
     return response(result, admin_id=admin_id, conversation_id=conversation_id, run_id=run_id)
+
+
+@router.get("/{conversation_id}/runs/{run_id}/rag-debug/{capture_id}")
+async def get_rag_capture(
+    conversation_id: str, run_id: str, capture_id: str,
+    admin_id: int = Depends(get_current_admin_id),
+):
+    result = await service.get_rag_capture(conversation_id, run_id, capture_id)
+    return response(result, admin_id=admin_id, conversation_id=conversation_id, run_id=run_id)

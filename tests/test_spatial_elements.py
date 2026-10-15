@@ -9,6 +9,7 @@ from aiohttp import web
 
 from agents.agent_loop import AgentLoop
 from agents.skills import SkillCatalog
+from agents.tools.duanmian_element_compare import execute_duanmian_element_compare
 from agents.tools.executor import ToolExecutor
 from agents.tools.load_skill import load_skill
 from agents.tools.map_action import execute_map_action, spatial_map_results
@@ -402,6 +403,68 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(actions[0]["payload"]["markers"][0]["coordinates"], [122.5, 31.3])
                 self.assertTrue(all("clear_selection" not in action for action in actions))
                 self.assertTrue(all(event.tool_name == "map_action" for event in events if event.type == "map_action"))
+
+    @patch("services.context_service.expand_query_synonyms", new=lambda text: text)
+    async def test_transect_map_and_comparison_share_existing_action_flow(self):
+        catalog = SkillCatalog(Path(__file__).resolve().parents[1] / "skills")
+        self.executor.register("load_skill", "加载能力", lambda name: load_skill(catalog, name))
+        self.executor.register("dm_duanmian_element_compare", "断面要素对比", execute_duanmian_element_compare)
+        self.results["list"] = [{"dataKey": "test_transects", "dataName": "测试断面线"}]
+        self.results["detail"] = {
+            "dataKey": "test_transects", "maxQueryLimit": 100,
+            "fields": [{"name": "section", "type": "string", "operatorWhitelist": ["="]}],
+        }
+        features = [{
+            "type": "Feature", "id": section, "properties": {"section": section, "name": section + "断面"},
+            "geometry": {"type": "LineString", "coordinates": [[122, 30 + index], [123, 30 + index]]},
+        } for index, section in enumerate(("E1", "E2", "E3"))]
+        self.element_results = {"test_transects": {"type": "FeatureCollection", "total": 3, "features": features}}
+        query = {
+            "element": "test_transects", "includeGeometry": True, "limit": 1,
+            "conditions": [{"field": "section", "operator": "=", "value": section} for section in ("E1", "E2", "E3")],
+            "conditionLogic": "OR",
+        }
+        months = ["2025-11", "2024-11"]
+
+        class TransectLlm(FakeLlm):
+            async def stream(self, messages, tools=None, temperature=0):
+                # Consume the real query reference instead of copying geometry into the model call.
+                result = next((json.loads(m["content"]) for m in messages
+                               if m.get("tool_call_id") == "query-transects"), None)
+                if result and not any(m.get("tool_call_id") == "map-transects" for m in messages):
+                    self.responses = iter([
+                        ([], [{"id": "map-transects", "name": "map_action", "args": {
+                            "action_type": "GEOJSON_ADD", "payload": {"result_ref": result["result_ref"]},
+                        }}]),
+                        (["已提交三条断面地图及 E1007 测点对比指令。"], []),
+                    ])
+                async for item in super().stream(messages, tools=tools, temperature=temperature):
+                    yield item
+
+        llm = TransectLlm([
+            ([], [{"id": "skill", "name": "load_skill", "args": {"name": "断面业务"}}]),
+            ([], [{"id": "list", "name": TOOL_NAME, "args": {"operation": "list_spatial_elements"}}]),
+            ([], [{"id": "detail", "name": TOOL_NAME, "args": {
+                "operation": "get_spatial_element_detail", "dataKey": "test_transects",
+            }}]),
+            ([], [
+                {"id": "query-transects", "name": TOOL_NAME, "args": {"operation": "query_spatial_element", "query": query}},
+                {"id": "compare", "name": "dm_duanmian_element_compare", "args": {"months": months, "station": "E1007"}},
+            ]),
+        ])
+        agent = AgentLoop(llm, self.executor, skills=catalog)
+        events = [event async for event in agent.run_stream("2025年11月与2024年11月 E1007 各类要素对比情况", [])]
+        self.assertTrue(all(event.success for event in events if event.type == "tool_finished"))
+        actions = [event.data for event in events if event.type == "map_action"]
+        self.assertEqual([action["action_type"] for action in actions], ["dm_duanmian_element_compare", "GEOJSON_ADD"])
+        self.assertEqual(actions[0]["payload"], {"months": months, "station": "E1007"})
+        self.assertEqual(actions[1]["payload"], {
+            "layer_id": "spatial-element:test_transects", "replace": True, "fit_bounds": False,
+            "geojson": {"type": "FeatureCollection", "features": features},
+        })
+        self.assertEqual([request["payload"] for request in self.requests if request["method"] == "POST"], [
+            query, {**query, "offset": 1}, {**query, "offset": 2},
+        ])
 
     @patch("services.context_service.expand_query_synonyms", new=lambda text: text)
     async def test_result_references_render_original_pages_and_expire_after_run(self):

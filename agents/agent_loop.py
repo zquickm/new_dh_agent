@@ -24,6 +24,7 @@ from agents.tools.registry import build_skill_catalog, build_tool_executor
 from config.settings import get_settings
 from schemas.chat import ChatMessage, FrontContext, FrontendContext
 from services.context_service import ContextService, SYSTEM_PROMPT
+from services.rag_debug_service import rag_debug_scope
 from services.business_scenario import resolve_rag_scenario
 from services.token_budget_service import (
     DeepSeekV4TokenCounter,
@@ -168,6 +169,7 @@ class AgentLoop:
         context_usage_callback: Callable[[dict[str, Any]], Any] | None = None,
         model_messages_callback: Callable[[list[dict[str, Any]]], Any] | None = None,
         tool_progress_callback: Callable[[dict[str, Any]], Any] | None = None,
+        rag_debug_callback: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         rag_buffer = RagChunkBuffer(
             question, get_settings().tools.rag.buffer_token_budget,
@@ -528,6 +530,15 @@ class AgentLoop:
                     error_message = None
                     retryable = False
                     audit_observation = ""
+
+                    async def on_rag_debug(stage, data):
+                        if rag_debug_callback is not None:
+                            await rag_debug_callback(stage, {
+                                **data, "tool_call_id": tool_call["id"],
+                                "round_number": round_number,
+                                **({"original_question": question} if stage == "query" else {}),
+                            })
+
                     try:
                         token = spatial_map_results.set(map_results)
                         try:
@@ -543,9 +554,10 @@ class AgentLoop:
                             execute_kwargs = {"enabled_skill_names": enabled_skill_names}
                             if registered_tool and registered_tool.contextual:
                                 execute_kwargs["context"] = ToolContext(on_progress=on_progress, rag_scenario=rag_scenario)
-                            observation, client_events = await tools.execute_with_events(
-                                name, tool_call["args"], **execute_kwargs
-                            )
+                            with rag_debug_scope(on_rag_debug if name == "rag_search" and rag_debug_callback is not None else None):
+                                observation, client_events = await tools.execute_with_events(
+                                    name, tool_call["args"], **execute_kwargs
+                                )
                         finally:
                             # Reset before yielding, including failure/cancellation paths.
                             spatial_map_results.reset(token)
@@ -566,6 +578,10 @@ class AgentLoop:
                                         else ""
                                     ),
                                 )
+                                await on_rag_debug("sources", {"chunks": [
+                                    {key: chunk.get(key) for key in ("rank", "buffer_id", "knowledge_id", "document_id", "chunk_id", "source")}
+                                    for chunk in retrieval_data["chunks"]
+                                ]})
                                 observation = rag_buffer.add(observation)
                             else:
                                 retrieval_data = None
@@ -582,6 +598,8 @@ class AgentLoop:
                             ) = semantic_error
                             failure_stage = "execution"
                     except asyncio.CancelledError as exc:
+                        if name == "rag_search":
+                            await on_rag_debug("tool_end", {"status": "cancelled", "complete": False})
                         duration_ms = max(
                             0, int((perf_counter() - tool_started_at) * 1000)
                         )
@@ -666,6 +684,12 @@ class AgentLoop:
                     duration_ms = max(
                         0, int((perf_counter() - tool_started_at) * 1000)
                     )
+                    if name == "rag_search":
+                        await on_rag_debug("tool_end", {
+                            "status": "succeeded" if success else "failed",
+                            "complete": success, "duration_ms": duration_ms, "error_code": error_code,
+                            "error_type": error_type, "failure_stage": failure_stage,
+                        })
                     if audit_recorder is not None:
                         await audit_recorder.finished(
                             tool_call_id=tool_call["id"],

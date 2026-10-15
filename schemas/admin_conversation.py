@@ -38,3 +38,7 @@ class AdminEventPage(AdminDebugResponse):
     items: list[dict[str, Any]]
     next_sequence: int
     has_more: bool
+
+
+class AdminRagCapture(AdminDebugResponse):
+    capture: dict[str, Any]

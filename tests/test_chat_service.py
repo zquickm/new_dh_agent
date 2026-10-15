@@ -77,6 +77,33 @@ class FakeAgent:
 
 
 class ChatServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_rag_debug_is_persisted_without_live_or_replay_exposure(self):
+        class DebugAgent(FakeAgent):
+            async def run_stream(self, question, history, run_id="-", *, rag_debug_callback=None):
+                await rag_debug_callback("query", {"tool_call_id": "call-1", "actual_query": "检索问题", "score": 0.6})
+                await rag_debug_callback("response", {"tool_call_id": "call-1", "body": {"records": ["候选原始资料" * 9000]}})
+                async for event in super().run_stream(question, history, run_id):
+                    yield event
+
+        service = ChatService()
+        service._agent = DebugAgent()
+        try:
+            events = [event async for event in service.stream_chat(AgentRequest(question="检索调试"), user_id=TEST_USER_ID)]
+            meta = next(event["data"] for event in events if event["event"] == "conversation")
+            saved = conversation_repository._run_events[(TEST_USER_ID, meta["run_id"])]
+            manifests = [event.data for event in saved if event.event == "rag_debug"]
+            self.assertEqual([item["stage"] for item in manifests], ["query", "response", "answer", "run_end"])
+            cited = next(item["data"]["cited_sources"] for item in manifests if item["stage"] == "answer")
+            self.assertEqual(cited[0]["chunk_id"], "chunk-1")
+            self.assertTrue(any(event.event == "rag_debug_part" for event in saved))
+            self.assertNotIn("候选原始资料", str(events))
+            self.assertFalse(any(event["event"].startswith("rag_debug") for event in events))
+            replayed, _ = await conversation_repository.list_run_events(meta["conversation_id"], meta["run_id"], after=0, user_id=TEST_USER_ID)
+            self.assertFalse(any(event.event.startswith("rag_debug") for event in replayed))
+            self.assertNotIn("候选原始资料", str(replayed))
+        finally:
+            await service.close()
+
     async def test_user_can_cancel_run_and_keep_partial_answer(self):
         release = asyncio.Event()
 

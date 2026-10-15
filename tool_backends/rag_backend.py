@@ -4,12 +4,16 @@ import asyncio
 import logging
 import os
 import re
-from dataclasses import replace
+from dataclasses import asdict, replace
+from datetime import datetime, timezone
+from time import perf_counter
+from uuid import uuid4
 from typing import Any, Optional
 
 import aiohttp
 
 from tool_backends.rag_models import RagChunk, RagToolError
+from services.rag_debug_service import record_rag_debug
 from tool_backends.rerank_backend import (
     DocumentReranker,
     VllmDocumentReranker,
@@ -255,6 +259,25 @@ class RagSearchBackend:
             retry_backoff=self.retry_backoff,
         )
         chunks = self._parse_recall(body, recall_limit)
+        raw_chunks = list(chunks)
+        parse_decisions = []
+        parsed_rank = 0
+        original_ranks = []
+        for index, record in enumerate(body["data"]["records"], start=1):
+            valid = isinstance(record, dict) and bool(_first_text(record.get("chunk_text"),
+                record.get("abstract_text"), record.get("question_text")))
+            if valid:
+                parsed_rank += 1
+                if parsed_rank <= recall_limit:
+                    original_ranks.append(index)
+            parse_decisions.append({"original_rank": index,
+                "parsed_rank": parsed_rank if valid else None,
+                "accepted": bool(valid and parsed_rank <= recall_limit),
+                "reason": "invalid_record_or_empty_text" if not valid else
+                    "beyond_recall_limit" if parsed_rank > recall_limit else "parsed"})
+        await record_rag_debug("parse", knowledge_id=knowledge_ids[0] if len(knowledge_ids) == 1 else None,
+            raw_count=len(body["data"]["records"]), parsed_count=len(chunks),
+            recall_top_n=recall_limit, decisions=parse_decisions)
         logger.info(
             "rag_recall_returned knowledge_ids=%s raw_count=%d parsed_count=%d",
             knowledge_ids, len(body["data"]["records"]), len(chunks),
@@ -263,8 +286,9 @@ class RagSearchBackend:
         if score_only:
             time_tags = {tag for tag in tags if _TIME_TAG.fullmatch(tag)}
             if not time_tags:
-                return sorted(chunks, key=lambda chunk: chunk.score, reverse=True)[:top_k]
-            if any(_TIME_TAG.fullmatch(tag) for chunk in chunks for tag in chunk.tags):
+                chunks.sort(key=lambda chunk: chunk.score, reverse=True)
+                sort_rule = "score_desc"
+            elif any(_TIME_TAG.fullmatch(tag) for chunk in chunks for tag in chunk.tags):
                 year_tags = {tag for tag in time_tags if tag.endswith("年")}
                 # Match the whole year/month first, then the parent year, then fallback material.
                 chunks.sort(key=lambda chunk: (
@@ -272,7 +296,16 @@ class RagSearchBackend:
                     bool(year_tags.intersection(chunk.tags)),
                     chunk.score,
                 ), reverse=True)
+                sort_rule = "time_tags_then_year_then_score"
+            else:
+                sort_rule = "upstream_order_without_time_metadata"
             # Without returned time metadata, keep upstream tag priority rather than guessing dates.
+            ranks = {id(chunk): rank for chunk, rank in zip(raw_chunks, original_ranks)}
+            await record_rag_debug("sort", knowledge_id=knowledge_ids[0] if len(knowledge_ids) == 1 else None,
+                sort_rule=sort_rule, requested_tags=tags, rerank_executed=False, fallback=False,
+                candidates=[{"original_rank": ranks[id(chunk)], "sorted_rank": index,
+                             "chunk": asdict(chunk), "within_recall_limit": index <= top_k}
+                            for index, chunk in enumerate(chunks, start=1)])
             return chunks[:top_k]
 
         if not chunks:
@@ -323,6 +356,20 @@ class RagSearchBackend:
             except Exception as exc:
                 raise RagToolError("知识库检索失败") from exc
             recalled_count = len(chunks)
+            candidates = []
+            kept_count = 0
+            for index, chunk in enumerate(chunks, start=1):
+                eligible = chunk.score >= threshold
+                kept = eligible and kept_count < keep
+                candidates.append({"sorted_rank": index, "chunk": asdict(chunk), "kept": kept,
+                    "final_rank": kept_count + 1 if kept else None,
+                    "reason": "kept" if kept else "below_score_threshold" if not eligible else "beyond_top_n"})
+                if kept:
+                    kept_count += 1
+            await record_rag_debug("filter", knowledge_id=knowledge_id, recall_top_n=recall,
+                top_n=keep, result_score_threshold=threshold, recalled_count=recalled_count,
+                above_threshold_count=sum(chunk.score >= threshold for chunk in chunks),
+                kept_count=kept_count, candidates=candidates, rerank_executed=False)
             chunks = [
                 chunk for chunk in chunks
                 if chunk.score >= threshold
@@ -355,8 +402,16 @@ class RagSearchBackend:
         retry_backoff: float,
     ) -> Any:
         last_error: Optional[BaseException] = None
+        request_id = str(uuid4())
         for attempt in range(max(0, max_retries) + 1):
             retryable = True
+            started = perf_counter()
+            common = {"request_id": request_id, "attempt": attempt + 1,
+                      "knowledge_id": (payload.get("knowledge_ids") or [None])[0]}
+            await record_rag_debug("request", **common, payload=payload,
+                started_at=datetime.now(timezone.utc).isoformat(), timeout=timeout,
+                max_retries=max_retries, retry_backoff=retry_backoff)
+            started = perf_counter()
             try:
                 session = await self._get_session()
                 request_timeout = aiohttp.ClientTimeout(
@@ -372,18 +427,36 @@ class RagSearchBackend:
                 ) as response:
                     if 200 <= response.status < 300:
                         try:
-                            return await response.json(content_type=None)
+                            body = await response.json(content_type=None)
                         except (aiohttp.ContentTypeError, ValueError) as exc:
+                            await record_rag_debug("response", **common, http_status=response.status,
+                                duration_ms=int((perf_counter() - started) * 1000),
+                                body=(await response.text()).replace(self.api_token, "[REDACTED]"),
+                                valid_json=False)
                             raise RagToolError(
                                 "RAG service returned invalid JSON"
                             ) from exc
-                    detail = (await response.text())[:300]
+                        await record_rag_debug("response", **common, http_status=response.status,
+                            duration_ms=int((perf_counter() - started) * 1000), body=body, valid_json=True)
+                        return body
+                    response_text = (await response.text()).replace(self.api_token, "[REDACTED]")
+                    await record_rag_debug("response", **common, http_status=response.status,
+                        duration_ms=int((perf_counter() - started) * 1000), body=response_text, valid_json=False)
+                    detail = response_text[:300]
                     last_error = RagToolError(
                         f"RAG service returned HTTP {response.status}: {detail}"
                     )
                     retryable = response.status == 429 or response.status >= 500
             except (aiohttp.ClientError, asyncio.TimeoutError, RagToolError) as exc:
                 last_error = exc
+            except asyncio.CancelledError:
+                await record_rag_debug("request_error", **common, error_type="CancelledError",
+                    duration_ms=int((perf_counter() - started) * 1000), cancelled=True)
+                raise
+            await record_rag_debug("request_error", **common,
+                error_type=type(last_error).__name__,
+                duration_ms=int((perf_counter() - started) * 1000),
+                will_retry=retryable and attempt < max_retries)
             if not retryable or attempt >= max_retries:
                 break
             delay = max(0.0, retry_backoff) * (2**attempt)

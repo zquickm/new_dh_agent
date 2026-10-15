@@ -639,6 +639,7 @@ class MySQLConversationRepository:
                     .where(
                         RunEventModel.run_id == run_id,
                         RunEventModel.sequence_no > after,
+                        RunEventModel.event_type.notin_(("rag_debug", "rag_debug_part")),
                     )
                     .order_by(RunEventModel.sequence_no)
                     .limit(limit)

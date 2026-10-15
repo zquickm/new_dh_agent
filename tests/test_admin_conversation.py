@@ -195,7 +195,7 @@ class AdminConversationApiTest(DatabaseFixture, unittest.TestCase):
         super().tearDown()
 
     def test_every_endpoint_requires_internal_gateway_identity_and_admin(self):
-        for path in ("", "/c1", "/c1/runs/r1", "/c1/runs/r1/events"):
+        for path in ("", "/c1", "/c1/runs/r1", "/c1/runs/r1/events", "/c1/runs/r1/rag-debug/test"):
             url = "/admin/conversations" + path
             self.assertEqual(self.client.get(url).status_code, 403)
             missing = {key: value for key, value in self.headers.items() if key != "X-User-Id"}
