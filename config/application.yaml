@@ -64,6 +64,10 @@ exact_qa:
   timeout: 5
   chunk_chars: 80
   chars_per_second: 40
+  thinking_title: "第 {round_number} 轮思考"
+  # thinking_summary: "正在查询QA库"  # Unset: show original reasoning content.
+  thinking_min_duration_ms: 2000
+  thinking_max_duration_ms: 5000
 
 skills:
   directory: skills

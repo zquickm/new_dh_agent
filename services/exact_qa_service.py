@@ -23,6 +23,11 @@ class ExactQaSnapshot(BaseModel):
         for block in self.reasoning.blocks:
             if block.type == "reasoning" and block.status == "streaming":
                 raise ValueError("Fixed answers must contain finished reasoning")
+        rounds = {block.round_number for block in self.reasoning.blocks if block.type == "reasoning"}
+        presentation = self.reasoning.model_extra.get("presentation")
+        if presentation is not None:
+            if any(item["round_number"] not in rounds for item in presentation.get("rounds", [])):
+                raise ValueError("Presentation requires a corresponding reasoning round")
         return self
 
     def provenance(self) -> dict:

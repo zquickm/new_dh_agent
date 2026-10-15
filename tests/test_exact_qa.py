@@ -41,6 +41,13 @@ def snapshot():
 
 class ExactQaChatTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        from config.settings import get_settings
+        settings = get_settings().model_copy(deep=True)
+        settings.exact_qa = ExactQaSettings(thinking_min_duration_ms=0, thinking_max_duration_ms=0)
+        self.settings = settings
+        settings_patch = patch("services.chat_service.get_settings", return_value=settings)
+        settings_patch.start()
+        self.addCleanup(settings_patch.stop)
         self.repository = MemoryConversationRepository()
         repo_patch = patch("services.chat_service.conversation_repository", self.repository)
         repo_patch.start()
@@ -189,6 +196,140 @@ class ExactQaChatTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("".join(chunks), text)
             self.assertEqual([call.args[0] for call in sleep.await_args_list], [len(chunk) / rate for chunk in chunks])
             self.assertAlmostEqual(sum(call.args[0] for call in sleep.await_args_list), len(text) / rate)
+
+    async def test_round_presentation_waits_once_preserves_original_and_replays(self):
+        value = snapshot().model_dump(by_alias=True)
+        # Two text blocks and a process share the same round and one deadline.
+        value["reasoning"]["blocks"][2]["round_number"] = 1
+        value["reasoning"]["presentation"] = {"rounds": [{"round_number": 1,
+            "title": "正在查询东溟知识库", "summary": "正在查询QA库",
+            "min_duration_ms": 2000, "max_duration_ms": 5000}]}
+        fixed = ExactQaSnapshot.model_validate(value)
+        self.matcher.match.return_value = fixed
+        clock = [100.0]
+        waits = []
+
+        async def wait(deadline):
+            waits.append(deadline)
+            clock[0] = max(clock[0], deadline)
+
+        with patch("services.chat_service.random.uniform", return_value=3200) as random_duration, \
+             patch("services.chat_service.perf_counter", side_effect=lambda: clock[0]), \
+             patch.object(self.service, "_wait_exact_qa_deadline", side_effect=wait):
+            events = await self.events()
+        random_duration.assert_called_once_with(2000, 5000)
+        self.assertEqual(waits, [103.2])
+        steps = [e["data"] for e in events if e["event"] == "process" and e["data"].get("display_only")]
+        self.assertTrue(all(s["title"] == "正在查询东溟知识库" and s["summary"] == "正在查询QA库" for s in steps))
+        self.assertEqual(steps[0]["status"], "running")
+        self.assertEqual(steps[-1]["status"], "success")
+        first_token = next(i for i, e in enumerate(events) if e["event"] == "token")
+        self.assertFalse(any(e["event"] == "process" for e in events[first_token:]))
+        done = events[-1]["data"]
+        self.assertEqual(done["reasoning"], fixed.reasoning.model_dump())
+        saved = await self.repository.get(done["conversation_id"], user_id="101")
+        self.assertEqual(saved.messages[-1].reasoning.model_dump(), fixed.reasoning.model_dump())
+        replay, _ = await self.repository.list_run_events(done["conversation_id"], done["run_id"], after=0, user_id="101")
+        rebuilt = empty_reasoning()
+        for event in replay:
+            if event.event in {"reasoning_delta", "reasoning_block", "process"}:
+                rebuilt = apply_reasoning_event(rebuilt, event.event, event.data)
+        self.assertEqual(rebuilt, fixed.reasoning.model_dump())
+        self.assertEqual(len(waits), 1, "Replay must not schedule another delay")
+
+    async def test_separate_rounds_use_global_defaults_and_empty_reasoning_still_waits(self):
+        self.settings.exact_qa = ExactQaSettings(thinking_title="知识检索 {round_number}",
+            thinking_min_duration_ms=1000, thinking_max_duration_ms=2000)
+        value = snapshot().model_dump(by_alias=True)
+        value["reasoning"]["blocks"] = [value["reasoning"]["blocks"][0], value["reasoning"]["blocks"][2]]
+        for block in value["reasoning"]["blocks"]:
+            block["content"] = ""
+        self.matcher.match.return_value = ExactQaSnapshot.model_validate(value)
+        clock = [0.0]
+        waits = []
+
+        async def wait(deadline):
+            waits.append(deadline)
+            clock[0] = deadline
+
+        with patch("services.chat_service.random.uniform", side_effect=[1000, 2000]) as choose, \
+             patch("services.chat_service.perf_counter", side_effect=lambda: clock[0]), \
+             patch.object(self.service, "_wait_exact_qa_deadline", side_effect=wait):
+            events = await self.events()
+        self.assertEqual(choose.call_count, 2)
+        self.assertEqual(waits, [1.0, 3.0])
+        steps = [e["data"] for e in events if e["event"] == "process"]
+        self.assertEqual([s["title"] for s in steps], ["知识检索 1", "知识检索 1", "知识检索 2", "知识检索 2"])
+
+    async def test_cancel_during_presentation_wait_stops_answer(self):
+        reached = asyncio.Event()
+
+        async def wait(deadline):
+            reached.set()
+            await asyncio.Event().wait()
+
+        self.settings.exact_qa.thinking_summary = "查询中"
+        with patch.object(self.service, "_wait_exact_qa_deadline", side_effect=wait):
+            stream = self.service.stream_chat(AgentRequest(question=snapshot().question), user_id="101")
+            first = await stream.__anext__()
+            await reached.wait()
+            await self.service.cancel_run(first["data"]["conversation_id"], first["data"]["run_id"], user_id="101")
+            events = [e async for e in stream]
+        self.assertEqual(events[-1]["event"], "cancelled")
+        self.assertFalse(any(e["event"] in {"token", "done"} for e in events))
+        self.assertEqual([e["data"]["status"] for e in events if e["event"] == "process"][-1], "skipped")
+
+    async def test_long_original_thinking_uses_round_deadline_instead_of_answer_rate(self):
+        value = snapshot().model_dump(by_alias=True)
+        block = value["reasoning"]["blocks"][0]
+        block["content"] = "很长的原始思考🌊\n" * 100
+        value["reasoning"]["blocks"] = [block]
+        self.matcher.match.return_value = ExactQaSnapshot.model_validate(value)
+        self.settings.exact_qa = ExactQaSettings(thinking_min_duration_ms=2000, thinking_max_duration_ms=2000)
+        clock = [0.0]
+        deadlines = []
+
+        async def wait(deadline):
+            deadlines.append(deadline)
+            clock[0] = max(clock[0], deadline)
+
+        with patch("services.chat_service.perf_counter", side_effect=lambda: clock[0]), \
+             patch.object(self.service, "_wait_exact_qa_deadline", side_effect=wait):
+            events = await self.events()
+        self.assertGreater(len(deadlines), 1)
+        self.assertEqual(clock[0], 2.0)
+        self.assertTrue(all(deadline <= 2 for deadline in deadlines))
+        text = "".join(e["data"]["content"] for e in events if e["event"] == "reasoning_delta")
+        self.assertEqual(text, block["content"])
+
+    async def test_no_reasoning_does_not_create_presentation_or_wait(self):
+        value = snapshot().model_dump(by_alias=True)
+        value["reasoning"]["blocks"] = []
+        self.matcher.match.return_value = ExactQaSnapshot.model_validate(value)
+        self.settings.exact_qa.thinking_summary = "查询中"
+        with patch.object(self.service, "_wait_exact_qa_deadline", new_callable=AsyncMock) as wait, \
+             patch("services.chat_service.random.uniform") as choose:
+            events = await self.events()
+        self.assertFalse(any(e["event"] in {"process", "reasoning_delta", "reasoning_block"} for e in events))
+        wait.assert_not_awaited()
+        choose.assert_not_called()
+
+    def test_presentation_validation_and_defaults(self):
+        self.assertEqual(ExactQaSettings().thinking_min_duration_ms, 2000)
+        self.assertEqual(ExactQaSettings().thinking_max_duration_ms, 5000)
+        with self.assertRaises(ValueError):
+            ExactQaSettings(thinking_min_duration_ms=5001)
+        for fields in ({"min_duration_ms": 10}, {"min_duration_ms": 2, "max_duration_ms": 1},
+                       {"min_duration_ms": True, "max_duration_ms": 3},
+                       {"min_duration_ms": 0, "max_duration_ms": 300001}, {"title": 12}):
+            value = snapshot().model_dump(by_alias=True)
+            value["reasoning"]["presentation"] = {"rounds": [{"round_number": 1, **fields}]}
+            with self.subTest(fields=fields), self.assertRaises(ValueError):
+                ExactQaSnapshot.model_validate(value)
+        value = snapshot().model_dump(by_alias=True)
+        value["reasoning"]["presentation"] = {"rounds": [{"round_number": 3}]}
+        with self.assertRaises(ValueError):
+            ExactQaSnapshot.model_validate(value)
 
 
 class ExactQaClientTest(unittest.IsolatedAsyncioTestCase):

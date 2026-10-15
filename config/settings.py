@@ -214,6 +214,16 @@ class ExactQaSettings(BaseModel):
     timeout: float = Field(default=5, gt=0)
     chunk_chars: int = Field(default=80, ge=1, le=4096)
     chars_per_second: float = Field(default=40, gt=0, allow_inf_nan=False)
+    thinking_title: str = Field(default="第 {round_number} 轮思考", max_length=200)
+    thinking_summary: str | None = Field(default=None, max_length=20000)
+    thinking_min_duration_ms: int = Field(default=2000, ge=0, le=300000)
+    thinking_max_duration_ms: int = Field(default=5000, ge=0, le=300000)
+
+    @model_validator(mode="after")
+    def thinking_duration_range(self):
+        if self.thinking_min_duration_ms > self.thinking_max_duration_ms:
+            raise ValueError("thinking_min_duration_ms must not exceed thinking_max_duration_ms")
+        return self
 
 
 class StreamSettings(BaseModel):

@@ -21,6 +21,19 @@ class SettingsTest(unittest.TestCase):
     def tearDown(self):
         clear_settings_cache()
 
+    def test_exact_qa_presentation_environment_overrides(self):
+        with patch.dict(os.environ, {
+            "NEW_DH_EXACT_QA__THINKING_TITLE": "知识库查询 {round_number}",
+            "NEW_DH_EXACT_QA__THINKING_SUMMARY": "查询中",
+            "NEW_DH_EXACT_QA__THINKING_MIN_DURATION_MS": "1000",
+            "NEW_DH_EXACT_QA__THINKING_MAX_DURATION_MS": "3000",
+        }):
+            settings = Settings().exact_qa
+            self.assertEqual(settings.thinking_title, "知识库查询 {round_number}")
+            self.assertEqual(settings.thinking_summary, "查询中")
+            self.assertEqual(settings.thinking_min_duration_ms, 1000)
+            self.assertEqual(settings.thinking_max_duration_ms, 3000)
+
     def test_new_scenarios_load_from_yaml_and_validate_nested_overrides(self):
         values = yaml.safe_load((CONFIG_DIR / "application.yaml").read_text(encoding="utf-8"))
         values["business_scenarios"]["政策协同分析评估"] = {

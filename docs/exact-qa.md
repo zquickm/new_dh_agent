@@ -113,7 +113,7 @@ reasoning_event_sequence。历史加载返回 reasoning_event_id，正文继续�
 `exact_qa.timeout` 默认 5 秒，`exact_qa.chunk_chars` 默认 80。
 `exact_qa.chars_per_second` 默认 40 字符/秒，可用
 `NEW_DH_EXACT_QA__CHARS_PER_SECOND=40` 配置为其他正有限数值。
-正文与思维文本共用此速率；按约 100 毫秒的粒度分块，单块不超过 chunk_chars。
+正文按此速率输出；按约 100 毫秒的粒度分块，单块不超过 chunk_chars。
 每次分块发送前异步等待对应字符数/速率的时间，数据库与网络延迟可能降低实际显示速度。
 复用 dictionaries.base_url、TLS 设置及 internal_request.token，无新增依赖。
 
@@ -136,3 +136,37 @@ reasoning_block 和 done.reasoning 仍然保留。
 此适配无需修改 dh-frontend。旧版组件会折叠文本空白，引用可能归并或重新编号；
 旧版历史加载不会恢复过程面板，且发送问题前会去除首尾空白。后端仍按收到的问题
 严格匹配并保存原始答案、思维及引用。普通模型问答保持模型实际输出速度。
+
+## 固定 QA 的思考展示配置
+
+旧版 dh-frontend 无需修改，继续通过 process.title、summary 和 running/success 等状态展示。
+仅固定 QA 回放读取以下全局设置（同名前缀环境变量 `NEW_DH_EXACT_QA__`）：
+
+- `thinking_title`：默认 `第 {round_number} 轮思考`，仅替换 `{round_number}` 占位符。
+- `thinking_summary`：可选；未配置时显示原始思维正文。
+- `thinking_min_duration_ms` / `thinking_max_duration_ms`：默认 2000 / 5000，整数毫秒，范围 0～300000。
+
+单条 QA 在现有 reasoning JSON 中可增加可选 presentation 元数据，例如：
+
+```json
+{
+  "schema_version": 1,
+  "blocks": [{"id":"r1","type":"reasoning","round_number":1,"status":"completed","content":"原始思维文本"}],
+  "presentation": {"rounds": [{"round_number":1,"title":"正在查询东溟知识库","summary":"正在查询QA库","min_duration_ms":2000,"max_duration_ms":5000}]}
+}
+```
+
+每轮覆盖优先于全局设置；未提供或 null 表示继承，显式空字符串表示显示空文案。
+界面留空会移除覆盖。时长上下限必须同时设置或同时继承，最短不得大于最长；相等为固定时长，0/0 可关闭模拟等待。
+配置轮次必须对应 reasoning 文本块且不可重复。标题最多 200 字符，展示文字最多 20000 字符。
+
+每轮只抽取一次目标时长，同轮多个块共享计时。先发送 running，短展示文案立即显示；
+原始思维文本未被文案覆盖时，其增量在目标时间内输出。计时结束后发送块原有结束状态，再输出答案。
+目标时间为回放调度时间，不包含前面的实际 QA 查询，持久化和网络开销可能使实际展示更长。
+正文仍默认 40 字符/秒，普通模型回答不采用模拟计时。
+无思维块时不添加思维或等待。取消会终止异步等待，断线重放复用已经记录的 process 事件，不重新抽取时间。
+
+presentation 随现有 QA 草稿/发布版本及助手消息的 reasoning_json 保存，原始 blocks.content 不被替换。
+reasoning_delta 可附带 presentation 元数据，事件重建时保留；投影 process 仍不混入原始思维块。
+配置修改需重新发布后生效。管理端支持逐轮设置；Excel 使用原有“完整思维JSON”列导入配置，保留旧格式兼容。
+本功能不新增表、列或迁移。

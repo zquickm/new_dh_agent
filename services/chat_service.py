@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import random
 import re
 from hashlib import sha256
 from collections.abc import AsyncIterator
@@ -375,12 +376,33 @@ class ChatService:
             "details": {}, "display_only": True,
         }
 
+    async def _wait_exact_qa_deadline(self, deadline):
+        await asyncio.sleep(max(0, deadline - perf_counter()))
+
     async def _run_exact_qa(self, request, snapshot: ExactQaSnapshot, conversation_id, run_id,
                             message_id, user_id, sink):
         answer = ""
         reasoning = empty_reasoning()
         last_sequence = 0
         reasoning_sequence = 0
+        settings = get_settings().exact_qa.model_copy(deep=True)
+        original_reasoning = snapshot.reasoning.model_dump()
+        presentation = original_reasoning.get("presentation")
+        overrides = {item["round_number"]: item for item in (presentation or {}).get("rounds", [])}
+
+        def project(block, sequence):
+            data = self._reasoning_process_data(block, sequence)
+            override = overrides.get(block["round_number"], {})
+            title = override.get("title")
+            data["title"] = (settings.thinking_title.replace("{round_number}", str(block["round_number"]))
+                             if title is None else title)
+            summary = override.get("summary", settings.thinking_summary)
+            if summary is None:
+                summary = settings.thinking_summary
+            if summary is not None:
+                data["summary"] = summary
+            return data
+
         heartbeat = asyncio.create_task(self._heartbeat_loop(run_id, user_id))
         cancellation = asyncio.create_task(self._cancellation_loop(
             conversation_id, run_id, user_id, asyncio.current_task()))
@@ -401,7 +423,7 @@ class ChatService:
                 block_id = data.get("block_id") or data["block"]["id"]
                 block = next(b for b in reasoning["blocks"] if b["id"] == block_id)
                 if block["type"] == "reasoning":
-                    await emit("process", self._reasoning_process_data(block, last_sequence))
+                    await emit("process", project(block, last_sequence))
 
         async def save_reasoning_status(status):
             nonlocal reasoning
@@ -410,21 +432,62 @@ class ChatService:
                 event_sequence=reasoning_sequence, user_id=user_id)
             for block in reasoning["blocks"]:
                 if block["type"] == "reasoning":
-                    await emit("process", self._reasoning_process_data(block, last_sequence))
+                    await emit("process", project(block, last_sequence))
 
         try:
             if "context" in request.model_fields_set:
                 await conversation_repository.save_map_context(conversation_id,
                     request.context or FrontendContext(), user_id=user_id, run_id=run_id)
             await emit("sources", {"sources": snapshot.sources, "answer_origin": "exact_qa"})
-            for block in snapshot.reasoning.model_dump()["blocks"]:
+            blocks = original_reasoning["blocks"]
+            last_in_round = {block["round_number"]: index for index, block in enumerate(blocks)}
+            round_characters = {}
+            for block in blocks:
                 if block["type"] == "reasoning":
-                    async for content in self._paced_exact_qa_chunks(block["content"]):
+                    number = block["round_number"]
+                    round_characters[number] = round_characters.get(number, 0) + len(block["content"])
+            deadlines = {}
+            durations = {}
+            for index, block in enumerate(blocks):
+                number = block["round_number"]
+                if block["type"] == "reasoning":
+                    if number not in deadlines:
+                        override = overrides.get(number, {})
+                        minimum = override.get("min_duration_ms")
+                        maximum = override.get("max_duration_ms")
+                        duration = random.uniform(
+                            settings.thinking_min_duration_ms if minimum is None else minimum,
+                            settings.thinking_max_duration_ms if maximum is None else maximum,
+                        ) / 1000
+                        durations[number] = duration
+                        deadlines[number] = perf_counter() + duration
+                    initial = {"block_id": block["id"], "round_number": number, "content": ""}
+                    if presentation is not None:
+                        initial["presentation"] = presentation
+                    await emit("reasoning_delta", initial)
+                    # Thinking has its own schedule; answer character rate remains independent.
+                    text = block["content"]
+                    total = round_characters[number]
+                    size = min(settings.chunk_chars, max(1, int(total / max(durations[number] * 10, 1))))
+                    custom_summary = overrides.get(number, {}).get("summary")
+                    if custom_summary is None:
+                        custom_summary = settings.thinking_summary
+                    started = perf_counter()
+                    for start in range(0, len(text), size):
+                        content = text[start:start + size]
+                        if custom_summary is None and total:
+                            target = started + durations[number] * min(start + size, len(text)) / total
+                            await self._wait_exact_qa_deadline(min(target, deadlines[number]))
                         await emit("reasoning_delta", {"block_id": block["id"],
-                            "round_number": block["round_number"], "content": content})
+                            "round_number": number, "content": content})
                 else:
                     await emit("process", block["data"])
-                await emit("reasoning_block", {"block": block})
+                    await emit("reasoning_block", {"block": block})
+                if index == last_in_round[number] and number in deadlines:
+                    await self._wait_exact_qa_deadline(deadlines[number])
+                    for finished in blocks:
+                        if finished["type"] == "reasoning" and finished["round_number"] == number:
+                            await emit("reasoning_block", {"block": finished})
             async for content in self._paced_exact_qa_chunks(snapshot.answer):
                 answer += content
                 await emit("token", {"content": content})
