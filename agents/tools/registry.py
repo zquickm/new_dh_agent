@@ -22,6 +22,12 @@ from agents.tools.duanmian_analysis import (
     TOOL_PARAMETERS as DUANMIAN_TOOL_PARAMETERS,
     execute_duanmian_analysis,
 )
+from agents.tools.duanmian_element_compare import (
+    TOOL_DESCRIPTION as DUANMIAN_COMPARE_TOOL_DESCRIPTION,
+    TOOL_NAME as DUANMIAN_COMPARE_TOOL_NAME,
+    TOOL_PARAMETERS as DUANMIAN_COMPARE_TOOL_PARAMETERS,
+    execute_duanmian_element_compare,
+)
 from agents.tools.executor import ToolExecutor
 from agents.tools.suspicion import SuspicionTools
 from agents.tools.map_action import (
@@ -106,6 +112,12 @@ def build_tool_executor(
         DUANMIAN_TOOL_DESCRIPTION,
         execute_duanmian_analysis,
         DUANMIAN_TOOL_PARAMETERS,
+    )
+    executor.register(
+        DUANMIAN_COMPARE_TOOL_NAME,
+        DUANMIAN_COMPARE_TOOL_DESCRIPTION,
+        execute_duanmian_element_compare,
+        DUANMIAN_COMPARE_TOOL_PARAMETERS,
     )
     SuspicionTools().register(executor)
     executor.register_closer(rag_tool.close)

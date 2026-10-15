@@ -28,7 +28,7 @@ run_id：本次对话运行 ID；同一次流式回答内保持不变。
 batch_id：动作批次 ID，当前使用产生动作的 tool_call_id。
 action_id：动作唯一 ID，格式为 "{batch_id}-{seq}"。
 seq：动作在同一批次内的顺序，从 1 开始递增。
-action_type：动作类型，必须使用本契约规定的名称，区分大小写；既有地图动作使用大写枚举，断面专题分析使用 dm_duanmian_analysis。
+action_type：动作类型，必须使用本契约规定的名称，区分大小写；既有地图动作使用大写枚举，断面专题分析使用 dm_duanmian_analysis，断面要素对比使用 dm_duanmian_element_compare。
 payload：动作参数对象，结构由 action_type 决定。
 
 四、动作类型及必填参数
@@ -47,6 +47,7 @@ HEATMAP_SHOW：data_type。
 TRACK_PLAY：track_type、track_id。
 COMPARE_STATIONS：station_ids、data_types。
 dm_duanmian_analysis：analysis；断面专题分析参数和消费规则见第十节。
+dm_duanmian_element_compare：months；断面要素对比参数和消费规则见第十一节。
 
 所有地图坐标统一使用 CGCS2000（EPSG:4490），点坐标格式统一为 [经度, 纬度]。
 各 payload 的可选字段、枚举和具体数据结构以《地图操作工具定义》为准。
@@ -156,3 +157,21 @@ data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":
 
 工具返回 success=true、message="action received" 仅表示动作已接收；event: done 仅表示智能体流式回答结束，两者均不代表前端图表已经渲染完成。当前协议没有前端出图完成回执。
 联调分别确认：聊天流包含该动作事件；前端正确识别并打开浮层；参数回填正确；使用实际存在的航次能够查询出图；不传航次时不自动查询；重复 action_id 不重复执行。
+
+十一、断面要素对比动作
+
+对应 openapi-duanmian-element-compare.yaml 的 operationId：dm_duanmian_element_compare。
+复用 event: map_action、version="1.0" 和既有 JSON 外层，action_type 原样使用小写工具名。
+前端将其映射至内部 DUANMIAN_ELEMENT_COMPARE 动作，打开「断面要素对比」独立浮层并自动出图。
+后端不调用 POST /api/duanmian_element_compare，不下发 X-API-Key。
+
+payload.months：必填，2–12个月份的数组，每项为有效的 yyyy-MM；按数组顺序对比，首月为变化基准。
+payload.station：E1/E2/E3 前缀的5位测点编码，未指定时后端填充 E1001。
+固定查询全量化学10项；同一测点同一月份取该月最后一次观测（航次），多层水深取表层。
+浮层仅展示单个测点的数据，不代表整个断面或全部测点。
+
+event: map_action
+data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":"conversation-1","run_id":"run-1","batch_id":"call-compare","action_id":"call-compare-1","seq":1,"action_type":"dm_duanmian_element_compare","payload":{"months":["2022-11","2021-11"],"station":"E1001"}}}
+
+工具返回 {"success":true,"months":[...],"station":"E1001"} 仅表示动作已接收，不包含实测数据，不代表前端已出图。
+参数无效时不发送动作。沿用 action_id 去重、同批次 seq 顺序规则；不要求先清图、标点或查询数据库。

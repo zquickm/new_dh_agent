@@ -45,6 +45,7 @@ _TOOL_DISPLAY_NAMES = {
     "spatial_query_service": "通用空间查询服务",
     "map_action": "地图操作",
     "dm_duanmian_analysis": "断面专题分析",
+    "dm_duanmian_element_compare": "断面要素对比",
     "analyze_suspicion": "疑点疑区研判",
     "query_suspicion_results": "疑点疑区结果查询",
     "summarize_suspicion_results": "疑点疑区结果统计",

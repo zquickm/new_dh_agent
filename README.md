@@ -143,7 +143,7 @@ NEW_DH_LLM__API_KEY=your-key
 
 ## RAG、数据库、观测、地图与专题分析工具
 
-Agent 已注册八个业务工具（括号内为协议调用标识）：
+Agent 已注册九个业务工具（括号内为协议调用标识）：
 
 - 东溟知识库检索（`rag_search`）：检索内部知识库并返回文档片段和来源。
 
@@ -243,6 +243,7 @@ Agent 已注册八个业务工具（括号内为协议调用标识）：
 - 通用空间查询服务（`spatial_query_service`）：查询注册空间要素的目录、基础属性和几何（含观测站），以及观测站在线状态、最新数据和时序数据。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
 - 断面专题分析（`dm_duanmian_analysis`）：发送断面专题分析出图参数，由前端打开独立浮层并查询出图。
+- 断面要素对比（`dm_duanmian_element_compare`）：按测点与2–12个月份联动全量化学要素对比浮层。
 
 - 疑点疑区研判（`analyze_suspicion`）：五步串行流程，实时进度，仅返回本次摘要。
 - 疑点疑区明细（`query_suspicion_results`）：先筛选再分页，默认第一页10个、最多20个。
@@ -485,6 +486,28 @@ data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":
 后续新增观测、海域等分析时，按现有方式增加独立工具模块，在
 `agents/tools/registry.py` 注册，并在 `services/chat_service.py` 添加中文展示名。
 新动作继续使用各自 operationId 和 payload，前端增加对应处理分支即可；不需要修改执行器或 SSE 编码器。
+
+### 断面要素对比动作
+
+`dm_duanmian_element_compare` 按伙伴提供的 `openapi-duanmian-element-compare.yaml`
+接入，沿用上述虚拟动作链路，不请求 `POST /api/duanmian_element_compare`。
+先加载“断面业务” Skill；跨月各类要素对比默认联动此浮层，需要文字分析时仍查询数据库。
+仅要求出图时无需查询数据库。用户明确不要图时不触发。
+
+- `months`：必填，2–12个有效的 `yyyy-MM`；保留数组顺序，首月为变化基准。
+- `station`：可选，E1/E2/E3 前缀的5位测点编码，缺省 `E1001`。
+- 前端固定查询全量化学10项；同站同月取最后一次观测（航次），多层水深取表层。
+  浮层展示单个测点，默认测点图不能代表三条断面的整体统计。
+
+```text
+event: map_action
+data: {"code":200,"message":"success","data":{"version":"1.0","conversation_id":"<会话ID>","run_id":"<运行ID>","batch_id":"call-compare","action_id":"call-compare-1","seq":1,"action_type":"dm_duanmian_element_compare","payload":{"months":["2022-11","2021-11"],"station":"E1001"}}}
+```
+
+SSE 的 `action_type` 原样使用工具 operationId `dm_duanmian_element_compare`，
+由前端映射至其内部 `DUANMIAN_ELEMENT_COMPARE` 动作并打开「断面要素对比」浮层。
+工具回执为 `{"success":true,"months":[...],"station":"E1001"}`，只确认指令接收，
+不代表前端出图完成。参数无效时不发送动作，并将具体错误返回模型以便修正。
 
 ### 地图选区上下文
 
