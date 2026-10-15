@@ -265,7 +265,7 @@ class MemoryConversationRepository:
             events = [
                 event.model_copy(deep=True)
                 for event in self._run_events.get(key, [])
-                if event.id > after
+                if event.id > after and event.event not in {"rag_debug", "rag_debug_part"}
             ][:limit]
             return events, run.status
 

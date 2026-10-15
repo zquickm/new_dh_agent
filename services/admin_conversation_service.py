@@ -5,8 +5,9 @@ from pydantic.alias_generators import to_camel
 from database.runtime import database_runtime
 from repositories.mysql_admin_conversation_repository import MySQLAdminConversationRepository
 from schemas.admin_conversation import (
-    AdminConversationDetail, AdminConversationPage, AdminEventPage, AdminRunDetail,
+    AdminConversationDetail, AdminConversationPage, AdminEventPage, AdminRunDetail, AdminRagCapture,
 )
+from services.rag_debug_service import restore_capture
 
 
 def database_datetime(value):
@@ -69,8 +70,20 @@ class AdminConversationService:
         if result is None:
             return None
         items, has_more = result
-        return AdminEventPage(items=[stored_record(item) for item in items], has_more=has_more,
+        records = []
+        for item in items:
+            record = stored_record(item)
+            if item.event_type == "rag_debug" and not item.payload.get("part_count"):
+                record["payload"] = restore_capture(item.payload, [])
+            records.append(record)
+        return AdminEventPage(items=records, has_more=has_more,
                               next_sequence=items[-1].sequence_no if items else after_sequence)
+
+    async def get_rag_capture(self, conversation_id, run_id, capture_id):
+        result = await self._repository.get_rag_capture(conversation_id, run_id, capture_id)
+        if result is None:
+            return None
+        return AdminRagCapture(capture=restore_capture(*result))
 
 
 admin_conversation_service = AdminConversationService(MySQLAdminConversationRepository(database_runtime))

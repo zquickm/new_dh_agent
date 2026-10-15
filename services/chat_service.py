@@ -25,6 +25,7 @@ from services.recommendation_service import generate_recommendations
 from services.sensitive_word_service import SensitiveWordMatcher
 from services.tool_audit_service import PersistentToolAuditRecorder
 from services.exact_qa_service import ExactQaService, ExactQaSnapshot
+from services.rag_debug_service import RagDebugWriter
 from schemas.reasoning import empty_reasoning, apply_reasoning_event, finish_reasoning
 
 
@@ -566,6 +567,14 @@ class ChatService:
             name=f"agent-cancellation-{run_id}",
         )
 
+        rag_debug_writer = RagDebugWriter(conversation_repository, run_id, user_id)
+        rag_debug_started = False
+
+        async def save_rag_debug(stage, data):
+            nonlocal rag_debug_started
+            rag_debug_started = True
+            await rag_debug_writer.record(stage, data)
+
         async def emit(event: dict) -> int:
             nonlocal reasoning, reasoning_sequence
             if event["event"] == "error":
@@ -692,6 +701,8 @@ class ChatService:
 
             if "tool_progress_callback" in run_stream_parameters:
                 run_stream_kwargs["tool_progress_callback"] = publish_tool_progress
+            if "rag_debug_callback" in run_stream_parameters:
+                run_stream_kwargs["rag_debug_callback"] = save_rag_debug
             async for event in self.agent.run_stream(
                 request.question,
                 history,
@@ -841,6 +852,11 @@ class ChatService:
                 run_status="completed",
                 model=self.agent.model_name,
             )
+            if rag_debug_started:
+                await rag_debug_writer.record("answer", {"status": "completed",
+                    "cited_sources": [source for source in cited_sources if source.get("source_type") != "database"],
+                    "note": "仅表示最终回答明确引用的来源，未引用不等于未使用",
+                    "previous_capture_failures": rag_debug_writer.failed_captures})
             logger.info(
                 "chat_completed run_id=%s conversation_id=%s duration_ms=%.1f "
                 "answer_chars=%d source_count=%d",
@@ -979,6 +995,11 @@ class ChatService:
             await asyncio.gather(
                 heartbeat_task, cancellation_task, return_exceptions=True
             )
+            if rag_debug_started:
+                await rag_debug_writer.record("run_end", {
+                    "previous_capture_failures": rag_debug_writer.failed_captures,
+                    "note": "运行已结束；成功、失败或取消状态以运行元数据为准，缺失阶段不可还原",
+                })
             event_sink.finish()
 
     async def _finalize_user_cancellation(

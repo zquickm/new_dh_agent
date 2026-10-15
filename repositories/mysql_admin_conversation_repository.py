@@ -98,5 +98,22 @@ class MySQLAdminConversationRepository:
                 return None
             events = (await session.execute(select(RunEventModel).where(
                 RunEventModel.run_id == run_id, RunEventModel.sequence_no > after_sequence,
+                RunEventModel.event_type != "rag_debug_part",
             ).order_by(RunEventModel.sequence_no.asc()).limit(page_size + 1))).scalars().all()
             return events[:page_size], len(events) > page_size
+
+    async def get_rag_capture(self, conversation_id, run_id, capture_id):
+        async with self._runtime.session_factory() as session:
+            if await self._run(session, conversation_id, run_id) is None:
+                return None
+            conditions = (RunEventModel.run_id == run_id,
+                          RunEventModel.payload["capture_id"].as_string() == capture_id)
+            manifest = (await session.execute(select(RunEventModel).where(
+                *conditions, RunEventModel.event_type == "rag_debug",
+            ))).scalar_one_or_none()
+            if manifest is None:
+                return None
+            parts = (await session.execute(select(RunEventModel.payload).where(
+                *conditions, RunEventModel.event_type == "rag_debug_part",
+            ).order_by(RunEventModel.sequence_no.asc()))).scalars().all() if manifest.payload.get("part_count") else []
+            return manifest.payload, parts

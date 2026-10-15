@@ -7,6 +7,7 @@ from agents.tools.context import ToolContext
 from config.settings import get_settings
 from services.business_scenario import is_xiamen_query, resolve_query_scenario
 from services.synonym_service import expand_query_synonyms
+from services.rag_debug_service import record_rag_debug
 from tool_backends.rag_backend import RagSearchBackend
 from tool_backends.rag_models import unique_file_sources
 
@@ -117,6 +118,7 @@ class RagSearchTool:
             or any(not isinstance(tag, str) for tag in tags)
         ):
             raise ValueError("tags 必须是不超过 50 项的字符串数组")
+        model_query = query
         query = expand_query_synonyms(query)
         settings = get_settings().business_scenarios
         scenario_name = resolve_query_scenario(query, context.rag_scenario or "general")
@@ -128,6 +130,11 @@ class RagSearchTool:
         if business_scenario is None or not business_scenario.rag.knowledge_bases:
             raise ValueError("请配置当前场景的 RAG 知识库参数")
         scenario = business_scenario.rag
+        await record_rag_debug("query", model_query=model_query, actual_query=query,
+            base_scenario=context.rag_scenario or "general", selected_scenario=scenario_name,
+            requested_tags=tags or [], score=scenario.score,
+            result_score_threshold=scenario.result_score_threshold,
+            libraries=[library.model_dump() for library in scenario.knowledge_bases])
         chunks = await self.backend.search_all(
             query, [(library.knowledge_id.strip(), library.recall_top_n, library.top_n)
                     for library in scenario.knowledge_bases],
@@ -135,7 +142,7 @@ class RagSearchTool:
             score=scenario.score,
             result_score_threshold=scenario.result_score_threshold,
         )
-        return {
+        result = {
             "query": query,
             "requested_tags": tags or [],
             "library_count": len(scenario.knowledge_bases),
@@ -169,6 +176,8 @@ class RagSearchTool:
                 for chunk in chunks
             ],
         }
+        await record_rag_debug("result", **result)
+        return result
 
     async def close(self) -> None:
         if self._backend is not None:
