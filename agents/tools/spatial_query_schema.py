@@ -75,7 +75,7 @@ class SpatialCondition(QueryModel):
 
 
 class SpatialElementQuery(QueryModel):
-    element: str = Field(min_length=1, description="目录返回的 dataKey。")
+    element: str = Field(min_length=1, description="原样使用 list_spatial_elements 返回的 dataKey，不得使用地图 layer_id。")
     mode: Literal["attribute", "spatial"] = Field(
         default="attribute", description="attribute 仅属性查询；spatial 为空间与属性联合查询。省略时，有 spatial 自动使用 spatial，否则使用 attribute。"
     )

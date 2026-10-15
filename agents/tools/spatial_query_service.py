@@ -45,6 +45,7 @@ TOOL_DESCRIPTION = (
     "海岛一览数量、按省/分类分布及面积排序列表必须用 island_overview；"
     "断面一览/东海区断面情况概览、断面数、测点数、要素清单、数据量及最近航次必须用 dm_duanmian_overview（无参数）。"
     "这两类统计与前端使用同一接口，直接采用返回值，不从文档、历史回答、分页列表或数据库重算；失败时说明未取得统计。"
+    "通用查询先取得 list_spatial_elements 返回的 dataKey，再调用详情或查询；已有目录可复用，类别未注册时刷新目录核对。"
     "使用 query.fields、conditions 或 orderBy 前，缺少当前类别字段定义时须先调用 get_spatial_element_detail，"
     "收到定义后再查询；字段名、用途和运算符以定义为准，不猜测。"
     "通用查询按 limit/offset 返回一页 GeoJSON；需要几何时设置 includeGeometry=true。"
@@ -72,7 +73,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
         "dataKey": {
             "type": "string",
             "minLength": 1,
-            "description": "get_spatial_element_detail 必填的目录要素标识。",
+            "description": "get_spatial_element_detail 必填；原样使用 list_spatial_elements 返回的 dataKey，不得传地图 layer_id。",
         },
         "query": {
             **{key: value for key, value in QUERY_PARAMETERS.items() if key != "$defs"},

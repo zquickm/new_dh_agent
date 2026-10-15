@@ -373,6 +373,8 @@ SPATIAL_API_KEY=
 - `get_spatial_element_detail`：传 `dataKey`，调用 `/api/spatial/v2/elements/detail`，获取字段、枚举及查询约束。
 - `query_spatial_element`：传 `query`，`query` 对应 `/api/spatial/v2/elements/query` 原始请求体。
 
+详情参数 `dataKey` 和查询参数 `query.element` 必须原样使用目录返回的类别标识；缺少目录结果时先单独查询目录并等待返回，已有结果可复用。地图 `layer_id` 仅用于展示，例如 `transect-stations` 不能作为断面测点的查询类别；目录返回 `dm_duanmian` 时使用该值。收到“要素/图层未注册”时重新获取目录，仅在能确定目标类别时保留原条件修正一次，否则说明限制。
+
 已删除重复的 `list_station_types`、`search_stations`、`station_detail` 及旧 HTTP 入口。
 类型枚举从字段定义读取，站名、站号和类型作为通用查询条件；不再本地猜测站点类型、改写站名、筛选去重或重算总数。
 通用文档未覆盖实时在线状态及观测数据，因此保留 `station_status`、`observation_summary`、`observation_trend`、`observation_range`。注册属性中的运行状态不能替代实时在线状态。
