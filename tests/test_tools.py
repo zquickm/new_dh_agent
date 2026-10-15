@@ -362,6 +362,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                 "spatial_query_service",
                 "map_action",
                 "dm_duanmian_analysis",
+                "dm_duanmian_element_compare",
                 "analyze_suspicion",
                 "query_suspicion_results",
                 "summarize_suspicion_results",

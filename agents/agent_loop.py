@@ -611,6 +611,8 @@ class AgentLoop:
                             observation = f"{service}调用失败{context}：{detail}"
                     elif name == "dm_duanmian_analysis" and isinstance(exc, ValueError):
                         observation = f"断面专题分析参数无效：{exc}"
+                    elif name == "dm_duanmian_element_compare" and isinstance(exc, (ValueError, TypeError)):
+                        observation = f"断面要素对比参数无效：{exc}"
                     elif name == "map_action" and isinstance(exc, ValueError):
                         observation = f"地图操作参数无效：{exc}"
                     else:
