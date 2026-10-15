@@ -1,18 +1,17 @@
 ---
 name: 断面业务
-description: 指导东海 E1、E2、E3 三条断面及辅助点的业务、数据库查询和专题分析图。也适用于未写明断面编号、仅按年月询问各类要素对比。包括断面测点位置、属性查询及地图标点展示；不用于其他业务观测站查询。
+description: 指导东海 E1、E2、E3 三条断面及辅助点的业务、数据库查询和专题分析图。明确断面、年月和要素的历史观测问题默认同步出图，无需另说“画图”。也适用于未写明断面编号、仅按年月询问各类要素对比。包括断面测点位置、属性查询及地图标点展示；不用于其他业务观测站查询。
 ---
 
 # 断面业务
 
-断面一览统计使用 `spatial_query_service(operation="dm_duanmian_overview")`；空间位置与基础属性使用该工具的通用查询；接口未覆盖的历史观测、跨期指标统计和描述性分析使用 `database_query`；专题图使用 `dm_duanmian_analysis`。按问题组合数据、地图和专题图，不要求每个问题调用全部工具。
+断面一览统计使用 `spatial_query_service(operation="dm_duanmian_overview")`；空间位置与基础属性使用该工具的通用查询；接口未覆盖的历史观测、跨期指标统计和描述性分析使用 `database_query`，默认结合 `dm_duanmian_analysis` 出图。各类问题按下述路由处理，不要求每个问题调用全部工具。
 
 ## 路由边界
 
 - “断面一览”“东海区断面情况概览”、断面数、测点数、监测要素清单及数量、数据总量、最近航次，先调用 `spatial_query_service(operation="dm_duanmian_overview")`，无其他参数。总体值直接使用 `overview`，单断面值使用 `sections`，要素清单使用 `chemistryElements/hydrometElements`；不从文档、固定数字、历史回答或数据库替代、去重或重算。失败或缺字段时说明未取得对应统计，不补零。仅此类统计不要求 RAG、数据库或专题出图；时间或选区筛选不可套用全区概览。
-- 历史要素分析问题按需使用`rag_search`查询非结构化的文档，使用`database_query`查询相关数据库数据，结合使用`map_action`标出相应断面站点并用`dm_duanmian_analysis`打开专题分析图展示有联系的内容，向用户综合展示全面的信息，让用户既能获得你的回答，也能在前端的左侧地图中看到各类可视化信息。
-例：
-  - 用户询问“2022年E1断面盐度情况”，应先用 `database_query` 查询数据，再用 `dm_duanmian_analysis` 出`temp-section`图选择`E1`断面、`盐度 S`要素，随机选一个2022年的航次展示，再用`map_action`标出E1断面站点。
+- 历史要素情况、分布、变化、对比和描述性分析，使用 `database_query` 查询数据，并按下文专题图规则调用 `dm_duanmian_analysis`，不能只返回文字或统计表。需要文档依据时再用 `rag_search`；取得真实站点坐标后结合 `map_action` 标点，向用户综合展示全面的信息。
+  - 例：“2022年E1断面盐度情况”，先用 `database_query` 查询全年盐度统计及有有效盐度观测的航次，再用 `dm_duanmian_analysis` 出 `temp-section` 图，选择 `E1`、`盐度 S` 和结果中最新的实际航次，说明该图仅为全年中的单航次示例；取得真实坐标后再用 `map_action` 标出 E1 断面站点。
 
 - 调查断面及其站位、辅助点的位置、基础属性和分布，使用 `spatial_query_service` 的通用查询；历史观测、跨期统计和描述性评价使用 `database_query`。空间记录不能代替历史观测数据，不为查询基础信息重复调用数据库。
 - 通用查询通过 `spatial_query_service(operation=操作名, ...)` 调用：缺少目录结果时，先单独调用 `list_spatial_elements` 并等待返回，再选择目标类别并原样使用其 `dataKey`；已有目录结果可复用。默认字段满足需求时直接 `query_spatial_element(query=查询条件)`，自选字段、过滤或排序前复用该类别字段定义，缺少时调用 `get_spatial_element_detail(dataKey=类别标识)`。例如目录返回断面测点 `dataKey="dm_duanmian"`，则详情参数 `dataKey` 和查询参数 `query.element` 均用该值；`transect-stations` 仅为地图 `layer_id`，不得作为查询类别或据此推导类别。完整保留断面、站位及选区条件，不猜字段名或放宽为全库查询。
@@ -25,9 +24,13 @@ description: 指导东海 E1、E2、E3 三条断面及辅助点的业务、数�
 
 ## 专题图参数
 
-- 整条断面的海水温度、盐度等分布使用 `temp-section`；已明确的 `section`、`voyage`、`element` 必须传齐，水温为 `温度 T`、盐度为 `盐度 S`，不留给用户再次选择。
-- `surface` 同时传对应 `elementType`；其余图型及参数按 Schema。未明确的参数可省略，航次使用用户指定或已有查询结果中的实际年月，不为补参数额外查库。
+- **触发**：用户或有效上下文明确“E1/E2/E3 断面＋年月＋支持要素”并询问情况、分布、变化或分析时，必须调用 `dm_duanmian_analysis`，无需用户额外说“画图”。用户明确只要文字、只要表格或不要图时不出图；位置、基础属性、一览统计和文档查询不触发。不支持的断面或要素如实说明，不替换条件。
+- **参数**：已知的 `analysis`、`section`、`voyage` 按图型传齐；`temp-section`、`surface` 还须传 `element`，`surface` 同时传对应 `elementType`。指定月份直接规范为 `yyyy-MM`（如 `2022-05`），不省略或改换航次。
+- **图型**：海水化学分布默认用 `temp-section`；水文气象用 `surface`、`elementType="hydromet"`；明确要求化学要素表层沿程变化时用 `surface`、`elementType="chemistry"`。要素用 Schema 原值：水温 `温度 T`、盐度 `盐度 S`、pH `酸碱度 pH`、总碱度 `碱度 A`。只说“温度”时默认画海水温度并说明对象。明确要求溶解氧垂向、营养盐结构或 T-S 图时分别用 `do-profile`、`nutrient`、`ts-scatter`，省略 `element`；`ts-scatter` 合并全部断面，省略 `section`，不能替代单断面图。
+- **年份或时间范围**：在同断面、同要素、同时间范围的查询结果中，选最新且该要素有有效观测的实际航次，说明仅为单航次示例；将航次与统计合并查询，不为出图额外查库。没有可靠航次时省略 `voyage`，仅打开浮层，不编造月份。
+- **执行**：先加载 Skill；参数齐全即可与数据库查询同轮提交。数据库失败、空结果、缺少坐标均不阻止按指定条件出图，文档检索和标点也不是前置条件；仅航次依赖查询结果时等待返回。回答前确认本轮已实际调用，回执只代表指令已接收。
 - 例：“2022年5月 E1 断面的温度情况” → `dm_duanmian_analysis(analysis="temp-section", section="E1", voyage="2022-05", element="温度 T")`。
+- 例：“2022年5月 E3 断面的气温情况” → `dm_duanmian_analysis(analysis="surface", section="E3", voyage="2022-05", elementType="hydromet", element="气温")`。
 
 ## 断面与数据范围
 

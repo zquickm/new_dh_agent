@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from agents.agent_loop import AgentLoop
-from agents.tools.registry import build_tool_executor
+from agents.tools.registry import build_skill_catalog, build_tool_executor
 from controller.streaming.sse_encoder import encode_chat_stream
 from schemas.chat import AgentRequest
 from services.chat_service import ChatService
@@ -23,7 +23,8 @@ class DuanmianAnalysisStreamTest(unittest.IsolatedAsyncioTestCase):
             (["已发送出图指令。"], []),
         ])
         service = ChatService()
-        service._agent = AgentLoop(llm, build_tool_executor())
+        catalog = build_skill_catalog()
+        service._agent = AgentLoop(llm, build_tool_executor(catalog), catalog)
         self.addAsyncCleanup(service.close)
         repository = MemoryConversationRepository()
         with patch("services.chat_service.conversation_repository", repository), patch(
