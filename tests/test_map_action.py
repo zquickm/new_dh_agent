@@ -1,4 +1,5 @@
 import unittest
+from copy import deepcopy
 
 from agents.tools.map_action import TOOL_PARAMETERS, execute_map_action, spatial_map_results
 
@@ -19,7 +20,7 @@ class MapActionToolTest(unittest.TestCase):
             for action, invalid in [
                 ("CLEAR", {"result_ref": "result-1"}),
                 ("FLY_TO", {"result_ref": "result-1"}),  # Empty result is not a flight target.
-                ("GEOJSON_ADD", {"result_ref": "result-1", "geojson": cached["geojson"]}),
+                ("GEOJSON_ADD", {"result_ref": "result-1", "geojson": {"type": "FeatureCollection", "features": [1]}}),
                 *[("GEOJSON_ADD", {"result_ref": ref}) for ref in ("missing", "", None, [], {})],
             ]:
                 with self.subTest(action=action, invalid=invalid), self.assertRaises(ValueError):
@@ -28,6 +29,50 @@ class MapActionToolTest(unittest.TestCase):
             spatial_map_results.reset(token)
         with self.assertRaisesRegex(ValueError, "已过期"):
             execute_map_action("GEOJSON_ADD", {"result_ref": "result-1"})
+
+    def test_query_geometry_recovers_redundant_data_and_missing_layer_without_retry(self):
+        cached = {
+            "geojson": {"type": "FeatureCollection", "features": [{
+                "type": "Feature", "id": "island-1",
+                "geometry": {"type": "Polygon", "coordinates": [[[122, 30], [123, 30], [122, 31], [122, 30]]]},
+                "properties": {"std_name": "测试海岛", "area": 0, "status": None},
+            }]},
+            "layer_id": "spatial-element:island", "replace": False, "fit_bounds": False,
+        }
+        original = deepcopy(cached)
+        token = spatial_map_results.set({"result-1": cached})
+        try:
+            for payload in (
+                {"result_ref": "result-1", "geojson": deepcopy(cached["geojson"])},
+                {"result_ref": "result-1", "geojson": {**cached["geojson"], "total": 10, "returned": 1}},
+                {"result_ref": "result-1", "geojson": None},
+                {"geojson": deepcopy(cached["geojson"])},
+            ):
+                with self.subTest(payload=payload):
+                    before = deepcopy(payload)
+                    output = execute_map_action("geojson_add", payload)
+                    self.assertEqual(output.client_events, ({"action_type": "GEOJSON_ADD", "payload": cached},))
+                    self.assertIs(output.client_events[0]["payload"]["geojson"], cached["geojson"])
+                    self.assertEqual(payload, before)
+            output = execute_map_action("GEOJSON_ADD", {"geojson": cached["geojson"], "replace": True})
+            self.assertTrue(output.client_events[0]["payload"]["replace"])
+            self.assertEqual(cached, original)
+
+            changed = deepcopy(cached["geojson"])
+            changed["features"][0]["properties"]["std_name"] = "其他海岛"
+            with self.assertRaisesRegex(ValueError, "不一致"):
+                execute_map_action("GEOJSON_ADD", {"result_ref": "result-1", "geojson": changed})
+            with self.assertRaisesRegex(ValueError, "layer_id"):
+                execute_map_action("GEOJSON_ADD", {"geojson": changed})
+            with self.assertRaisesRegex(ValueError, "已过期"):
+                execute_map_action("GEOJSON_ADD", {"result_ref": "old-result", "geojson": cached["geojson"]})
+            spatial_map_results.get()["result-2"] = {**cached, "layer_id": "spatial-element:other"}
+            with self.assertRaisesRegex(ValueError, "layer_id"):
+                execute_map_action("GEOJSON_ADD", {"geojson": cached["geojson"]})
+        finally:
+            spatial_map_results.reset(token)
+        with self.assertRaisesRegex(ValueError, "layer_id"):
+            execute_map_action("GEOJSON_ADD", {"geojson": cached["geojson"]})
 
     def test_geojson_action_preserves_geometry_and_validates_envelope(self):
         geojson = {"type": "FeatureCollection", "features": [
