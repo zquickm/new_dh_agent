@@ -1,6 +1,6 @@
 """Shared, versioned display snapshot for generated and fixed answers."""
 from copy import deepcopy
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
@@ -8,10 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 class ReasoningRoundPresentation(BaseModel):
     model_config = ConfigDict(extra="allow")
     round_number: Annotated[StrictInt, Field(ge=1)]
-    title: str | None = Field(default=None, max_length=200)
-    summary: str | None = Field(default=None, max_length=20000)
-    min_duration_ms: Annotated[StrictInt, Field(ge=0, le=300000)] | None = None
-    max_duration_ms: Annotated[StrictInt, Field(ge=0, le=300000)] | None = None
+    title: Optional[str] = Field(default=None, max_length=200)
+    summary: Optional[str] = Field(default=None, max_length=20000)
+    min_duration_ms: Optional[Annotated[StrictInt, Field(ge=0, le=300000)]] = None
+    max_duration_ms: Optional[Annotated[StrictInt, Field(ge=0, le=300000)]] = None
 
     @model_validator(mode="after")
     def duration_range(self):
