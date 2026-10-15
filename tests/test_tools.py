@@ -208,6 +208,7 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
                         page_index=1,
                         line=None,
                         page=2,
+                        tags=("2021年", "3月"),
                     )
                 ]
 
@@ -231,6 +232,8 @@ class ToolExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rag_result["chunks"][0]["source"], "文档")
         self.assertEqual(rag_result["chunks"][0]["page_index"], 1)
         self.assertEqual(rag_result["chunks"][0]["page"], 2)
+        self.assertEqual(rag_result["requested_tags"], ["赤潮"])
+        self.assertEqual(rag_result["chunks"][0]["tags"], ["2021年", "3月"])
         self.assertEqual(
             rag_tool.backend.arguments,
             ("赤潮", [(b.knowledge_id.strip(), b.recall_top_n, b.top_n) for b in get_settings().business_scenarios["general"].rag.knowledge_bases], {"tags": ["赤潮"]}),

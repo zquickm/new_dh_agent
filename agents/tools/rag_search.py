@@ -38,9 +38,9 @@ TOOL_PARAMETERS: dict[str, Any] = {
             },
             "maxItems": 50,
             "description": (
-                "可选的文档标签名称列表，优先检索指定标签；"
-                "未检索到结果时，平台会在配置的授权范围内扩大检索。"
-                "省略或传空数组时不指定优先标签。"
+                "类别、发布时间等优先召回标签；不足时补召回其他片段，并非严格过滤。"
+                "年/月格式如 ['2021年', '3月']，月份不补零，可叠加业务标签。"
+                "默认最新及逐年拆分遵循通用 RAG 规则。"
             ),
         },
     },
@@ -137,6 +137,7 @@ class RagSearchTool:
         )
         return {
             "query": query,
+            "requested_tags": tags or [],
             "library_count": len(scenario.knowledge_bases),
             "libraries": [
                 {
@@ -163,6 +164,7 @@ class RagSearchTool:
                     "page_index": chunk.page_index,
                     "line": chunk.line,
                     "page": chunk.page,
+                    "tags": list(chunk.tags),
                 }
                 for chunk in chunks
             ],

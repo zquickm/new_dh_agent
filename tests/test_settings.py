@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from config.settings import (
     ApplicationDotEnvSettingsSource,
     CONFIG_DIR,
+    ReactSettings,
     Settings,
     clear_settings_cache,
     get_active_profile,
@@ -18,6 +19,13 @@ from config.settings import (
 
 
 class SettingsTest(unittest.TestCase):
+    def test_react_defaults_and_all_profiles_use_twenty_rounds(self):
+        self.assertEqual(ReactSettings().max_rounds, 20)
+        common = yaml.safe_load((CONFIG_DIR / "application.yaml").read_text(encoding="utf-8"))
+        for profile in ("dev", "prod"):
+            overrides = yaml.safe_load((CONFIG_DIR / f"application-{profile}.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(overrides.get("react", {}).get("max_rounds", common["react"]["max_rounds"]), 20)
+
     def tearDown(self):
         clear_settings_cache()
 

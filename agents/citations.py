@@ -157,6 +157,7 @@ class CitationRegistry:
                     "page_index": item.get("page_index"),
                     "line": item.get("line"),
                     "page": item.get("page"),
+                    "tags": item.get("tags", []),
                 }
             )
             model_chunks.append(
@@ -177,7 +178,7 @@ class CitationRegistry:
             "query": query,
             "result_count": len(retrieval_chunks),
             "chunks": retrieval_chunks,
-            **{key: result[key] for key in ("library_count", "libraries") if key in result},
+            **{key: result[key] for key in ("library_count", "libraries", "requested_tags") if key in result},
         }
         model_result = {**result, "chunks": model_chunks}
         return retrieval, json.dumps(model_result, ensure_ascii=False, default=str)
