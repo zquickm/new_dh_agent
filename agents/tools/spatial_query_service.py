@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Any, Optional
@@ -416,14 +417,26 @@ class SpatialQueryServiceTool:
         first = None
         items: list[Any] = []
         seen_pages: set[str] = set()
+        pending_pages: list[Any] = []
         pages = 0
         warning = ""
         while True:
             try:
-                data = (
-                    await self.client.query_spatial_element(params) if spatial
-                    else await self.client.get_island_overview(**params)
-                )
+                if spatial:
+                    data = await self.client.query_spatial_element(params)
+                elif first is None:
+                    data = await self.client.get_island_overview(**params)
+                else:
+                    if not pending_pages:
+                        # 首次响应确定实际页大小；后续每批最多并发 4 页，按页码校验和合并。
+                        last_page = (first["total"] + page_size - 1) // page_size
+                        pending_pages = await asyncio.gather(*(
+                            self.client.get_island_overview(**{**params, "page": page})
+                            for page in range(page_number, min(page_number + 4, last_page + 1))
+                        ), return_exceptions=True)
+                    data = pending_pages.pop(0)
+                    if isinstance(data, BaseException):
+                        raise data
                 batch = data.get(items_key)
                 total = data.get("total")
                 if not isinstance(batch, list) or type(total) is not int or total < 0:

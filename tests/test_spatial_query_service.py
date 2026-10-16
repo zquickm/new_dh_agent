@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from copy import deepcopy
@@ -152,6 +153,113 @@ class SpatialQueryServiceToolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content["pagination"]["next_page"], 2)
         self.assertIn("后续页查询失败", result.content["pagination"]["warning"])
         self.assertEqual(client.get_island_overview.call_args.kwargs, {"province": "浙江省", "size": 2, "page": 2})
+
+    async def test_island_pages_run_concurrently_and_merge_in_order_with_actual_page_size(self):
+        client = FakeSpatialClient()
+        filters = {"province": "浙江省", "keyword": "岛", "size": 100, "page": 2}
+        active = peak = 0
+        completed = []
+        fourth_page_done = asyncio.Event()
+
+        async def get_page(**params):
+            nonlocal active, peak
+            page = params["page"]
+            active += 1
+            peak = max(peak, active)
+            try:
+                if page == 3:
+                    await fourth_page_done.wait()
+                await asyncio.sleep(0)
+                completed.append(page)
+                if page == 4:
+                    fourth_page_done.set()
+                return {
+                    "total": 18, "page": page, "size": 2,
+                    "items": [{"id": index} for index in range((page - 1) * 2, page * 2)],
+                    "byProvince": [{"province": "浙江省", "count": 18}],
+                }
+            finally:
+                active -= 1
+
+        client.get_island_overview = AsyncMock(side_effect=get_page)
+        output = await asyncio.wait_for(
+            SpatialQueryServiceTool(client).execute("island_overview", **filters), timeout=2,
+        )
+        self.assertEqual(peak, 4)
+        self.assertEqual(active, 0)
+        self.assertLess(completed.index(4), completed.index(3))
+        self.assertEqual(output.content["items"], [{"id": index} for index in range(2, 18)])
+        self.assertEqual(output.content["byProvince"], [{"province": "浙江省", "count": 18}])
+        self.assertEqual(output.content["pagination"], {
+            "complete": False, "pages": 8, "fetched": 16, "start_offset": 2, "next_page": None,
+            "warning": "本次从第 3 条开始，未包含此前记录；查询全部信息请从 offset=0/page=1 开始",
+        })
+        self.assertEqual(filters, {"province": "浙江省", "keyword": "岛", "size": 100, "page": 2})
+        self.assertEqual([call.kwargs for call in client.get_island_overview.call_args_list], [
+            filters, *[{**filters, "page": page, "size": 2} for page in range(3, 10)],
+        ])
+
+    async def test_concurrent_island_page_failures_keep_only_the_valid_contiguous_prefix(self):
+        def page(number):
+            return {
+                "total": 10, "page": number, "size": 2,
+                "items": [{"id": index} for index in range((number - 1) * 2, number * 2)],
+                "byClass": [{"islandClass": "无居民海岛", "count": 10}],
+            }
+
+        cases = [
+            (SpatialServiceError("第三页失败"), "第三页失败"),
+            ({**page(3), "total": 12}, "total"),
+            ({**page(3), "page": 4}, "页码"),
+            ({**page(3), "size": 3}, "size"),
+            ({**page(3), "items": page(2)["items"]}, "重复"),
+            ({**page(3), "items": []}, "空页"),
+            ({**page(3), "items": [{"id": 4}]}, "不足一页"),
+        ]
+        for third, warning in cases:
+            with self.subTest(warning=warning):
+                client = FakeSpatialClient()
+                client.get_island_overview = AsyncMock(side_effect=[page(1), page(2), third, page(4), page(5)])
+                output = await SpatialQueryServiceTool(client).execute("island_overview", size=2)
+                self.assertEqual(output.content["items"], page(1)["items"] + page(2)["items"])
+                self.assertEqual(output.content["byClass"], page(1)["byClass"])
+                self.assertFalse(output.content["pagination"]["complete"])
+                self.assertEqual(output.content["pagination"]["next_page"], 3)
+                self.assertEqual(output.content["pagination"]["pages"], 2)
+                self.assertIn(warning, output.content["pagination"]["warning"])
+
+    async def test_cancelling_island_pagination_cancels_all_in_flight_requests(self):
+        client = FakeSpatialClient()
+        ready = asyncio.Event()
+        blocked = asyncio.Event()
+        active = cancelled = 0
+
+        async def get_page(**params):
+            nonlocal active, cancelled
+            if params.get("page", 1) == 1:
+                return {"total": 20, "page": 1, "size": 1, "items": [{"id": 0}]}
+            active += 1
+            if active == 4:
+                ready.set()
+            try:
+                await blocked.wait()
+            except asyncio.CancelledError:
+                cancelled += 1
+                raise
+            finally:
+                active -= 1
+
+        client.get_island_overview = AsyncMock(side_effect=get_page)
+        task = asyncio.create_task(SpatialQueryServiceTool(client).execute("island_overview"))
+        try:
+            await asyncio.wait_for(ready.wait(), timeout=2)
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertEqual(active, 0)
+        self.assertEqual(cancelled, 4)
+        self.assertEqual(client.get_island_overview.await_count, 5)
 
     async def test_all_station_operations_only_call_the_requested_data_endpoint(self):
         client = FakeSpatialClient()
