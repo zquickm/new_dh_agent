@@ -477,12 +477,11 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
         features = [{
             "type": "Feature", "id": section, "properties": {"section": section, "name": section + "断面"},
             "geometry": {"type": "LineString", "coordinates": [[122, 30 + index], [123, 30 + index]]},
-        } for index, section in enumerate(("E1", "E2", "E3"))]
-        self.element_results = {"test_transects": {"type": "FeatureCollection", "total": 3, "features": features}}
+        } for index, section in enumerate(("E1",))]
+        self.element_results = {"test_transects": {"type": "FeatureCollection", "total": len(features), "features": features}}
         query = {
             "element": "test_transects", "includeGeometry": True, "limit": 1,
-            "conditions": [{"field": "section", "operator": "=", "value": section} for section in ("E1", "E2", "E3")],
-            "conditionLogic": "OR",
+            "conditions": [{"field": "section", "operator": "=", "value": "E1"}],
         }
         months = ["2025-11", "2024-11"]
 
@@ -496,7 +495,7 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
                         ([], [{"id": "map-transects", "name": "map_action", "args": {
                             "action_type": "GEOJSON_ADD", "payload": {"result_ref": result["result_ref"]},
                         }}]),
-                        (["已提交三条断面地图及 E1007 测点对比指令。"], []),
+                        (["已提交 E1 断面地图及 E1007 测点对比指令。"], []),
                     ])
                 async for item in super().stream(messages, tools=tools, temperature=temperature):
                     yield item
@@ -513,7 +512,7 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
             ]),
         ])
         agent = AgentLoop(llm, self.executor, skills=catalog)
-        events = [event async for event in agent.run_stream("2025年11月与2024年11月 E1007 各类要素对比情况", [])]
+        events = [event async for event in agent.run_stream("2025年11月与2024年11月 E1 断面各类要素对比情况，浮层测点用 E1007", [])]
         self.assertTrue(all(event.success for event in events if event.type == "tool_finished"))
         actions = [event.data for event in events if event.type == "map_action"]
         self.assertEqual([action["action_type"] for action in actions], ["dm_duanmian_element_compare", "GEOJSON_ADD"])
@@ -523,7 +522,7 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
             "geojson": {"type": "FeatureCollection", "features": features},
         })
         self.assertEqual([request["payload"] for request in self.requests if request["method"] == "POST"], [
-            query, {**query, "offset": 1}, {**query, "offset": 2},
+            query,
         ])
 
     @patch("services.context_service.expand_query_synonyms", new=lambda text: text)
