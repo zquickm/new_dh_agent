@@ -1,3 +1,4 @@
+import json
 import unittest
 from copy import deepcopy
 from unittest.mock import AsyncMock
@@ -33,6 +34,34 @@ class FakeSpatialClient:
 
 
 class SpatialQueryServiceToolTest(unittest.IsolatedAsyncioTestCase):
+    async def test_json_string_query_matches_object_query_without_rewriting_values(self):
+        client = FakeSpatialClient()
+        client.query_spatial_element = AsyncMock(return_value={
+            "type": "FeatureCollection", "total": 0, "returned": 0, "features": [],
+        })
+        query = {
+            "element": "obs_station", "includeGeometry": True, "limit": 100,
+            "conditions": [{"field": "name", "operator": "=", "value": "true"}],
+        }
+        tool = SpatialQueryServiceTool(client)
+        for argument in (query, json.dumps(query)):
+            with self.subTest(argument=argument):
+                output = await tool.execute("query_spatial_element", query=argument)
+                self.assertTrue(output.content["pagination"]["complete"])
+                self.assertEqual(client.query_spatial_element.call_args.args[0], query)
+
+    async def test_invalid_query_encoding_fails_before_http(self):
+        client = FakeSpatialClient()
+        client.query_spatial_element = AsyncMock()
+        tool = SpatialQueryServiceTool(client)
+        for query in (None, [], 1, "", "{'element': 'obs_station'}", "[]", "null", '"text"'):
+            with self.subTest(query=query), self.assertRaisesRegex(ValueError, "query.*JSON 对象"):
+                await tool.execute("query_spatial_element", query=query)
+        for query in ('{}', '{"element":"obs_station","includeGeometry":"true"}'):
+            with self.subTest(query=query), self.assertRaises(ValueError):
+                await tool.execute("query_spatial_element", query=query)
+        client.query_spatial_element.assert_not_awaited()
+
     async def test_auto_pagination_uses_actual_returned_count_without_mutating_query(self):
         features = [{"type": "Feature", "id": index, "geometry": None, "properties": {"name": str(index)}} for index in range(3)]
         client = FakeSpatialClient()
