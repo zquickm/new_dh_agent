@@ -460,9 +460,7 @@ def _point(value: Any, name: str) -> list[float]:
 
 
 def validate_feature_collection(value: Any) -> None:
-    """Validate the envelope here; geometry topology is validated by the spatial service."""
-    from agents.tools.spatial_query_schema import SpatialCondition
-
+    """Validate the FeatureCollection envelope without inspecting geometry."""
     if not isinstance(value, dict) or value.get("type") != "FeatureCollection" or not isinstance(value.get("features"), list):
         raise ValueError("geojson 必须为 FeatureCollection")
     for feature in value["features"]:
@@ -470,7 +468,4 @@ def validate_feature_collection(value: Any) -> None:
             raise ValueError("geojson.features 必须为 Feature 数组")
         if not isinstance(feature.get("properties"), (dict, type(None))):
             raise ValueError("Feature.properties 必须为对象或 null")
-        geometry = feature.get("geometry")
-        if geometry is not None:
-            SpatialCondition(relation="intersects", geometry=geometry)
     json.dumps(value, allow_nan=False)

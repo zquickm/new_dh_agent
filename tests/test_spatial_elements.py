@@ -225,6 +225,16 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
             {"relation": "intersects", "geometry": polygon, "point": {"lon": 122, "lat": 30}},
             *[{"relation": relation, "geometry": polygon}
               for relation in ("within", "contains", "touches", "overlaps", "disjoint")],
+            *[{"relation": relation} for relation in (
+                "bbox", "intersects", "within", "contains", "touches", "overlaps", "disjoint",
+            )],
+            {"relation": "intersects", "bbox": {"west": 122, "south": 30, "east": 123, "north": 31}},
+            {"relation": "dwithin", "point": {"lon": 122, "lat": 30}},
+            {"relation": "dwithin", "distance": 5},
+            *[{"relation": "intersects", "geometry": geometry} for geometry in (
+                {}, {"type": "unknown"}, {"type": "Polygon"},
+                {"type": "FeatureCollection", "features": []}, "POINT(122 30)",
+            )],
         ]
         for spatial in spatial_inputs:
             for explicit_mode in (True, False):
@@ -300,13 +310,9 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
             {"conditionLogic": "XOR"}, {"query_type": "circle"}, {"includeGeometry": "true"},
             {"conditions": [{"field": "code", "operator": "IN", "value": ["E1001"]}]},
             {"conditions": [{"field": "code", "operator": "="}]},
-            {"mode": "spatial", "spatial": {"relation": "within"}},
-            {"mode": "spatial", "spatial": {"relation": "dwithin", "point": {"lon": 122, "lat": 30}}},
-            {"mode": "spatial", "spatial": {"relation": "dwithin", "distance": 5}},
             {"mode": "spatial", "spatial": {"relation": "dwithin", "distance": 0, "point": {"lon": 122, "lat": 30}}},
             {"mode": "spatial", "spatial": {"relation": "dwithin", "distance": 5, "point": {"lon": 181, "lat": 30}}},
             {"mode": "spatial", "spatial": {"relation": "bbox", "bbox": {"west": 123, "south": 30, "east": 122, "north": 31}}},
-            {"mode": "spatial", "spatial": {"relation": "intersects", "geometry": {"type": "FeatureCollection", "features": []}}},
             {"mode": "spatial", "spatial": {"relation": "intersects", "geometry": {"type": "Point", "coordinates": [float("nan"), 30]}}},
         ]
         for update in invalid:
