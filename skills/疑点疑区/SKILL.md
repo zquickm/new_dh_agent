@@ -21,16 +21,17 @@ description: 厦门地区专属的疑点疑区图斑的海域权属、生态修�
 
 ## 结果口径
 
-- SEA_RIGHTS：NO_APPROVAL 未批先建；OUT_OF_SCOPE 超范围用海，默认超出面积>0.05公顷且比例>5%；CHANGE_MODE 改变用海方式；CLEAR 该规则合规。阈值以返回值为准。
-- ECO_RESTORE：ECO_OUT_OF_SCOPE 修复项目内超出权属范围；ECO_CHANGE_MODE 修复项目内改变用海方式；NO_APPROVAL 项目内无权属且不满足免审批；EXEMPT 免审批合规，不计为疑点。免审批情形包括无构筑物的植被种植、互花米草清理、沙滩补沙，或工期不足3个月的拆除。CLEAR 可能为项目外，也可能为项目内有权属且合规，结合inProject区分。
-- HISTORY：HISTORY 命中历史核查记录，多条相交取核查日期最新记录，引用relatedId、checkConclusion、checkDate。历史关联不直接证明新增违法；CLEAR 未命中历史记录。
-- COASTLINE：OCCUPY_COASTLINE 占用自然岸线，自然岸线占用长度>0。任意岸线长度 anyLengthM 仅为背景，不参与判定。
-- REDLINE：REDLINE 占用生态保护红线，重叠面积>0；边界相切不算，红线合并后计算以免重复。
-- assessedRules、complete、missingRules 及合规统计覆盖五条规则。hasSuspicion=null 表示规则结果不足且已知结论没有疑点，不能当作合规。EXEMPT只对生态修复规则合规，不抵消其他规则疑点；五条规则均齐全且全部为CLEAR或EXEMPT才计入allClearPatchCount。
+- 明细使用中文 conclusion，不返回 resultType；counts 以中文结论为键。以下编码仅用于 suspicionTypes 筛选，回答引用真实中文结论，命中类保留“疑似”前缀。
+- SEA_RIGHTS：NO_APPROVAL 疑似未批先建；OUT_OF_SCOPE 疑似超范围用海，默认超出面积>0.05公顷且比例>5%；CHANGE_MODE 疑似改变用海方式；CLEAR 有权-合规。阈值以返回值为准。
+- ECO_RESTORE：ECO_OUT_OF_SCOPE 疑似修复项目内超范围；ECO_CHANGE_MODE 疑似修复项目内改变用海方式；NO_APPROVAL 疑似未批先建，表示项目内无权属且不满足免审批；EXEMPT 合规免审批，不计为疑点。免审批情形包括无构筑物的植被种植、互花米草清理、沙滩补沙，或工期不足3个月的拆除。CLEAR 文本为“未占用修复区域”，也可能表示项目内有权属且合规，需结合 projectCount 区分，不凭结论文字认定在项目外。projects 保留全部相交项目名称（分号分隔），exempt 表示是否满足免审批情形，rightsMethods 为相交权属用海方式。图斑在项目外时 outsideAreaHa、outsideRatioPct 为 null，不能当作数值0；CLEAR 时 approvalState 为 null。校验属性中的 patchId、eventNo 为图斑主键和事件编号。
+- HISTORY：HISTORY 疑似命中历史疑点，多条相交保留全部关联，不只取最新一条。引用 historyCount、historyPatchNos、checkConclusions、lastCheckDate；关联编号和核查结论以顿号分隔，日期取最近一条。历史关联不直接证明新增违法；CLEAR 未命中历史疑点。
+- COASTLINE：OCCUPY_COASTLINE 疑似占用自然岸线，自然岸线占用长度>0；CLEAR 未占用自然岸线。任意岸线长度 anyLengthM 仅为背景，不参与判定。
+- REDLINE：REDLINE 疑似占用生态保护红线，重叠面积>0；CLEAR 未占用生态保护红线。边界相切不算，红线合并后计算以免重复。
+- assessedRules、complete、missingRules 及合规统计覆盖五条规则。hasSuspicion=null 表示规则结果不足且已知结论没有疑点，不能当作合规。EXEMPT只对生态修复规则合规，不抵消其他规则疑点；五条规则均齐全且全部为各规则的CLEAR文本或“合规免审批”才计入allClearPatchCount。
 - 疑点总数使用去重 suspicionPatchCount，不相加各规则计数。incompletePatchCount 和疑点数可能重叠。
 - 查询、统计的图斑范围是五条规则结果的编号并集；totalPatchCount是其中去重图斑数，missingRules只反映这些图斑缺少哪些规则。五条规则均无保存记录的图斑无法计数；返回空列表不表示原始批次没有图斑或全部合规。
 - PARTIAL_SUCCESS 应说明失败规则；失败规则counts=null，不能说零疑点。未研判与读取失败要区分。
-- Ha公顷、M米、Pct百分比；源overlapRatio单位未明确，不转成百分比。引用真实evidence，不编造结论。红树林→其他方式映射尚待确认。
+- Ha公顷、M米、Pct百分比；源overlapRatio单位未明确，不转成百分比。引用真实evidence，不编造结论。
 
 ## 地图
 

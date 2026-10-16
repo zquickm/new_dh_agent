@@ -10,17 +10,17 @@ from tool_backends.spatial_backend import SpatialServiceError
 from tool_backends.suspicion_backend import SuspicionBackend
 
 RULES = {
-    "SEA_RIGHTS": ("sea-rights", "海域权属校验", ("NO_APPROVAL", "OUT_OF_SCOPE", "CHANGE_MODE", "CLEAR")),
-    "ECO_RESTORE": ("eco-restore", "生态修复项目校验", ("ECO_OUT_OF_SCOPE", "ECO_CHANGE_MODE", "EXEMPT", "NO_APPROVAL", "CLEAR")),
-    "HISTORY": ("history", "历史疑点校验", ("HISTORY", "CLEAR")),
-    "COASTLINE": ("coastline", "自然岸线校验", ("OCCUPY_COASTLINE", "CLEAR")),
-    "REDLINE": ("redline", "生态保护红线校验", ("REDLINE", "CLEAR")),
-}
-RESULT_LABELS = {
-    "NO_APPROVAL": "未批先建", "OUT_OF_SCOPE": "超范围用海", "CHANGE_MODE": "改变用海方式",
-    "ECO_OUT_OF_SCOPE": "修复项目内超范围", "ECO_CHANGE_MODE": "修复项目内改变用海方式",
-    "EXEMPT": "免审批合规", "HISTORY": "命中历史疑点", "OCCUPY_COASTLINE": "占用自然岸线",
-    "REDLINE": "占用生态保护红线", "CLEAR": "本规则无疑点",
+    "SEA_RIGHTS": ("sea-rights", "海域权属校验", {
+        "NO_APPROVAL": "疑似未批先建", "OUT_OF_SCOPE": "疑似超范围用海",
+        "CHANGE_MODE": "疑似改变用海方式", "CLEAR": "有权-合规",
+    }),
+    "ECO_RESTORE": ("eco-restore", "生态修复项目校验", {
+        "ECO_OUT_OF_SCOPE": "疑似修复项目内超范围", "ECO_CHANGE_MODE": "疑似修复项目内改变用海方式",
+        "EXEMPT": "合规免审批", "NO_APPROVAL": "疑似未批先建", "CLEAR": "未占用修复区域",
+    }),
+    "HISTORY": ("history", "历史疑点校验", {"HISTORY": "疑似命中历史疑点", "CLEAR": "未命中历史疑点"}),
+    "COASTLINE": ("coastline", "自然岸线校验", {"OCCUPY_COASTLINE": "疑似占用自然岸线", "CLEAR": "未占用自然岸线"}),
+    "REDLINE": ("redline", "生态保护红线校验", {"REDLINE": "疑似占用生态保护红线", "CLEAR": "未占用生态保护红线"}),
 }
 
 
@@ -52,7 +52,7 @@ class Analyze(Scope):
 
 class Query(Scope):
     patchNos: Optional[list[str]] = Field(default=None, min_length=1, description="只查询指定图斑编号。")
-    suspicionTypes: Optional[list[Literal["NO_APPROVAL", "OUT_OF_SCOPE", "CHANGE_MODE", "ECO_OUT_OF_SCOPE", "ECO_CHANGE_MODE", "EXEMPT", "HISTORY", "OCCUPY_COASTLINE", "REDLINE"]]] = Field(default=None, min_length=1, description="结论类型筛选，省略不筛选。EXEMPT表示免审批合规，不计入疑点。")
+    suspicionTypes: Optional[list[Literal["NO_APPROVAL", "OUT_OF_SCOPE", "CHANGE_MODE", "ECO_OUT_OF_SCOPE", "ECO_CHANGE_MODE", "EXEMPT", "HISTORY", "OCCUPY_COASTLINE", "REDLINE"]]] = Field(default=None, min_length=1, description="结论编码筛选，省略不筛选。响应返回中文conclusion；EXEMPT表示合规免审批，不计入疑点。")
     match: Literal["any", "all"] = Field(default="any", description="多个结论条件满足任一或同时满足。")
     page: int = Field(default=1, ge=1, description="页码，默认只返回第一页。")
     pageSize: int = Field(default=10, ge=1, le=20, description="每页数量，默认10，最多20个图斑。")
@@ -92,7 +92,7 @@ def merge(patch_nos, results):
             if not isinstance(row, dict):
                 raise ValueError("规则返回了无效图斑记录")
             key = row.get("patchNo")
-            if key not in patches or key in seen or row.get("resultType") not in RULES[rule][2]:
+            if key not in patches or key in seen or row.get("conclusion") not in RULES[rule][2].values():
                 raise ValueError("规则结果包含无效编号、重复图斑或未知结论")
             seen.add(key)
             # Preserve source attribute names/units. Do not translate the ambiguous overlapRatio to percent.
@@ -101,7 +101,8 @@ def merge(patch_nos, results):
         present = {c["ruleCode"] for c in patch["conclusions"]}
         patch["missingRules"] = [r for r in RULES if r not in present]
         patch["complete"] = not patch["missingRules"]
-        suspicious = any(c["resultType"] not in ("CLEAR", "EXEMPT") for c in patch["conclusions"])
+        suspicious = any(c["conclusion"] not in (RULES[c["ruleCode"]][2]["CLEAR"], "合规免审批")
+                         for c in patch["conclusions"])
         patch["hasSuspicion"] = True if suspicious else (False if patch["complete"] else None)
     return list(patches.values())
 
@@ -122,7 +123,7 @@ class SuspicionTools:
             args = Analyze.model_validate(arguments)
             batch = args.batchNo
             patch_nos = set(args.patchNos) if args.patchNos is not None else None
-            for index, (rule, (path, title, codes)) in enumerate(RULES.items(), 1):
+            for index, (rule, (path, title, labels)) in enumerate(RULES.items(), 1):
                 details = {"ruleCode": rule, "ruleIndex": index, "batchNo": batch,
                            "finishedRules": index, "totalRules": len(RULES)}
                 stop = False
@@ -147,10 +148,10 @@ class SuspicionTools:
                     batch, patch_nos = result_batch, keys
                     results[rule] = rows
                     item = {"ruleCode": rule, "status": "SUCCESS",
-                            "saved": result["saved"], "counts": {code: sum(row["resultType"] == code for row in rows) for code in codes}}
+                            "saved": result["saved"], "counts": {label: sum(row["conclusion"] == label for row in rows) for label in labels.values()}}
                     if "thresholds" in result:
                         item["thresholds"] = result["thresholds"]
-                    counts_text = "，".join(f"{RESULT_LABELS[code]}{count}个" for code, count in item["counts"].items())
+                    counts_text = "，".join(f"{label}{count}个" for label, count in item["counts"].items())
                     summary = f"{title}完成：共{len(rows)}个图斑；{counts_text}。"
                 except (SpatialServiceError, ValueError) as exc:
                     errors.append(error(exc, rule))
@@ -202,7 +203,8 @@ class SuspicionTools:
                 if args.patchNos is not None and patch["patchNo"] not in args.patchNos:
                     continue
                 if args.suspicionTypes:
-                    codes = {c["resultType"] for c in patch["conclusions"]}
+                    codes = {code for c in patch["conclusions"] for code, label in RULES[c["ruleCode"]][2].items()
+                             if c["conclusion"] == label}
                     matches = [code in codes for code in args.suspicionTypes]
                     if not (all(matches) if args.match == "all" else any(matches)):
                         continue
@@ -210,7 +212,11 @@ class SuspicionTools:
             start = (args.page - 1) * args.pageSize
             page = deepcopy(selected[start:start + args.pageSize])
             if not args.includeEvidence:
-                compact_fields = {"ruleCode", "resultType", "useType", "useMode", "areaHa", "inProject", "projectName", "approvalState", "relatedId", "checkConclusion", "checkDate", "outsideAreaHa", "outsideRatioPct", "overlapAreaHa", "overlapRatio", "overlapRatioPct", "overlapLengthM", "naturalLengthM", "anyLengthM", "createdAt"}
+                compact_fields = {"ruleCode", "conclusion", "patchId", "eventNo", "useType", "useMode", "areaHa",
+                                  "projectCount", "projects", "exempt", "approvalState", "historyCount", "historyPatchNos",
+                                  "checkConclusions", "lastCheckDate", "relatedId", "outsideAreaHa", "outsideRatioPct",
+                                  "overlapAreaHa", "overlapRatio", "overlapRatioPct", "overlapLengthM", "naturalLengthM",
+                                  "anyLengthM", "createdAt"}
                 for patch in page:
                     patch["conclusions"] = [{k: v for k, v in c.items() if k in compact_fields} for c in patch["conclusions"]]
             return response({"batchNo": data["batchNo"],
@@ -228,10 +234,10 @@ class SuspicionTools:
             for item in data["ruleResults"]:
                 rule = item["ruleCode"]
                 conclusions = [c for p in patches for c in p["conclusions"] if c["ruleCode"] == rule]
-                counts = Counter(c["resultType"] for c in conclusions)
+                counts = Counter(c["conclusion"] for c in conclusions)
                 rules.append({**item, "assessedPatchCount": len(conclusions),
                               "unassessedPatchCount": len(patches) - len(conclusions),
-                              "counts": {code: counts[code] for code in RULES[rule][2]} if item["status"] == "SUCCESS" else None})
+                              "counts": {label: counts[label] for label in RULES[rule][2].values()} if item["status"] == "SUCCESS" else None})
             return response({"batchNo": data["batchNo"], "totalPatchCount": len(patches),
                              "assessedRules": list(RULES), "ruleResults": rules, "summary": totals(patches)}, errors)
         except (ValidationError, ValueError, SpatialServiceError) as exc:

@@ -259,6 +259,10 @@ Agent 已注册九个业务工具（括号内为协议调用标识）：
 （不含 `/api`），使用 `SPATIAL_API_KEY`，validate POST不自动重试。
 执行参数为batchNo、patchNos、save（默认false），固定①海域权属→②生态修复项目→③历史疑点→④自然岸线→⑤生态红线。
 五条规则全部调用真实服务，规则编码为SEA_RIGHTS、ECO_RESTORE、HISTORY、COASTLINE、REDLINE。
+响应按OpenAPI 1.6.0处理：明细返回中文conclusion，counts以中文结论为键，命中类保留“疑似”前缀，不依赖或返回resultType。
+suspicionTypes筛选入参继续使用结论编码，由工具按所属规则映射中文结论。
+生态修复使用projectCount、projects、exempt、rightsMethods等属性，项目外outsideAreaHa/outsideRatioPct为null，CLEAR时approvalState为null。
+历史疑点保留全部关联，使用historyCount、historyPatchNos、checkConclusions、lastCheckDate，日期取最近一条。
 前端process携带真实规则状态、计数与保存状态；调用失败发送failed，不再有展示占位分支。
 正常共7个process：框架原有整体开始/结束，加每条规则结束后一个process。普通规则失败后继续，401/403停止后续，取消终止执行。
 
@@ -266,7 +270,7 @@ Agent 已注册九个业务工具（括号内为协议调用标识）：
 save=false只试算，本次明细无法后续查询；save=true覆盖所选图斑同规则的正式结果，之后可按批次查询或统计。
 明细按图斑编号稳定排序，先对全部结果筛选，再返回指定页；page=1、pageSize=10（最多20），includeEvidence默认false。
 正式/results接口未提供分页，所以第一版完整读取后由工具分页；这限制交给模型的数据量，不减少后端读取量。
-统计覆盖五条规则；EXEMPT为免审批合规，不计为疑点，HISTORY为历史关联命中，不直接证明新增违法。
+统计覆盖五条规则；EXEMPT为合规免审批，不计为疑点，HISTORY为历史关联命中，不直接证明新增违法。
 缺失或失败不算合规，多标签去重，incompletePatchCount与疑点数可能重叠。
 源overlapRatio单位不明确，原样保留，不转换成百分比。
 
