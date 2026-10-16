@@ -5,9 +5,12 @@ from copy import deepcopy
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import httpx
 from aiohttp import web
 
 from agents.agent_loop import AgentLoop
+from agents.llm_client import HelloAgentsLLM
+from agents.llm_diagnostics import DiagnosticChatOpenAI
 from agents.skills import SkillCatalog
 from agents.tools.duanmian_element_compare import execute_duanmian_element_compare
 from agents.tools.executor import ToolExecutor
@@ -168,6 +171,69 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(r["api_key"] == "test-key" for r in self.requests))
         self.assertEqual(result, {**self.results["query"], "operation": "query_spatial_element"})
         self.assertEqual(events, ())
+
+    @patch("services.context_service.expand_query_synonyms", new=lambda text: text)
+    async def test_native_stream_query_formats_succeed_without_model_retry(self):
+        query = {
+            "element": "obs_station", "includeGeometry": True, "limit": 100,
+            "mode": "spatial", "spatial": {
+                "relation": "dwithin", "point": {"lon": 122.5, "lat": 31.3}, "distance": 1000,
+            },
+            "conditions": [{"field": "code", "operator": "=", "value": "E1001"}],
+        }
+        for query_argument in (query, json.dumps(query)):
+            with self.subTest(query_argument=query_argument):
+                self.requests.clear()
+                model_requests = []
+
+                async def respond(request):
+                    body = json.loads(request.content)
+                    model_requests.append(body)
+                    spatial_schema = next(tool["function"]["parameters"] for tool in body["tools"]
+                                          if tool["function"]["name"] == TOOL_NAME)
+                    self.assertEqual(spatial_schema["properties"]["query"]["type"], "object")
+                    observations = [message for message in body["messages"] if message["role"] == "tool"]
+                    if not observations:
+                        name, arguments = TOOL_NAME, {"operation": "query_spatial_element", "query": query_argument}
+                    elif len(observations) == 1:
+                        result = json.loads(observations[0]["content"])
+                        name, arguments = "map_action", {"action_type": "GEOJSON_ADD", "payload": {"result_ref": result["result_ref"]}}
+                    else:
+                        name = None
+                    deltas = [{"content": "已提交地图展示。"}]
+                    if name is not None:
+                        encoded = json.dumps(arguments)
+                        deltas = [{"tool_calls": [{"index": 0,
+                            **({"id": name, "type": "function"} if start == 0 else {}),
+                            "function": {**({"name": name} if start == 0 else {}),
+                                         "arguments": encoded[start:start + 11]},
+                        }]} for start in range(0, len(encoded), 11)]
+                    deltas.append({})
+                    chunks = [{"id": "replay", "object": "chat.completion.chunk", "model": "test",
+                               "choices": [{"index": 0, "delta": delta,
+                                            "finish_reason": ("tool_calls" if name else "stop") if index == len(deltas) - 1 else None}]}
+                              for index, delta in enumerate(deltas)]
+                    content = "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+                    return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=content)
+
+                async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+                    client = DiagnosticChatOpenAI(model="test", api_key="test-key", base_url="http://test/v1",
+                                                  http_async_client=http_client)
+                    with patch("agents.llm_client.ChatOpenAI", return_value=client):
+                        llm = HelloAgentsLLM()
+                    recorder = AsyncMock()
+                    events = [event async for event in AgentLoop(llm, self.executor).run_stream(
+                        "查询选区内观测站并展示地图", [], audit_recorder=recorder,
+                    )]
+                finished = [event for event in events if event.type == "tool_finished"]
+                self.assertEqual([(event.tool_name, event.success) for event in finished],
+                                 [(TOOL_NAME, True), ("map_action", True)])
+                self.assertEqual(len(model_requests), 3)
+                self.assertEqual([request["payload"] for request in self.requests], [query])
+                self.assertEqual(recorder.started.await_args_list[0].kwargs["arguments"]["query"], query_argument)
+                self.assertTrue(all(call.kwargs["status"] == "succeeded" for call in recorder.finished.await_args_list))
+                action = next(event.data for event in events if event.type == "map_action")
+                self.assertEqual(action["payload"]["geojson"]["features"], self.results["query"]["features"])
 
     async def test_station_queries_use_catalog_fields_without_local_rewriting(self):
         self.results["list"] = [{"dataKey": "obs_station", "dataName": "观测站点"}]
@@ -689,7 +755,7 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actions[0]["action_type"], "GEOJSON_ADD")
         self.assertEqual(actions[0]["payload"]["geojson"]["features"], features)
 
-    async def test_default_call_collects_more_than_twenty_records_and_preserves_all_filters(self):
+    async def test_json_string_query_collects_all_pages_and_preserves_filters_and_map(self):
         features = [{
             "type": "Feature", "id": index, "geometry": {"type": "Point", "coordinates": [122 + index / 1000, 30]},
             "properties": {"std_name": f"测试海岛{index}", "area": index},
@@ -710,7 +776,7 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
                 observations = [json.loads(m["content"]) for m in messages if m["role"] == "tool"]
                 if not observations:
                     yield "", [{"id": "query-all", "name": TOOL_NAME, "args": {
-                        "operation": "query_spatial_element", "query": query,
+                        "operation": "query_spatial_element", "query": json.dumps(query, ensure_ascii=False),
                     }}]
                 elif len(observations) == 1:
                     yield "", [{"id": "map-all", "name": "map_action", "args": {

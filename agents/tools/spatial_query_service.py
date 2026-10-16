@@ -108,7 +108,9 @@ TOOL_PARAMETERS: dict[str, Any] = {
         "query": {
             **{key: value for key, value in QUERY_PARAMETERS.items() if key != "$defs"},
             "description": (
-                "query_spatial_element 必填；对应 v2 /query 请求体，"
+                "query_spatial_element 必填的 JSON 对象，不要传转义后的 JSON 字符串；"
+                '调用示例：{"operation":"query_spatial_element","query":{"element":"目录返回的dataKey","includeGeometry":true}}。'
+                "对应 v2 /query 请求体，"
                 "要素标识和可查询字段以空间目录及字段定义为准。"
             ),
         },
@@ -356,7 +358,16 @@ class SpatialQueryServiceTool:
             data_key = self._required_text(arguments.get("dataKey"), "dataKey")
             data = await self.client.get_spatial_element_detail(data_key)
         elif operation == "query_spatial_element":
-            query = SpatialElementQuery.model_validate(arguments.get("query"))
+            raw_query = arguments.get("query")
+            # 部分兼容模型会将内层 query 再序列化一次，仅解析这一层，不改写字段值。
+            if isinstance(raw_query, str):
+                try:
+                    raw_query = json.loads(raw_query)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("query 必须是 JSON 对象；收到的字符串不是合法 JSON") from exc
+            if not isinstance(raw_query, dict):
+                raise ValueError("query 必须是 JSON 对象，例如 {\"element\":\"目录返回的dataKey\",\"includeGeometry\":true}")
+            query = SpatialElementQuery.model_validate(raw_query)
             payload = query.model_dump(exclude_unset=True, exclude_none=True)
             json.dumps(payload, allow_nan=False)
             data = (
