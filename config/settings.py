@@ -4,7 +4,7 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
@@ -211,6 +211,8 @@ class SkillSettings(BaseModel):
 
 class ExactQaSettings(BaseModel):
     enabled: bool = False
+    match_mode: Literal["exact", "model"] = "model"
+    match_timeout: float = Field(default=30, gt=0, allow_inf_nan=False)
     timeout: float = Field(default=5, gt=0)
     chunk_chars: int = Field(default=80, ge=1, le=4096)
     chars_per_second: float = Field(default=40, gt=0, allow_inf_nan=False)

@@ -3,16 +3,30 @@
 ## 路由与匹配
 
 继续使用 `POST /api/agent/chat/stream`。ChatService 在会话归属校验、敏感词检查之后，
-读取系统提示词、启用 Skill 和启动模型之前，调用 dh-knowledge 的
-`POST /internal/v1/qa/exact-match`，请求体为 `{"question":"原始问题"}`。
+读取正常问答系统提示词、启用 Skill 和启动普通智能体之前，执行固定 QA 匹配。
+`exact_qa.match_mode` 支持 `model`（默认）和 `exact`，两条路径共用原有 QA 回放流程。
 
-当前问答库为全局库。匹配仅使用本轮原始问题，不使用历史、选区、板块、同义词或模型改写。
-空格、换行、大小写、标点和全半角均参与匹配。SHA-256 只用于数据库候选定位，
-返回前还会严格比较原文。问题最长 20000 个字符，超出查询限制直接进入普通问答。
+模型模式：
 
-未命中返回成功封装中的 `data: null`，继续现有 Agent 流程。超时、非成功 HTTP、
-无效响应和问题不一致返回 `EXACT_QA_LOOKUP_FAILED`，保存失败 Run，不调用模型。
-敏感词拒绝和会话归属错误不会触发精确匹配。
+1. Agent 调用 `GET /internal/v1/qa/candidates`，读取全部已启用 QA 的当前发布问题、qaId 和 versionId。
+2. 一次把本轮用户原始问题和全部候选问题交给模型；模型复用现有 `llm` 连接配置，温度为 0，不绑定工具。
+   候选 ID 为 `qa-{qaId}-v{versionId}`。不向匹配模型发送答案、思维或引用，也不发送历史、选区或板块信息。
+3. 模型只能返回 `{"status":"matched","candidate_id":"qa-1-v2"}`，或返回 no_match/ambiguous 且 candidate_id 为 null。
+   问题应语义等价，不能仅因主题相关就选中；依赖缺失上下文、存在歧义时不匹配。
+4. 选中后调用 `GET /internal/v1/qa/{qaId}/versions/{versionId}`，仅当 QA 仍启用且此版本仍是当前发布版本时返回完整快照。
+   Agent 再校验快照的 QA ID、版本 ID、问题与候选一致，不要求用户问题与候选原文一致。
+5. 命中后原样回放已发布答案、思维和引用。原始用户提问仍按原文保存。
+
+无候选、不匹配、歧义、模型超时/失败、非法 JSON、非法 ID、工具调用、候选接口故障，以及 QA 停用/删除/换版均转入正常问答。
+匹配模型输出只用于路由，不作为正文或思维发送前端。异常日志只记录异常类型。
+不引入缓存、向量检索、预筛选或分批匹配；候选超出模型上下文导致调用失败时同样转普通问答，不截断候选。
+
+精确模式：继续使用 `POST /internal/v1/qa/exact-match`，请求体为 `{"question":"原始问题"}`。
+空格、换行、大小写、标点和全半角均参与匹配，SHA-256 只用于定位，返回前严格比较原文。
+未命中继续现有 Agent 流程；超时、非成功 HTTP、无效响应和问题不一致仍返回 `EXACT_QA_LOOKUP_FAILED`，保持原行为。
+
+当前问答库为全局库。问题最长 20000 个字符，超出查询限制直接进入普通问答。
+敏感词拒绝和会话归属错误不会触发任何 QA 匹配。
 
 ## 数据与发布
 
@@ -110,6 +124,9 @@ reasoning_event_sequence。历史加载返回 reasoning_event_id，正文继续�
 
 `exact_qa.enabled` 默认 YAML 配置为 true；可以设置
 `NEW_DH_EXACT_QA__ENABLED=false` 禁用精确查询。
+`exact_qa.match_mode` 默认 `model`，可用 `NEW_DH_EXACT_QA__MATCH_MODE=exact` 切回原精确匹配。
+`exact_qa.match_timeout` 默认 30 秒，使用 `NEW_DH_EXACT_QA__MATCH_TIMEOUT` 调整匹配模型调用超时。
+知识服务 HTTP 超时仍独立使用 `exact_qa.timeout`。模型匹配增加一次非流式模型调用的首字延迟；本次无需新依赖或数据库迁移。
 `exact_qa.timeout` 默认 5 秒，`exact_qa.chunk_chars` 默认 80。
 `exact_qa.chars_per_second` 默认 40 字符/秒，可用
 `NEW_DH_EXACT_QA__CHARS_PER_SECOND=40` 配置为其他正有限数值。
