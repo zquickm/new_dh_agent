@@ -61,6 +61,8 @@ dictionaries:
 
 exact_qa:
   enabled: true
+  match_mode: model
+  match_timeout: 30
   timeout: 5
   chunk_chars: 80
   chars_per_second: 80

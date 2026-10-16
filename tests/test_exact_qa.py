@@ -334,7 +334,7 @@ class ExactQaChatTest(unittest.IsolatedAsyncioTestCase):
 
 class ExactQaClientTest(unittest.IsolatedAsyncioTestCase):
     async def call(self, handler):
-        settings = SimpleNamespace(exact_qa=SimpleNamespace(enabled=True, timeout=5),
+        settings = SimpleNamespace(exact_qa=ExactQaSettings(enabled=True, match_mode="exact"),
             dictionaries=SimpleNamespace(base_url="http://knowledge", connect_timeout=1, verify_ssl=True),
             internal_request=InternalRequestSettings(token="unit-test-secret-token"))
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))

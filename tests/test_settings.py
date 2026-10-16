@@ -51,6 +51,17 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(settings.thinking_min_duration_ms, 1000)
             self.assertEqual(settings.thinking_max_duration_ms, 3000)
 
+    def test_qa_match_mode_defaults_to_model_and_can_switch_to_exact(self):
+        from config.settings import ExactQaSettings
+        self.assertEqual(ExactQaSettings().match_mode, "model")
+        with patch.dict(os.environ, {"NEW_DH_EXACT_QA__MATCH_MODE": "exact",
+                                    "NEW_DH_EXACT_QA__MATCH_TIMEOUT": "12"}):
+            settings = Settings().exact_qa
+            self.assertEqual(settings.match_mode, "exact")
+            self.assertEqual(settings.match_timeout, 12)
+        with self.assertRaises(ValidationError):
+            ExactQaSettings(match_mode="unknown")
+
     def test_new_scenarios_load_from_yaml_and_validate_nested_overrides(self):
         values = yaml.safe_load((CONFIG_DIR / "application.yaml").read_text(encoding="utf-8"))
         values["business_scenarios"]["政策协同分析评估"] = {
