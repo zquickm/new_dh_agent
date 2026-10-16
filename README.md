@@ -389,7 +389,7 @@ SPATIAL_API_KEY=
 
 海岛与断面一览统计复用同一工具及 `tools.spatial` 地址、`SPATIAL_API_KEY`：
 
-- `island_overview`：`GET /api/spatial/islands/overview`。可传 `page`（起始页，默认 1）、`size`（每批默认 20，上限 100）、`keyword`、`province`、`city`、`islandClass`、`minLng/minLat/maxLng/maxLat`（矩形四坐标必须同时传）。工具默认自动翻页并合并全部 `items`；首个请求确认实际页大小和总数后，后续每批最多并发 4 页，按页码顺序校验和合并。显式传顶层 `fetch_all=false` 时保留原单页模式。保留全部筛选条件；`total/byProvince/byClass` 直接采用接口返回值，不按合并列表或单页分组重算统计。
+- `island_overview`：`GET /api/spatial/islands/overview`。可传 `page`（起始页，默认 1）、`size`（每批默认 20，上限 100）、`keyword`、`province`、`city`、`islandClass`、`minLng/minLat/maxLng/maxLat`（矩形四坐标必须同时传）。工具默认自动翻页并合并全部 `items`，显式传顶层 `fetch_all=false` 时保留原单页模式。保留全部筛选条件；`total/byProvince/byClass` 直接采用接口返回值，不按合并列表或单页分组重算统计。
 - `dm_duanmian_overview`：`GET /api/spatial/v2/duanmian/overview`，无其他参数。断面情况概览、断面数、测点数、要素数、数据量、最近航次直接采用 `overview`，单断面统计采用 `sections`，要素清单采用 `chemistryElements/hydrometElements`。不自行归并站位编码重算测点数量，也不把总体统计当成时间或选区筛选结果。
 - `dm_duanmian_latest`：`GET /api/spatial/v2/duanmian/latest`，必填 `code`（如 E1/EK 或 E1001），返回每站最近观测及各深度层的化学/水文快照，保留 `chemistryFields/hydrometFields` 标签映射及 `elements` 物理列名。
 - `dm_duanmian_observations`：`GET /api/spatial/v2/duanmian/observations`，必填 `from/to`（yyyy-MM-dd，含起止日），跨度不超过 3 个月；可选 `code`，省略时不发送该参数，查询 E1/E2/E3 全部断面测点并保留响应 `scope=all、code=null`。无 code 时命中超过 50000 条，服务明确报错，须收窄时间或指定断面/测点，不截断或抽样。可传 `page`（默认 1）、`size`（默认 100，上限 1000），按文档每次只取一页，保留 `total/page/size/rows`，不支持 `fetch_all`；完整明细需固定原条件继续翻页，不能将单页视为全量。日期格式、先后顺序和分页参数在工具侧校验，三个月跨度与五万条上限由伙伴服务最终校验。
