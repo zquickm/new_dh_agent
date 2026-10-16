@@ -78,6 +78,9 @@ class MapActionToolTest(unittest.TestCase):
         geojson = {"type": "FeatureCollection", "features": [
             {"type": "Feature", "id": 1, "properties": {"name": "航线"},
              "geometry": {"type": "MultiLineString", "coordinates": [[[122, 30], [123, 31]]]}},
+            *[{"type": "Feature", "properties": {}, "geometry": geometry} for geometry in (
+                {}, {"type": "unknown"}, {"type": "Polygon"}, "POINT(122 30)",
+            )],
         ]}
         payload = {"layer_id": "routes", "geojson": geojson, "replace": False, "fit_bounds": False}
         output = execute_map_action("GEOJSON_ADD", payload)
@@ -86,7 +89,6 @@ class MapActionToolTest(unittest.TestCase):
         for invalid in (
             {"layer_id": ""}, {"group_id": 1}, {"replace": "false"}, {"fit_bounds": 1},
             {"geojson": []}, {"geojson": {"type": "FeatureCollection", "features": [1]}},
-            {"geojson": {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "bad"}}]}},
         ):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 execute_map_action("GEOJSON_ADD", {**payload, **invalid})

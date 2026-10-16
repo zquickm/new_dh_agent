@@ -40,38 +40,14 @@ class SpatialCondition(QueryModel):
         "bbox", "dwithin", "intersects", "within", "contains", "touches",
         "overlaps", "disjoint",
     ] = Field(description="空间关系；被查询要素与输入几何的关系以空间服务定义为准。")
-    geometry: Optional[dict[str, Any]] = Field(
-        default=None,
-        description="EPSG:4490 GeoJSON 几何对象；与 point/bbox 同传时优先使用 geometry。",
+    geometry: Any = Field(
+        default=None, description="可选空间几何参数，原样转发给空间服务处理。",
     )
     point: Optional[QueryPoint] = Field(default=None, description="dwithin 的中心点。")
     bbox: Optional[QueryBounds] = Field(default=None, description="矩形查询范围。")
     distance: Optional[float] = Field(
-        default=None, gt=0, description="dwithin 必填的距离，单位为米。"
+        default=None, gt=0, description="dwithin 的距离，单位为米。"
     )
-
-    @model_validator(mode="after")
-    def validate_spatial(self) -> SpatialCondition:
-        if self.geometry is not None:
-            geometry_type = self.geometry.get("type")
-            if not isinstance(geometry_type, str) or geometry_type not in {
-                "Point", "MultiPoint", "LineString", "MultiLineString",
-                "Polygon", "MultiPolygon", "GeometryCollection",
-            }:
-                raise ValueError("geometry 必须为 GeoJSON 几何对象")
-            coordinate_key = "geometries" if geometry_type == "GeometryCollection" else "coordinates"
-            if not isinstance(self.geometry.get(coordinate_key), list):
-                raise ValueError(f"geometry 缺少 {coordinate_key} 数组")
-            # Geometry topology and element-specific constraints belong to the spatial service.
-        if self.relation == "dwithin":
-            if self.distance is None or (self.geometry is None and self.point is None):
-                raise ValueError("dwithin 需要 distance 及 point 或 geometry")
-        elif self.relation == "bbox":
-            if self.geometry is None and self.bbox is None:
-                raise ValueError("bbox 查询需要 bbox 或 geometry")
-        elif self.geometry is None:
-            raise ValueError(f"{self.relation} 需要 geometry")
-        return self
 
 
 class SpatialElementQuery(QueryModel):
