@@ -443,6 +443,22 @@ class AgentLoop:
                     name = str(tool_call.get("name") or "")
                     if not name:
                         raise RuntimeError("模型返回了无效工具调用")
+                    arguments = tool_call.get("args") or {}
+                    spatial_tool = tools.get("spatial_query_service")
+                    if (
+                        tools.get(name) is None
+                        and spatial_tool is not None
+                        and name in spatial_tool.parameters.get("properties", {}).get("operation", {}).get("enum", ())
+                        and isinstance(arguments, dict)
+                        and arguments.get("operation", name) == name
+                    ):
+                        # Correct an operation used as a tool name before audit and history.
+                        logger.warning(
+                            "spatial_operation_tool_name_corrected run_id=%s round=%s operation=%s call_id=%s",
+                            run_id, round_number, name, tool_call.get("id"),
+                        )
+                        arguments = {**arguments, "operation": name}
+                        name = "spatial_query_service"
                     normalized_calls.append(
                         {
                             **tool_call,
@@ -450,7 +466,7 @@ class AgentLoop:
                                 tool_call.get("id") or f"call-{round_number}-{index}"
                             ),
                             "name": name,
-                            "args": tool_call.get("args") or {},
+                            "args": arguments,
                             "type": "tool_call",
                         }
                     )

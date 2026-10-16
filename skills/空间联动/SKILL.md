@@ -5,7 +5,7 @@ description: 查询区域空间要素（观测站、断面测点及线面）并�
 
 # 空间联动
 
-空间要素的位置、基础属性和分布统一使用 `spatial_query_service` 的通用查询，包括断面及其测点。本 Skill 独立完成空间检索、观测站查询和地图联动。下文查询操作均通过 `spatial_query_service(operation=操作名, ...)` 调用；查询只返回数据，取得结果后再显式调用 `map_action` 标点、展示弹窗或线面。参数以工具 Schema 为准。
+空间要素的位置、基础属性和分布统一使用 `spatial_query_service` 的通用查询，包括断面及其测点。本 Skill 独立完成空间检索、观测站查询和地图联动。下文查询操作均通过 `spatial_query_service(operation=操作名, ...)` 调用；操作名是 `operation` 的枚举值，不能作为独立工具名。查询只返回数据，取得结果后再显式调用 `map_action` 标点、展示弹窗或线面。参数以工具 Schema 为准。
 
 ## 观测体系概览
 
@@ -22,7 +22,7 @@ description: 查询区域空间要素（观测站、断面测点及线面）并�
 
 ## 空间要素查询
 
-- 区域内泛问“有哪些”时，用 `list_spatial_elements` 发现目录，再按返回的 `dataKey` 逐类调用 `query_spatial_element`，不因要素类别不同而跳过查询。逐类汇总实际命中数量和名称；断面测点数量不等于断面条数，按返回属性区分。已明确类别时只查目标类别。
+- 区域内泛问“有哪些”时，用 `spatial_query_service(operation="list_spatial_elements")` 发现目录，再按返回的 `dataKey` 逐类调用 `spatial_query_service(operation="query_spatial_element", query=查询条件)`，不因要素类别不同而跳过查询。逐类汇总实际命中数量和名称；断面测点数量不等于断面条数，按返回属性区分。已明确类别时只查目标类别。
 - 区域总览由本 Skill 独立完成；查询命中的全部类别纳入回答，再显式调用 `map_action` 展示实际取得的几何，不追加其他业务流程或专题图。
 - `list_spatial_elements` 是类别目录，`get_spatial_element_detail` 是类别字段定义，不是单个要素的详情；具体要素记录使用 `query_spatial_element`。
 - 某类别查询失败或不支持所需空间关系时，说明该类未完成查询，不当成不存在，也不改成无范围的属性查询。

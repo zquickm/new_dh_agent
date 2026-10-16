@@ -3,7 +3,7 @@ import asyncio
 import unittest
 from copy import deepcopy
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from aiohttp import web
 
@@ -83,6 +83,66 @@ class SpatialElementsTest(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.tool.close()
         await self.runner.cleanup()
+
+    async def test_operation_tool_names_use_canonical_calls_in_execution_audit_and_history(self):
+        calls = [
+            {"id": "list", "name": "list_spatial_elements", "args": {}},
+            {"id": "detail", "name": "get_spatial_element_detail", "args": {"dataKey": "test_point"}},
+            {"id": "query", "name": "query_spatial_element", "args": {"query": {"element": "test_point", "includeGeometry": True}}},
+        ]
+        original = deepcopy(calls)
+        llm = FakeLlm([*[([], [call]) for call in calls], (["已取得目录及测试点。"], [])])
+        agent = AgentLoop(llm, self.executor)
+        recorder = AsyncMock()
+        saved = []
+        try:
+            with patch("services.context_service.expand_query_synonyms", side_effect=lambda text: text):
+                events = [event async for event in agent.run_stream(
+                    "东海区立体观测体系概览", [], audit_recorder=recorder,
+                    model_messages_callback=saved.append,
+                )]
+            finished = [event for event in events if event.type == "tool_finished"]
+            self.assertEqual([event.success for event in finished], [True] * 3)
+            self.assertTrue(all(event.tool_name == TOOL_NAME for event in finished))
+            self.assertEqual([request["path"] for request in self.requests], [
+                "/api/spatial/v2/elements/list", "/api/spatial/v2/elements/detail", "/api/spatial/v2/elements/query",
+            ])
+            self.assertEqual(self.requests[1]["params"], {"dataKey": "test_point"})
+            self.assertEqual(self.requests[2]["payload"], calls[2]["args"]["query"])
+            self.assertEqual(calls, original)
+            for index, call in enumerate(calls):
+                expected_args = {**call["args"], "operation": call["name"]}
+                audit = recorder.started.await_args_list[index].kwargs
+                self.assertEqual((audit["tool_name"], audit["arguments"]), (TOOL_NAME, expected_args))
+                self.assertEqual(recorder.finished.await_args_list[index].kwargs["status"], "succeeded")
+                assistant, result = saved[-1][index * 2:index * 2 + 2]
+                self.assertEqual(assistant["tool_calls"][0]["name"], TOOL_NAME)
+                self.assertEqual(assistant["tool_calls"][0]["args"], expected_args)
+                self.assertEqual((result["name"], result["tool_call_id"]), (TOOL_NAME, call["id"]))
+            self.assertNotIn("list_spatial_elements", {item["function"]["name"] for item in llm.calls[0][1]})
+        finally:
+            await agent.close()
+
+    async def test_operation_name_correction_preserves_scope_and_argument_validation(self):
+        cases = [
+            ("查询目录", "list_spatial_elements", {"operation": "query_spatial_element"}, "TOOL_NOT_FOUND"),
+            ("厦门查询目录", "list_spatial_elements", {}, "TOOL_NOT_FOUND"),
+            ("查询目录", "invented_spatial_operation", {}, "TOOL_NOT_FOUND"),
+            ("查询目录", "list_spatial_elements", {"unexpected": True}, "TOOL_ARGUMENT_INVALID"),
+        ]
+        for question, name, arguments, error_code in cases:
+            with self.subTest(question=question, name=name, arguments=arguments):
+                llm = FakeLlm([([], [{"id": "invalid", "name": name, "args": arguments}]), (["查询失败。"], [])])
+                agent = AgentLoop(llm, self.executor)
+                recorder = AsyncMock()
+                try:
+                    with patch("services.context_service.expand_query_synonyms", side_effect=lambda text: text):
+                        events = [event async for event in agent.run_stream(question, [], audit_recorder=recorder)]
+                    self.assertFalse(next(event for event in events if event.type == "tool_finished").success)
+                    self.assertEqual(recorder.finished.await_args.kwargs["error_code"], error_code)
+                    self.assertEqual(self.requests, [])
+                finally:
+                    await agent.close()
 
     async def test_discovery_detail_and_query_follow_v2_wire_contract(self):
         listing = await self.tool.execute("list_spatial_elements")

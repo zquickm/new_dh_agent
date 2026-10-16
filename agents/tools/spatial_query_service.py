@@ -41,6 +41,8 @@ class IslandOverviewQuery(BaseModel):
 
 TOOL_NAME = "spatial_query_service"
 TOOL_DESCRIPTION = (
+    '工具名固定为 spatial_query_service；所有查询操作均通过 operation 参数选择，不是独立工具。'
+    '例如目录查询应调用 spatial_query_service(operation="list_spatial_elements")，不得调用 list_spatial_elements 工具。'
     "查询已注册空间要素的目录、字段定义、属性和几何，以及观测站在线状态、最新观测和时序数据。"
     "海岛一览数量、按省/分类分布及面积排序列表必须用 island_overview；"
     "断面一览/东海区断面情况概览、断面数、测点数、要素清单、数据量及最近航次必须用 dm_duanmian_overview（无参数）。"
@@ -70,7 +72,7 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "island_overview",
                 "dm_duanmian_overview",
             ],
-            "description": "通用空间或观测数据查询操作；list_spatial_elements 无需其他参数。",
+            "description": "通用空间或观测数据查询操作；枚举值不是工具名。目录查询传 operation=list_spatial_elements，无需其他参数。",
         },
         "dataKey": {
             "type": "string",

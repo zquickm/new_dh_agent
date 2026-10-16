@@ -14,7 +14,7 @@ description: 指导东海 E1、E2、E3 三条断面及辅助点的业务、数�
   - 例：“2022年E1断面盐度情况”，先用 `database_query` 查询全年盐度统计及有有效盐度观测的航次，再用 `dm_duanmian_analysis` 出 `temp-section` 图，选择 `E1`、`盐度 S` 和结果中最新的实际航次，说明该图仅为全年中的单航次示例；地图同步展示 E1、E2、E3，统计与专题图仍仅针对 E1。
 
 - 调查断面及其站位、辅助点的位置、基础属性和分布，使用 `spatial_query_service` 的通用查询；历史观测、跨期统计和描述性评价使用 `database_query`。空间记录不能代替历史观测数据，不为查询基础信息重复调用数据库。
-- 通用查询通过 `spatial_query_service(operation=操作名, ...)` 调用：缺少目录结果时，先单独调用 `list_spatial_elements` 并等待返回，再选择目标类别并原样使用其 `dataKey`；已有目录结果可复用。默认字段满足需求时直接 `query_spatial_element(query=查询条件)`，自选字段、过滤或排序前复用该类别字段定义，缺少时调用 `get_spatial_element_detail(dataKey=类别标识)`。例如目录返回断面测点 `dataKey="dm_duanmian"`，则详情参数 `dataKey` 和查询参数 `query.element` 均用该值；`transect-stations` 仅为地图 `layer_id`，不得作为查询类别或据此推导类别。完整保留断面、站位及选区条件，不猜字段名或放宽为全库查询。
+- 通用查询通过 `spatial_query_service(operation=操作名, ...)` 调用；操作名是 `operation` 的枚举值，不能作为独立工具名。缺少目录结果时，先单独调用 `spatial_query_service(operation="list_spatial_elements")` 并等待返回，再选择目标类别并原样使用其 `dataKey`；已有目录结果可复用。默认字段满足需求时直接调用 `spatial_query_service(operation="query_spatial_element", query=查询条件)`，自选字段、过滤或排序前复用该类别字段定义，缺少时调用 `spatial_query_service(operation="get_spatial_element_detail", dataKey=类别标识)`。例如目录返回断面测点 `dataKey="dm_duanmian"`，则详情参数 `dataKey` 和查询参数 `query.element` 均用该值；`transect-stations` 仅为地图 `layer_id`，不得作为查询类别或据此推导类别。完整保留断面、站位及选区条件，不猜字段名或放宽为全库查询。
 - 收到“要素/图层未注册”时重新查询目录；仅在目录能确定目标类别时，保留原条件修正一次。目录无目标类别或修正后仍失败时说明限制，不猜别名重试。
 - 仅查询位置、基础属性或分布时不打开无关专题图；地图展示按下节执行。
 - 仅要求专题出图或打开分析浮层时使用 `dm_duanmian_analysis`；跨月全量化学要素对比则使用 `dm_duanmian_element_compare`，由前端查询出图，无需额外查询数据库；仍须按下节同步展示三条断面，浮层不能代替地图展示。
