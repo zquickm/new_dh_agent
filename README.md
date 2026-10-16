@@ -242,7 +242,7 @@ Agent 已注册九个业务工具（括号内为协议调用标识）：
   字符串数组，不从请求条件推造切片标签；多标签组合的 AND/OR 语义需按实际平台联调验证。
   时间标签仅影响文档检索，断面实测数据仍由空间服务或数据库提供。
 - 数据库查询（`database_query`）：将自然语言问题转换成 Apache Doris 只读 SQL，并查询授权业务表。
-- 通用空间查询服务（`spatial_query_service`）：查询注册空间要素的目录、基础属性和几何（含观测站），以及观测站在线状态、最新数据和时序数据。
+- 通用空间查询服务（`spatial_query_service`）：查询注册空间要素的目录、基础属性和几何（含观测站），以及观测站在线状态、最新数据和时序数据；支持断面一览、最新观测、区间明细和航次列表。
 - 地图操作（`map_action`）：通过 SSE 驱动前端地图执行标准可视化动作，不查询或修改业务数据。
 - 断面专题分析（`dm_duanmian_analysis`）：发送断面专题分析出图参数，由前端打开独立浮层并查询出图。
 - 断面要素对比（`dm_duanmian_element_compare`）：按测点与2–12个月份联动全量化学要素对比浮层。
@@ -355,7 +355,7 @@ description: 查询或分析业务观测站时使用。
 项目内置“空间联动”和“断面业务”两个 Skill。业务路由、查询步骤和可视化时机放在
 各自独立的 Skill 中，Skill 不互相加载；主模型按任务选择对应 Skill。工具描述说明能力、输入输出和副作用，Schema 保留参数校验，
 通用工具不按业务类别限制复用；断面专题出图工具保留先加载“断面业务”的前置提示。空间位置、基础属性和分布（含断面）使用通用空间查询；
-断面一览统计使用 `spatial_query_service` 的 `dm_duanmian_overview`，接口未覆盖的历史观测和跨期指标统计使用 `database_query`，指标分析默认结合 `dm_duanmian_analysis` 出图。断面信息类问题（含一览、历史分析、月份对比和报告）默认另用通用空间查询取得 E1/E2/E3 的真实几何，再通过 `map_action(GEOJSON_ADD)` 展示；仅问单断面或测点时也展示三条断面背景，原统计和出图范围保持用户条件。明确只要文字、只要表格或不要图/地图时不绘制。
+断面一览统计使用 `spatial_query_service` 的 `dm_duanmian_overview`，最新观测、区间明细和航次列表分别使用 `dm_duanmian_latest`、`dm_duanmian_observations`、`dm_duanmian_voyages`；接口未覆盖的历史观测和跨期指标统计使用 `database_query`，指标分析默认结合 `dm_duanmian_analysis` 出图。断面信息类问题（含一览、历史分析、月份对比和报告）默认另用通用空间查询取得 E1/E2/E3 的真实几何，再通过 `map_action(GEOJSON_ADD)` 展示；仅问单断面或测点时也展示三条断面背景，原统计和出图范围保持用户条件。明确只要文字、只要表格或不要图/地图时不绘制。
 
 RAG、重排、数据库和 SQL 生成模型的地址、超时、重试、知识库 ID、数据库账号等
 普通参数统一配置在 `config/application.yaml`，不同环境的差异写入对应的
@@ -387,8 +387,11 @@ SPATIAL_API_KEY=
 
 - `island_overview`：`GET /api/spatial/islands/overview`。可传 `page`（起始页，默认 1）、`size`（每批默认 20，上限 100）、`keyword`、`province`、`city`、`islandClass`、`minLng/minLat/maxLng/maxLat`（矩形四坐标必须同时传）。工具默认自动翻页并合并全部 `items`，显式传顶层 `fetch_all=false` 时保留原单页模式。保留全部筛选条件；`total/byProvince/byClass` 直接采用接口返回值，不按合并列表或单页分组重算统计。
 - `dm_duanmian_overview`：`GET /api/spatial/v2/duanmian/overview`，无其他参数。断面情况概览、断面数、测点数、要素数、数据量、最近航次直接采用 `overview`，单断面统计采用 `sections`，要素清单采用 `chemistryElements/hydrometElements`。不自行归并站位编码重算测点数量，也不把总体统计当成时间或选区筛选结果。
+- `dm_duanmian_latest`：`GET /api/spatial/v2/duanmian/latest`，必填 `code`（如 E1/EK 或 E1001），返回每站最近观测及各深度层的化学/水文快照，保留 `chemistryFields/hydrometFields` 标签映射及 `elements` 物理列名。
+- `dm_duanmian_observations`：`GET /api/spatial/v2/duanmian/observations`，必填 `from/to`（yyyy-MM-dd，含起止日），跨度不超过 3 个月；可选 `code`，省略时不发送该参数，查询 E1/E2/E3 全部断面测点并保留响应 `scope=all、code=null`。无 code 时命中超过 50000 条，服务明确报错，须收窄时间或指定断面/测点，不截断或抽样。可传 `page`（默认 1）、`size`（默认 100，上限 1000），按文档每次只取一页，保留 `total/page/size/rows`，不支持 `fetch_all`；完整明细需固定原条件继续翻页，不能将单页视为全量。日期格式、先后顺序和分页参数在工具侧校验，三个月跨度与五万条上限由伙伴服务最终校验。
+- `dm_duanmian_voyages`：`GET /api/spatial/v2/duanmian/voyages`，必填 `code`（断面或测点），返回按日期倒序的 `voyages`，包含各航次化学/水文覆盖测点数；专题出图航次年月可取 `date` 前 7 位。
 
-统计取数规则配置在 `config/application.yaml` 的两个场景提示词中：海岛规则使用 `business_scenarios.海岛高质量发展与高水平保护.prompt`，断面规则使用 `business_scenarios.海洋断面数据分析.prompt`。前端通过 `front_context.module_l2` 传对应场景名称，后端按现有场景选择逻辑加载本轮提示词；通用系统提示不再全局附加这两类规则。已有的厦门问题优先规则仍然适用。部署后重启服务即可生效，无需重新发布主提示词。统计只采用本轮成功接口返回值；失败或缺字段时如实说明，不用 RAG、固定数字、历史回答或数据库替代，不补零。仅查询一览统计不强制检索文档、查数据库或打开专题图；历史要素和跨期指标分析沿用现有流程。两个一览操作只返回数据，地图展示继续使用通用空间查询和 `map_action`。
+统计取数规则配置在 `config/application.yaml` 的两个场景提示词中：海岛规则使用 `business_scenarios.海岛高质量发展与高水平保护.prompt`，断面规则使用 `business_scenarios.海洋断面数据分析.prompt`。前端通过 `front_context.module_l2` 传对应场景名称，后端按现有场景选择逻辑加载本轮提示词；通用系统提示不再全局附加这两类规则。已有的厦门问题优先规则仍然适用。部署后重启服务即可生效，无需重新发布主提示词。统计只采用本轮成功接口返回值；失败或缺字段时如实说明，不用 RAG、固定数字、历史回答或数据库替代，不补零。仅查询一览统计不强制检索文档、查数据库或打开专题图；最新观测、区间明细和航次列表采用上述接口，接口未覆盖的历史要素和跨期指标分析沿用数据库流程。这些操作只返回数据，地图展示继续使用通用空间查询和 `map_action`。
 
 观测站也是注册空间要素，位置、基础详情、名称和类型筛选统一使用以下三个 operation：
 
@@ -418,7 +421,7 @@ Agent 任务内请求 `includeGeometry=true` 后，查询结果额外返回 `res
 复用 `tools.spatial` 和 `SPATIAL_API_KEY`，base_url 继续只配置主机与端口，不附加 v2 路径。
 
 框选区域询问“有什么要素”时，加载“空间联动” Skill，先发现目录，再按同一范围逐类查询，包括 `dm_duanmian`；目录本身不代表区域内存在该类别。断面位置、基础属性和分布通过通用查询返回后调用 `map_action` 展示，不打开断面专题图。某类别无法完成空间查询时说明限制，不静默跳过，也不放宽为全库查询。
-一览接口未覆盖的断面历史观测和跨期指标统计按“断面业务” Skill 使用 `database_query`，涉及指标、变化或分析时默认调用 `dm_duanmian_analysis`。三条断面的地图背景优先复用目录中实际注册的断面线几何，仅有测点时展示三条断面的全部测点，不自行连线。一次查询覆盖三条断面并使用合并结果的 `result_ref` 提交地图；分别查询时同图层首次替换、后续追加，避免互相覆盖。历史航次的实际测点坐标仍可由数据库查询后使用 `map_action(MARKER_ADD)` 展示于独立图层 `transect-stations`，保留选区和其他类别图层。专题分析和要素对比浮层不代替三条断面的地图背景，空间服务失败不阻止原专题出图。
+上述断面接口未覆盖的历史观测和跨期指标统计按“断面业务” Skill 使用 `database_query`，涉及指标、变化或分析时默认调用 `dm_duanmian_analysis`。三条断面的地图背景优先复用目录中实际注册的断面线几何，仅有测点时展示三条断面的全部测点，不自行连线。一次查询覆盖三条断面并使用合并结果的 `result_ref` 提交地图；分别查询时同图层首次替换、后续追加，避免互相覆盖。历史航次的实际测点坐标仍可由数据库查询后使用 `map_action(MARKER_ADD)` 展示于独立图层 `transect-stations`，保留选区和其他类别图层。专题分析和要素对比浮层不代替三条断面的地图背景，空间服务失败不阻止原专题出图。
 工具标识统一为 `spatial_query_service`，中文显示名为“通用空间查询服务”；对接方按工具名处理的逻辑及已发布提示词中的引用也需同步更新。
 已有环境需同步发布更新后的系统提示词，将具体业务路由交给当前 Skill；代码只更新默认提示词，不覆盖数据库中已发布的版本。工具代码更新后需重启服务；Skill 文件按次读取，历史对话中已加载的旧说明应在新会话中重新加载。
 

@@ -53,6 +53,21 @@ class SpatialServiceClient:
     async def get_duanmian_overview(self) -> dict[str, Any]:
         return await self._request("GET", "/api/spatial/v2/duanmian/overview")
 
+    async def get_duanmian_latest(self, code: str) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/api/spatial/v2/duanmian/latest", params={"code": code},
+        )
+
+    async def get_duanmian_observations(self, **params: Any) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/api/spatial/v2/duanmian/observations", params=params,
+        )
+
+    async def get_duanmian_voyages(self, code: str) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/api/spatial/v2/duanmian/voyages", params={"code": code},
+        )
+
     async def get_spatial_element_detail(self, data_key: str) -> dict[str, Any]:
         return await self._request(
             "GET", "/api/spatial/v2/elements/detail", params={"dataKey": data_key},

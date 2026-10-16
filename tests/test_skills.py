@@ -78,6 +78,10 @@ class SkillCatalogTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("仅按年月询问各类要素对比", skill.description)
         self.assertIn("database_query", skill.instructions)
         self.assertIn("spatial_query_service", skill.instructions)
+        for operation in ("dm_duanmian_latest", "dm_duanmian_observations", "dm_duanmian_voyages"):
+            self.assertIn(operation, skill.instructions)
+        self.assertIn("scope=all、code=null", skill.instructions)
+        self.assertIn("每次只返回一页", skill.instructions)
         self.assertIn("dm_duanmian_analysis", skill.instructions)
         self.assertIn("## 路由边界", skill.instructions)
         self.assertIn(

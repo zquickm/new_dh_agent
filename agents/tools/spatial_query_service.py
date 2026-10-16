@@ -39,6 +39,24 @@ class IslandOverviewQuery(BaseModel):
         return self
 
 
+class DuanmianObservationsQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    code: Optional[str] = Field(default=None, min_length=1, description="断面编号（如 E1/EK）或测点编码（如 E1001）；省略时查询 E1/E2/E3 全部断面测点。")
+    from_: str = Field(alias="from", pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$", description="dm_duanmian_observations 必填的起始日期 yyyy-MM-dd（含）。")
+    to: str = Field(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$", description="dm_duanmian_observations 必填的结束日期 yyyy-MM-dd（含）；时间跨度不超过 3 个月，由服务校验。")
+    page: int = Field(default=1, ge=1)
+    size: int = Field(default=100, ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def validate_dates(self) -> "DuanmianObservationsQuery":
+        start = datetime.strptime(self.from_, "%Y-%m-%d")
+        end = datetime.strptime(self.to, "%Y-%m-%d")
+        if start > end:
+            raise ValueError("from 不能晚于 to")
+        return self
+
+
 TOOL_NAME = "spatial_query_service"
 TOOL_DESCRIPTION = (
     '工具名固定为 spatial_query_service；所有查询操作均通过 operation 参数选择，不是独立工具。'
@@ -47,6 +65,11 @@ TOOL_DESCRIPTION = (
     "海岛一览数量、按省/分类分布及面积排序列表必须用 island_overview；"
     "断面一览/东海区断面情况概览、断面数、测点数、要素清单、数据量及最近航次必须用 dm_duanmian_overview（无参数）。"
     "这两类统计与前端使用同一接口，直接采用返回值，不从文档、历史回答、分页列表或数据库重算；失败时说明未取得统计。"
+    "断面/测点最新观测用 dm_duanmian_latest，航次列表用 dm_duanmian_voyages，两者必填 code。"
+    "不超过 3 个月的断面/测点观测明细用 dm_duanmian_observations，必填 from/to（yyyy-MM-dd）；"
+    "code 可省略，省略表示 E1/E2/E3 全部断面测点，返回 scope=all、code=null；此时超过 50000 条会报错，须收窄时间或指定断面/测点，不截断或抽样。"
+    "dm_duanmian_observations 每次仅返回一页，page 默认 1、size 默认 100 且最多 1000；total 是总条数，rows 是当前页，不能把单页当成全部结果。"
+    "断面接口保留原始 elements 字段和 chemistryFields/hydrometFields 标签映射，不用空间属性代替观测数据。"
     "通用查询先取得 list_spatial_elements 返回的 dataKey，再调用详情或查询；已有目录可复用，类别未注册时刷新目录核对。"
     "使用 query.fields、conditions 或 orderBy 前，缺少当前类别字段定义时须先调用 get_spatial_element_detail，"
     "收到定义后再查询；字段名、用途和运算符以定义为准，原样保留大小写及下划线，不自行转换命名。"
@@ -71,6 +94,9 @@ TOOL_PARAMETERS: dict[str, Any] = {
                 "query_spatial_element",
                 "island_overview",
                 "dm_duanmian_overview",
+                "dm_duanmian_latest",
+                "dm_duanmian_observations",
+                "dm_duanmian_voyages",
             ],
             "description": "通用空间或观测数据查询操作；枚举值不是工具名。目录查询传 operation=list_spatial_elements，无需其他参数。",
         },
@@ -153,11 +179,56 @@ TOOL_PARAMETERS: dict[str, Any] = {
             "default": 2000,
             "description": "observation_range 最多返回的观测记录数。",
         },
+        **DuanmianObservationsQuery.model_json_schema()["properties"],
         **IslandOverviewQuery.model_json_schema()["properties"],
+        "code": {
+            "type": "string",
+            "minLength": 1,
+            "description": "断面编号（如 E1/EK）或测点编码（如 E1001）；dm_duanmian_latest、dm_duanmian_voyages 必填；dm_duanmian_observations 可省略，表示 E1/E2/E3 全部断面测点。",
+        },
+        "page": {
+            "type": "integer", "minimum": 1, "default": 1,
+            "description": "island_overview 的起始页，或 dm_duanmian_observations 的单页页码，从 1 开始。",
+        },
+        "size": {
+            "type": "integer", "minimum": 1, "maximum": 1000,
+            "description": "每页条数；island_overview 默认 20、最多 100；dm_duanmian_observations 默认 100、最多 1000。",
+        },
     },
     "required": ["operation"],
     "$defs": QUERY_PARAMETERS["$defs"],
     "allOf": [
+        {
+            "if": {
+                "properties": {"operation": {"const": "island_overview"}},
+                "required": ["operation"],
+            },
+            "then": {"properties": {"size": {"maximum": 100, "default": 20}}},
+        },
+        {
+            "if": {
+                "properties": {"operation": {"const": "dm_duanmian_latest"}},
+                "required": ["operation"],
+            },
+            "then": {"required": ["code"]},
+        },
+        {
+            "if": {
+                "properties": {"operation": {"const": "dm_duanmian_voyages"}},
+                "required": ["operation"],
+            },
+            "then": {"required": ["code"]},
+        },
+        {
+            "if": {
+                "properties": {"operation": {"const": "dm_duanmian_observations"}},
+                "required": ["operation"],
+            },
+            "then": {
+                "required": ["from", "to"],
+                "properties": {"size": {"default": 100}},
+            },
+        },
         {
             "if": {
                 "properties": {"operation": {"const": "get_spatial_element_detail"}},
@@ -242,6 +313,9 @@ class SpatialQueryServiceTool:
             "query_spatial_element": {"query", "fetch_all"},
             "island_overview": set(IslandOverviewQuery.model_fields) | {"fetch_all"},
             "dm_duanmian_overview": set(),
+            "dm_duanmian_latest": {"code"},
+            "dm_duanmian_observations": {"code", "from", "to", "page", "size"},
+            "dm_duanmian_voyages": {"code"},
             "station_status": {"tznos"},
             "observation_summary": {"tzno"},
             "observation_trend": {"tzno", "element", "hours"},
@@ -269,6 +343,15 @@ class SpatialQueryServiceTool:
             )
         elif operation == "dm_duanmian_overview":
             data = await self.client.get_duanmian_overview()
+        elif operation == "dm_duanmian_latest":
+            data = await self.client.get_duanmian_latest(self._required_text(arguments.get("code"), "code"))
+        elif operation == "dm_duanmian_voyages":
+            data = await self.client.get_duanmian_voyages(self._required_text(arguments.get("code"), "code"))
+        elif operation == "dm_duanmian_observations":
+            params = DuanmianObservationsQuery.model_validate(arguments).model_dump(
+                by_alias=True, exclude_unset=True, exclude_none=True,
+            )
+            data = await self.client.get_duanmian_observations(**params)
         elif operation == "get_spatial_element_detail":
             data_key = self._required_text(arguments.get("dataKey"), "dataKey")
             data = await self.client.get_spatial_element_detail(data_key)

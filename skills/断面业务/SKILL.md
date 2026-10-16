@@ -5,15 +5,18 @@ description: 指导东海 E1、E2、E3 三条断面及辅助点的业务、数�
 
 # 断面业务
 
-断面一览统计使用 `spatial_query_service(operation="dm_duanmian_overview")`；空间位置与基础属性使用该工具的通用查询；接口未覆盖的历史观测、跨期指标统计和描述性分析使用 `database_query`，默认结合专题图出图；跨月全量化学要素对比使用 `dm_duanmian_element_compare`，其他专题图使用 `dm_duanmian_analysis`。各类问题按下述路由处理，并默认按“断面地图展示”同步展示三条断面，不要求每个问题调用全部工具。
+断面一览统计使用 `spatial_query_service(operation="dm_duanmian_overview")`；最新观测、区间明细和航次列表分别使用同一工具的 `dm_duanmian_latest`、`dm_duanmian_observations`、`dm_duanmian_voyages`；空间位置与基础属性使用该工具的通用查询；接口未覆盖的历史观测、跨期指标统计和描述性分析使用 `database_query`，默认结合专题图出图；跨月全量化学要素对比使用 `dm_duanmian_element_compare`，其他专题图使用 `dm_duanmian_analysis`。各类问题按下述路由处理，并默认按“断面地图展示”同步展示三条断面，不要求每个问题调用全部工具。
 
 ## 路由边界
 
 - “断面一览”“东海区断面情况概览”、断面数、测点数、监测要素清单及数量、数据总量、最近航次，先调用 `spatial_query_service(operation="dm_duanmian_overview")`，无其他参数。总体值直接使用 `overview`，单断面值使用 `sections`，要素清单使用 `chemistryElements/hydrometElements`；不从文档、固定数字、历史回答或数据库替代、去重或重算。失败或缺字段时说明未取得对应统计，不补零。仅此类统计不要求 RAG、数据库或专题出图；时间或选区筛选不可套用全区概览。
-- 历史要素情况、分布、变化、对比和描述性分析，使用 `database_query` 查询数据，并按下文规则调用对应的出图工具，不能只返回文字或统计表。需要文档依据时再用 `rag_search`；同时按“断面地图展示”调用 `map_action`，向用户综合展示全面的信息。
+- 断面/测点最新观测快照使用 `spatial_query_service(operation="dm_duanmian_latest", code="E1")`；`code` 必填，可为断面前缀（如 E1/EK）或单测点（如 E1001），返回每站最近一次观测及各深度层。`elements` 使用接口原始物理列名，中文标签采用返回的 `chemistryFields/hydrometFields`，空值不能当作 0。
+- 不超过 3 个月的逐条观测明细使用 `dm_duanmian_observations`，必填 `from/to`（yyyy-MM-dd，含起止日）；`code` 可省略，省略表示 E1/E2/E3 全部断面测点，响应为 `scope=all、code=null`，不能默认补成 E1。每次只返回一页，`page` 默认 1，`size` 默认 100、最多 1000；需要完整明细时按同一 code/from/to 继续翻页，不能把当前页 `rows` 当成 `total` 条完整数据或据此推算总体统计。无 code 命中超过 50000 条时如实说明服务错误并提示收窄时间或指定断面/测点，不截断、抽样或绕过限制。指定选区等接口不支持的筛选条件时，不省略这些条件改查全区。
+- 可用航次使用 `spatial_query_service(operation="dm_duanmian_voyages", code="E1")`，`code` 必填，也支持单测点；`voyages` 按日期倒序，保留化学/水文覆盖测点数（0 表示该日该类型无观测）。专题出图需要确认可用航次时先查此接口，航次年月取返回 `date` 的前 7 位；某航次是否含目标要素有效值仍须由观测数据确认。
+- 接口未覆盖的历史要素情况、分布、变化、对比和描述性分析，使用 `database_query` 查询数据，并按下文规则调用对应的出图工具，不能只返回文字或统计表。需要文档依据时再用 `rag_search`；同时按“断面地图展示”调用 `map_action`，向用户综合展示全面的信息。
   - 例：“2022年E1断面盐度情况”，先用 `database_query` 查询全年盐度统计及有有效盐度观测的航次，再用 `dm_duanmian_analysis` 出 `temp-section` 图，选择 `E1`、`盐度 S` 和结果中最新的实际航次，说明该图仅为全年中的单航次示例；地图同步展示 E1、E2、E3，统计与专题图仍仅针对 E1。
 
-- 调查断面及其站位、辅助点的位置、基础属性和分布，使用 `spatial_query_service` 的通用查询；历史观测、跨期统计和描述性评价使用 `database_query`。空间记录不能代替历史观测数据，不为查询基础信息重复调用数据库。
+- 调查断面及其站位、辅助点的位置、基础属性和分布，使用 `spatial_query_service` 的通用查询；接口未覆盖的历史观测、跨期统计和描述性评价使用 `database_query`。空间记录不能代替历史观测数据，不为查询基础信息重复调用数据库。
 - 通用查询通过 `spatial_query_service(operation=操作名, ...)` 调用；操作名是 `operation` 的枚举值，不能作为独立工具名。缺少目录结果时，先单独调用 `spatial_query_service(operation="list_spatial_elements")` 并等待返回，再选择目标类别并原样使用其 `dataKey`；已有目录结果可复用。默认字段满足需求时直接调用 `spatial_query_service(operation="query_spatial_element", query=查询条件)`，自选字段、过滤或排序前复用该类别字段定义，缺少时调用 `spatial_query_service(operation="get_spatial_element_detail", dataKey=类别标识)`。例如目录返回断面测点 `dataKey="dm_duanmian"`，则详情参数 `dataKey` 和查询参数 `query.element` 均用该值；`transect-stations` 仅为地图 `layer_id`，不得作为查询类别或据此推导类别。完整保留断面、站位及选区条件，不猜字段名或放宽为全库查询。
 - 收到“要素/图层未注册”时重新查询目录；仅在目录能确定目标类别时，保留原条件修正一次。目录无目标类别或修正后仍失败时说明限制，不猜别名重试。
 - 仅查询位置、基础属性或分布时不打开无关专题图；地图展示按下节执行。

@@ -29,6 +29,26 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
                 "sections": [{"section": "E1", "stationCount": 14, "dataCount": 123}],
                 "chemistryElements": ["温度", "盐度"], "hydrometElements": ["海况"],
             },
+            "/api/spatial/v2/duanmian/latest": {
+                "code": "E1001", "scope": "station",
+                "rows": [{"dataType": "chemistry", "stationCode": "E1001",
+                          "observedAt": "2025-11-01", "depthM": "0",
+                          "elements": {"temperature_c": 20.5, "salinity": None}}],
+                "chemistryFields": [{"column": "temperature_c", "label": "温度 T（℃）"}],
+                "hydrometFields": [],
+            },
+            "/api/spatial/v2/duanmian/observations": {
+                "code": None, "scope": "all", "from": "2025-08-01", "to": "2025-11-01",
+                "page": 1, "size": 1, "total": 2,
+                "rows": [{"dataType": "hydromet", "stationCode": "E1001",
+                          "observedAt": "2025-11-01", "depthM": "0",
+                          "elements": {"air_temperature_c": 0}}],
+            },
+            "/api/spatial/v2/duanmian/voyages": {
+                "code": "EK", "scope": "section",
+                "voyages": [{"date": "2025-11-01", "chemistryStations": 6, "hydrometStations": 0},
+                            {"date": "2025-08-01", "chemistryStations": 5, "hydrometStations": 5}],
+            },
         }
 
         async def overview(request):
@@ -142,6 +162,53 @@ class SpatialServiceClientTest(unittest.IsolatedAsyncioTestCase):
             {key: str(value) for key, value in params.items()}
             for params in (filters, {**filters, "page": 2, "size": 20}, {**filters, "page": 3, "size": 20})
         ])
+
+    async def test_transect_tools_preserve_parameters_response_fields_and_single_pages(self):
+        tool = SpatialQueryServiceTool(self.client)
+        dates = {"from": "2025-08-01", "to": "2025-11-01"}
+        cases = [
+            ("dm_duanmian_latest", {"code": " E1001 "}, {"code": "E1001"}, "latest"),
+            ("dm_duanmian_voyages", {"code": "EK"}, {"code": "EK"}, "voyages"),
+            ("dm_duanmian_observations", dates, dates, "observations"),
+            ("dm_duanmian_observations", {**dates, "code": None}, dates, "observations"),
+            ("dm_duanmian_observations", {**dates, "code": " E1 ", "page": 2, "size": 1000},
+             {**dates, "code": "E1", "page": 2, "size": 1000}, "observations"),
+        ]
+        for operation, arguments, expected, endpoint in cases:
+            with self.subTest(operation=operation, arguments=arguments):
+                before = len(self.requests)
+                original = dict(arguments)
+                path = f"/api/spatial/v2/duanmian/{endpoint}"
+                if endpoint == "observations":
+                    code = expected.get("code")
+                    self.overview_data[path].update({
+                        "code": code, "scope": "section" if code else "all",
+                        "page": expected.get("page", 1), "size": expected.get("size", 100),
+                    })
+                output = await tool.execute(operation, **arguments)
+                self.assertEqual(arguments, original)
+                self.assertEqual(len(self.requests), before + 1)
+                request = self.requests[-1]
+                self.assertEqual((request.method, request.path), ("GET", path))
+                self.assertEqual(dict(request.query), {key: str(value) for key, value in expected.items()})
+                self.assertEqual(request.headers["X-API-Key"], "test-spatial-key")
+                self.assertEqual(output.content, {"operation": operation, **self.overview_data[path]})
+                self.assertEqual(output.client_events, ())
+
+    async def test_transect_tools_surface_service_errors_without_empty_success_or_retries(self):
+        tool = SpatialQueryServiceTool(self.client)
+        for operation, arguments in (
+            ("dm_duanmian_latest", {"code": "E1"}),
+            ("dm_duanmian_voyages", {"code": "E1"}),
+            ("dm_duanmian_observations", {"from": "2025-01-01", "to": "2025-11-01"}),
+        ):
+            for status, code in ((400, 0), (401, 0), (500, 0), (200, 400)):
+                self.overview_status, self.overview_code = status, code
+                before = len(self.requests)
+                with self.subTest(operation=operation, status=status, code=code):
+                    with self.assertRaisesRegex(SpatialServiceError, "统计服务结果"):
+                        await tool.execute(operation, **arguments)
+                    self.assertEqual(len(self.requests), before + 1)
 
     async def test_overview_validation_and_failures_do_not_return_fallback_statistics(self):
         tool = SpatialQueryServiceTool(self.client)

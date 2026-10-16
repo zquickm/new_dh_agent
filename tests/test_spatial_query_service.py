@@ -183,19 +183,51 @@ class SpatialQueryServiceToolTest(unittest.IsolatedAsyncioTestCase):
             "list_spatial_elements", "get_spatial_element_detail", "query_spatial_element",
             "station_status", "observation_summary", "observation_trend", "observation_range",
             "island_overview", "dm_duanmian_overview",
+            "dm_duanmian_latest", "dm_duanmian_observations", "dm_duanmian_voyages",
         })
         self.assertFalse({"query_type", "bbox", "center", "radius", "polygon",
                           "station_types", "station_name"} & props.keys())
         requirements = {
             item["if"]["properties"]["operation"]["const"]: set(item["then"]["required"])
             for item in TOOL_PARAMETERS["allOf"]
+            if "required" in item["then"]
         }
         self.assertEqual(requirements, {
             "get_spatial_element_detail": {"dataKey"}, "query_spatial_element": {"query"},
             "station_status": {"tznos"}, "observation_summary": {"tzno"},
             "observation_trend": {"tzno", "element"},
             "observation_range": {"tzno", "data_type", "start_time", "end_time"},
+            "dm_duanmian_latest": {"code"}, "dm_duanmian_voyages": {"code"},
+            "dm_duanmian_observations": {"from", "to"},
         })
+
+    async def test_invalid_transect_arguments_fail_before_http(self):
+        client = FakeSpatialClient()
+        client.get_duanmian_latest = AsyncMock()
+        client.get_duanmian_voyages = AsyncMock()
+        client.get_duanmian_observations = AsyncMock()
+        tool = SpatialQueryServiceTool(client)
+        dates = {"from": "2025-08-01", "to": "2025-11-01"}
+        cases = [
+            *[(operation, arguments) for operation in ("dm_duanmian_latest", "dm_duanmian_voyages")
+              for arguments in ({}, {"code": " "}, {"code": "E1", "page": 1})],
+            ("dm_duanmian_observations", {}),
+            ("dm_duanmian_observations", {"from": "2025-08-01"}),
+            ("dm_duanmian_observations", {"to": "2025-11-01"}),
+            *[("dm_duanmian_observations", {**dates, **update}) for update in (
+                {"from": "2025-02-30"}, {"from": "2025-8-01"}, {"to": "invalid"},
+                {"from": "2025-12-01"}, {"code": " "}, {"code": 123},
+                {"page": 0}, {"page": True}, {"page": 1.5},
+                {"size": 0}, {"size": 1001}, {"size": "100"},
+                {"fetch_all": True},
+            )],
+        ]
+        for operation, arguments in cases:
+            with self.subTest(operation=operation, arguments=arguments), self.assertRaises(ValueError):
+                await tool.execute(operation, **arguments)
+        client.get_duanmian_latest.assert_not_awaited()
+        client.get_duanmian_voyages.assert_not_awaited()
+        client.get_duanmian_observations.assert_not_awaited()
 
     async def test_removed_operations_and_extra_parameters_fail_before_http(self):
         client = FakeSpatialClient()
