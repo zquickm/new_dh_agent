@@ -7,3 +7,4 @@ logs/
 data/dictionaries/
 *.py[cod]
 打包部署.command
+.env
